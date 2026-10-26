@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0a101b">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.supabase.co http://127.0.0.1:*; media-src 'self' blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>Vault</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="booting">
+    <div id="boot"><div class="orb big"></div><div class="boot-word">VAULT</div></div>
+  </div>
+  <div id="layers"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="drop-hint" hidden><div><div class="orb"></div><p>Drop to send to your phone</p></div></div>
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/lock.js"></script>
+  <script src="js/cloud.js"></script>
+  <script src="js/notes.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/send.js"></script>
+  <script src="js/clips.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/start.js"></script>
+</body>
+</html>
