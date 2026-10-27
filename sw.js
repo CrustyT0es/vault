@@ -11,7 +11,7 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.1.0-da3f8dbd4049';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.2.0-07cd273c00e5';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 const CACHE = 'vault-' + BUILD;
 const LEGACY = /^vault-1\.0\.\d+$/;  // Vault 1.0.x's caches: its pages can't say "update-now", so it switches itself
 const KEPT = /^vault-(\d+(?:\.\d+)+)-[0-9a-f]{12}$/;  // a version kept here since (vault-<version>-<hash>)
@@ -137,4 +137,19 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(caches.open(CACHE)
     .then((cache) => cache.match(event.request, { ignoreSearch: true }))
     .then((kept) => kept || fetch(event.request)));
+});
+
+/* A reminder's notification tapped (js/reminders.js): Vault comes to the front with that note, or opens with it. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((open) => {
+    const page = open.find((client) => 'focus' in client);
+    if (page) {
+      if (data.id) page.postMessage({ vault: 'open-note', id: data.id });
+      return page.focus();
+    }
+    const own = new URL(String(data.url || './'), self.registration.scope);
+    return self.clients.openWindow(own.origin === self.location.origin ? own.href : './');
+  }));
 });

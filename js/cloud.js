@@ -4,7 +4,13 @@
    offline. A change made here is saved here with _dirty set, then sent (push). Changes from elsewhere come in by
    Supabase Realtime as they happen, and by asking for "everything since" (pull) on start, every so often, and when
    the app comes back to the front: rows carry the cloud's own updated_at, so nothing is missed. A row changed here
-   and not sent yet always wins over the cloud's copy until it's sent (the last device to send wins).
+   and not sent yet always wins over the cloud's copy until it's sent.
+
+   Notes are sent only if the cloud still has the version they were changed from (_base_at, its updated_at): when
+   another device (or Jarvis) got there first, the two are put together line by line (V.mergeLines, from _base, the
+   version both started from) and that is sent instead; where both changed the very same lines (or a locked note's
+   sealed words), this device's stay and the other version is kept as a "(conflict copy)" note beside it. So two
+   devices typing in one note at once both keep their words. Folders and files: the last device to send wins.
 
    On the phone the supabase client signs in itself (its session in localStorage). In the PC app the Python side
    owns the sign-in (vault/cloud.py, shared with Jarvis), and the page asks it for each access token (V.pc). */
@@ -78,6 +84,12 @@ V.cloud = (() => {
     kind: 'file', path: null, size: 0, mime: '', text: '', from_device: '', to_device: '', received_at: null,
   };
   const SYNCED = ['folders', 'notes', 'transfers'];
+  // What a note changed here also keeps, for putting it together with another device's change (never sent):
+  // _base / _base_at = the cloud's version it was changed from, _theirs = a newer cloud version that came meanwhile,
+  // _merged / _mine = a token for the last time another device's words were put in here, and this device's version
+  // just before (so a save from a copy older than that keeps them: see carryBase).
+  const NOTE_LOCAL = ['_base', '_base_at', '_theirs', '_merged', '_mine'];
+  const MOST_TRIES = 4;
   const POLL_LIVE = 120000;   // with Realtime working, a safety check every 2 minutes
   const POLL_OFFLINE = 20000; // without it, every 20 seconds
   const TRASH_DAYS = 30;
@@ -130,7 +142,15 @@ V.cloud = (() => {
     const changed = [];
     for (const row of rows) {
       const here = map.get(row.id);
-      if (fromCloud && here && here._dirty) continue;  // ours isn't sent yet: it wins
+      if (fromCloud && here && here._dirty) {
+        // Ours isn't sent yet, so it stays; a newer note from the cloud is kept aside to be put together with it.
+        if (table === 'notes' && newer(row, here) && !(here._theirs && here._theirs.updated_at >= row.updated_at)) {
+          const waiting = { ...here, _theirs: row };
+          map.set(row.id, waiting);
+          await V.db.put(table, waiting);
+        }
+        continue;
+      }
       if (row.deleted && table !== 'notes') {
         if (here) { map.delete(row.id); await V.db.del(table, row.id); changed.push(row); }
         continue;
@@ -148,12 +168,143 @@ V.cloud = (() => {
 
   /* A change made on this device: shown and saved at once, sent soon after. */
   async function save(table, row) {
-    const stamped = { ...row, _dirty: Date.now() + Math.random(), _edited: new Date().toISOString() };
-    V.data[table].set(stamped.id, stamped);
-    await V.db.put(table, stamped);
-    V.emit('data', table);
+    let stamped = { ...row, _dirty: stamp(), _edited: new Date().toISOString() };
+    if (table === 'notes') stamped = carryBase(stamped, V.data.notes.get(row.id), row);
+    await put(table, stamped);
     pushSoon();
     return stamped;
+  }
+
+  async function put(table, row) {
+    V.data[table].set(row.id, row);
+    await V.db.put(table, row);
+    V.emit('data', table);
+  }
+
+  const stamp = () => Date.now() + Math.random();
+
+  /* -- notes changed on two devices at once */
+
+  /* jsonb comes back from the cloud with its keys in another order: compared with them sorted. */
+  const sortedKeys = (v) => (Array.isArray(v) ? v.map(sortedKeys) : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortedKeys(v[k])])) : v);
+  const stable = (v) => JSON.stringify(sortedKeys(v === undefined ? null : v));
+  const fieldsOf = (row) => Object.fromEntries(FIELDS.notes.map((f) => [f, f in row ? row[f] : BLANK[f]]));
+  const newer = (row, here) => !!row.updated_at && row.updated_at > (here._base_at || here.updated_at || '');
+
+  /* The version a note changed here was changed from: the cloud's, when it wasn't changed here before; else what it
+     already had. A save from a copy older than another device's words put in here (the open note, saved before it
+     heard of them) keeps those words: the save's changes go in on top. */
+  function carryBase(next, here, given) {
+    for (const key of NOTE_LOCAL) delete next[key];
+    if (!here || here._purge) return next;
+    if (!here._dirty) {
+      if (here.updated_at) { next._base = fieldsOf(here); next._base_at = here.updated_at; }
+      return next;
+    }
+    for (const key of NOTE_LOCAL) if (key in here) next[key] = here[key];
+    if (!here._merged) return next;
+    if (given._merged === here._merged) {  // saved from a copy that has them: nothing more to do
+      delete next._merged;
+      delete next._mine;
+      return next;
+    }
+    if (!here._mine || next._purge) return next;
+    const { row } = combine(here._mine, fieldsOf(next), fieldsOf(here));
+    return { ...next, ...row, _mine: fieldsOf(next) };
+  }
+
+  /* Each setting kept in `extra` as this device changed it, else as theirs. */
+  function mergeExtra(start, mine, theirs) {
+    const was = start || {};
+    const now = mine || {};
+    const out = { ...(theirs || {}) };
+    for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
+      if (stable(was[key]) === stable(now[key])) continue;
+      if (key in now) out[key] = now[key];
+      else delete out[key];
+    }
+    return out;
+  }
+
+  /* A note's pictures, files, memos and drawings, each kept unless one side removed it, and each side's new ones added
+     (this device's first). */
+  function mergeFiles(start, mine, theirs) {
+    const id = (a) => (a && (a.path || a.id)) || stable(a);
+    const was = new Map((start || []).map((a) => [id(a), a]));
+    const there = new Map((theirs || []).map((a) => [id(a), a]));
+    const here = new Set((mine || []).map(id));
+    const out = [];
+    for (const a of mine || []) {
+      const key = id(a);
+      if (was.has(key) && !there.has(key)) continue;  // removed on the other device
+      const changedThere = there.has(key) && stable(there.get(key)) !== stable(was.get(key));
+      out.push(changedThere && stable(a) === stable(was.get(key)) ? there.get(key) : a);
+    }
+    for (const a of theirs || []) if (!was.has(id(a)) && !here.has(id(a))) out.push(a);
+    return out;
+  }
+
+  /* `mine` and `theirs`, both changed from `base`: each field as the side that changed it has it, the title and words
+     put together line by line. `clash`: both changed the very same lines (or a locked note's sealed words, which
+     can't be put together), where this device's stay. */
+  function combine(base, mine, theirs) {
+    const changed = (r, f) => stable(r[f]) !== stable(base[f]);
+    const row = {};
+    for (const f of FIELDS.notes) row[f] = changed(mine, f) ? mine[f] : theirs[f];
+    row.id = mine.id;
+    row.extra = mergeExtra(base.extra, mine.extra, theirs.extra);
+    row.attachments = mergeFiles(base.attachments, mine.attachments, theirs.attachments);
+    let clash = false;
+    if (changed(mine, 'title') && changed(theirs, 'title') && mine.title !== theirs.title) {
+      const titles = V.mergeLines(base.title || '', mine.title || '', theirs.title || '');
+      row.title = titles.text.replace(/\n+/g, ' ');
+      clash = titles.conflict;
+    }
+    const words = (r) => (r.locked ? 'sealed:' + (r.secret || '') : 'plain:' + (r.body || ''));
+    const mineWords = words(mine) !== words(base);
+    const theirWords = words(theirs) !== words(base);
+    const from = mineWords ? mine : theirs;
+    Object.assign(row, { locked: !!from.locked, secret: from.secret || null, body: from.body || '' });
+    if (mineWords && theirWords && words(mine) !== words(theirs)) {
+      if (!mine.locked && !theirs.locked && !base.locked) {
+        const merged = V.mergeLines(base.body || '', mine.body || '', theirs.body || '');
+        row.body = merged.text;
+        clash = clash || merged.conflict;
+      } else {
+        clash = true;
+      }
+    }
+    return { row, clash };
+  }
+
+  /* This device's version of note `id` put together with the cloud's newer `theirs`, saved here to be sent (based on
+     theirs now). Returns it, or null when there's nothing to send any more. */
+  async function mergeIn(id, theirs) {
+    const now = V.data.notes.get(id);
+    if (!now || !now._dirty || now._purge) return null;
+    const base = now._base || fieldsOf(theirs);  // (changed before Vault kept that: this device's version wins)
+    const { row, clash } = combine(base, fieldsOf(now), fieldsOf(theirs));
+    const merged = { ...now, ...row, updated_at: theirs.updated_at, _base: fieldsOf(theirs), _base_at: theirs.updated_at,
+      _merged: V.uuid(), _mine: now._merged && now._mine ? now._mine : fieldsOf(now), _dirty: stamp() };
+    delete merged._theirs;
+    await put('notes', merged);
+    if (clash) await conflictCopy(now, theirs);
+    return merged;
+  }
+
+  /* The other device's version, kept whole as a note of its own beside this one. */
+  async function conflictCopy(mine, theirs) {
+    const name = (theirs.title || '').trim() || (V.noteTitle ? V.noteTitle(theirs) : '') || 'Untitled';
+    const title = `${name} (conflict copy)`.slice(0, 200);
+    const copy = { ...fieldsOf(theirs), id: V.uuid(), title, pinned: false, attachments: [], template: '', deleted: false,
+      deleted_at: null, extra: { conflict_of: mine.id, conflict_at: new Date().toISOString() },
+      _dirty: stamp(), _edited: new Date().toISOString() };
+    await put('notes', copy);
+    pushAgain = true;
+    V.emit('conflict', { id: mine.id, copy: copy.id });
+    V.toast(`"${name}" was changed on two devices at once. Both versions are kept: the other one is in "${title}".`,
+      { ms: 9000 });
   }
 
   /* -- asking the cloud */
@@ -215,18 +366,16 @@ V.cloud = (() => {
             V.emit('data', table);
           }
           const sending = dirty.filter((r) => !r._purge && r._refused !== r._dirty);
-          for (let i = 0; i < sending.length; i += 50) {
-            const chunk = sending.slice(i, i + 50);
+          // Notes the cloud already has go one by one, each only if it still has their version; the rest in bulk.
+          const known = table === 'notes' ? sending.filter((r) => r._base_at || r.updated_at) : [];
+          const fresh = sending.filter((r) => !known.includes(r));
+          for (let i = 0; i < fresh.length; i += 50) {
+            const chunk = fresh.slice(i, i + 50);
             const body = chunk.map((row) => Object.fromEntries(FIELDS[table].map((f) => [f, f in row ? row[f] : BLANK[f]])));
-            const data = await send(table, chunk, body);
-            const settled = [];
-            for (const sent of data) {
-              const before = chunk.find((r) => r.id === sent.id);
-              const now = V.data[table].get(sent.id);
-              if (!now || now._dirty !== before._dirty) continue;  // changed again meanwhile: send that next
-              settled.push({ ...sent, _edited: now._edited });
-            }
-            await keep(table, settled, { fromCloud: false });
+            await settle(table, chunk, await send(table, chunk, body));
+          }
+          for (let i = 0; i < known.length; i += 6) {  // a few at a time (moving a folder's worth of notes)
+            await Promise.all(known.slice(i, i + 6).map((row) => pushNote(row.id)));
           }
         }
         if (V.data.settings._dirty) {
@@ -244,27 +393,84 @@ V.cloud = (() => {
     return pushing;
   }
 
+  /* What the cloud took back: kept as sent (unless changed again meanwhile: then that's sent next, made from this). */
+  async function settle(table, chunk, data) {
+    const settled = [];
+    const after = [];
+    for (const sent of data) {
+      const before = chunk.find((r) => r.id === sent.id);
+      const now = V.data[table].get(sent.id);
+      if (!now || !before) continue;
+      if (now._dirty !== before._dirty) {
+        if (table === 'notes' && !now._purge) {
+          const next = { ...now, _base: fieldsOf(sent), _base_at: sent.updated_at, updated_at: sent.updated_at };
+          if (next._theirs && !newer(next._theirs, next)) delete next._theirs;
+          V.data.notes.set(sent.id, next);
+          await V.db.put('notes', next);
+        }
+        continue;
+      }
+      settled.push({ ...sent, _edited: now._edited });
+      if (now._theirs && now._theirs.updated_at > sent.updated_at) after.push(now._theirs);  // came after ours
+    }
+    await keep(table, settled, { fromCloud: false });
+    if (after.length) await keep(table, after);
+  }
+
+  /* One note the cloud already has, sent only if the cloud still has the version it was changed from (one request).
+     If not, the cloud's version is fetched and put together with this one, and that goes instead. */
+  async function pushNote(id) {
+    for (let tries = 0; tries < MOST_TRIES; tries++) {
+      let row = V.data.notes.get(id);
+      if (!row || !row._dirty || row._purge || row._refused === row._dirty) return;
+      if (row._theirs && newer(row._theirs, row)) {
+        row = await mergeIn(id, row._theirs);
+        if (!row) return;
+      }
+      const values = fieldsOf(row);
+      delete values.id;
+      const { data, error, status } = await sb.from('notes').update(values).eq('id', id)
+        .eq('updated_at', row._base_at || row.updated_at).select();
+      if (error) { await refused('notes', row, Object.assign(error, { status })); return; }
+      if (data && data.length) { await settle('notes', [row], data); return; }
+      const got = await sb.from('notes').select('*').eq('id', id).maybeSingle();
+      if (got.error) throw Object.assign(got.error, { status: got.status });
+      if (!got.data) {  // gone from the cloud (emptied from the Trash elsewhere): put back, words and all
+        await settle('notes', [row], await send('notes', [row], [fieldsOf(row)]));
+        return;
+      }
+      if (!(await mergeIn(id, got.data))) return;
+    }
+  }
+
+  /* A row the cloud won't take (a note over its size check) is set aside until it's changed again; a network or
+     sign-in problem stops this round instead. */
+  async function refused(table, row, err) {
+    if (authError(err) || offlineError(err) || !(err.status >= 400 && err.status < 500)) throw err;
+    const now = V.data[table].get(row.id);
+    if (now && now._dirty === row._dirty) {
+      const aside = { ...now, _refused: now._dirty };
+      V.data[table].set(row.id, aside);
+      await V.db.put(table, aside);
+    }
+    console.warn('Vault: the cloud refused a row', table, row.id, err.message);
+    V.toast(table === 'notes' ? `"${row.title || 'A note'}" couldn't be saved to the cloud: it's too big. ` +
+      'Make it shorter and it goes up.' : 'Something couldn\'t be saved to the cloud.', { kind: 'err', ms: 8000 });
+  }
+
   /* One bulk upsert; if the cloud refuses it (not a network or sign-in problem), each row on its own, so a row it
      won't take (a note over its size limit) is set aside until it's changed again instead of stopping all sync. */
   async function send(table, chunk, body) {
     const { data, error, status } = await sb.from(table).upsert(body).select();
     if (!error) return data;
     const failed = Object.assign(error, { status });
-    if (chunk.length === 1 || authError(failed) || offlineError(failed) || !(status >= 400 && status < 500)) throw failed;
+    if (authError(failed) || offlineError(failed) || !(status >= 400 && status < 500)) throw failed;
+    if (chunk.length === 1) { await refused(table, chunk[0], failed); return []; }
     const taken = [];
     for (let i = 0; i < chunk.length; i++) {
       const one = await sb.from(table).upsert([body[i]]).select();
       if (!one.error) { taken.push(...one.data); continue; }
-      const err = Object.assign(one.error, { status: one.status });
-      if (authError(err) || offlineError(err) || !(one.status >= 400 && one.status < 500)) throw err;
-      const row = V.data[table].get(chunk[i].id);
-      if (row && row._dirty === chunk[i]._dirty) {
-        row._refused = row._dirty;
-        await V.db.put(table, row);
-      }
-      console.warn('Vault: the cloud refused a row', table, chunk[i].id, err.message);
-      V.toast(table === 'notes' ? `"${chunk[i].title || 'A note'}" couldn't be saved to the cloud: it's too big. ` +
-        'Make it shorter and it goes up.' : 'Something couldn\'t be saved to the cloud.', { kind: 'err', ms: 8000 });
+      await refused(table, chunk[i], Object.assign(one.error, { status: one.status }));
     }
     return taken;
   }
@@ -324,8 +530,9 @@ V.cloud = (() => {
   }
 
   async function purgeNote(note) {
-    const files = (note.attachments || []).map((a) => a.path).filter(Boolean);
+    const files = (note.attachments || []).flatMap((a) => [a.path, a.preview]).filter(Boolean);  // (a drawing has two)
     if (files.length) await remove(files).catch(() => {});
+    if (V.history) await V.history.forget(note.id).catch(() => {});  // its older versions go with it
     await save('notes', { ...note, _purge: true });
   }
 

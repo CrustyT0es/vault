@@ -1,14 +1,18 @@
 /* Vault: the shared clipboard. The newest 30 bits of copied text, from either device (the clips table keeps them).
    On the PC the app watches the clipboard itself (vault/desktop.py: never what password managers mark private, or
    anything that looks like a password or a key) and puts what the phone shares on it; both can be switched off in
-   Settings. A phone can't watch its clipboard, so there it's a button, and a toast when the PC shares something. */
+   Settings. A phone can't watch its clipboard, so there it's a button, and a toast when the PC shares something. A
+   Chromebook (or any other browser: 'web' in util.js's V.device) shares like the phone, and its clips say where they
+   came from. */
 'use strict';
 
 V.clips = (() => {
   let root = null;
   let parts = null;
 
-  const latestFrom = (device) => V.data.clips.find((c) => c.from_device === device);
+  // The newest from another device (the PC, the phone or a Chromebook): what this one may want to paste.
+  const latestElsewhere = () => V.data.clips.find((c) => c.from_device !== V.device);
+  const from = (device) => (V.DEVICES.includes(device) ? V.deviceLabel(device) : 'Another device');
 
   async function share(text) {
     const clean = String(text || '').trim();
@@ -35,8 +39,8 @@ V.clips = (() => {
   function item(clip) {
     const mineHere = clip.from_device === V.device;
     return V.h('div.clip', {},
-      V.h('div.clip-from', {}, V.icon(clip.from_device === 'pc' ? 'pc' : 'phone'),
-        V.h('span', { text: (clip.from_device === 'pc' ? 'PC' : 'Phone') + ' · ' + V.ago(clip.created_at) })),
+      V.h('div.clip-from', { dataset: { from: clip.from_device } }, V.icon(V.deviceIcon(clip.from_device)),
+        V.h('span', { text: from(clip.from_device) + ' · ' + V.ago(clip.created_at) })),
       V.h('div.clip-text', { text: clip.text.length > 800 ? clip.text.slice(0, 800) + '...' : clip.text }),
       V.h('div.clip-actions', {},
         V.button(mineHere ? 'Copy' : 'Copy here', { icon: 'copy', kind: mineHere ? 'quiet' : '', onClick: async () => {
@@ -58,14 +62,15 @@ V.clips = (() => {
       } }));
     return V.h('div.card.switches', {},
       toggle('clipboardShare', 'Share what I copy on this PC', 'Not passwords, keys or what password managers hide'),
-      toggle('clipboardReceive', 'Copy what my phone shares', 'Straight onto this PC\'s clipboard'));
+      toggle('clipboardReceive', V.send.targets().includes('web') ? `Copy what my phone and ${V.deviceName('web')} share`
+        : 'Copy what my phone shares', 'Straight onto this PC\'s clipboard'));
   }
 
   function draw() {
     if (!parts || !root || !root.isConnected || root.dataset.tab !== 'clips') return;
-    const latest = latestFrom(V.other);
+    const latest = latestElsewhere();
     V.clear(parts.latest, latest ? V.h('div.card.latest', {},
-      V.h('h2.section', { text: `Latest from ${V.otherName}` }),
+      V.h('h2.section', { text: `Latest from ${V.DEVICES.includes(latest.from_device) ? V.deviceName(latest.from_device) : 'another device'}` }),
       item(latest)) : V.h('div.card.latest.empty-latest', {},
       V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Vault > Clipboard > Share my clipboard.'
         : 'Nothing from your PC yet. Copy something there and it shows up here.' })));
@@ -90,12 +95,14 @@ V.clips = (() => {
   V.on('data', (table) => { if (table === 'clips') draw(); });
   V.on('clip-in', (clip) => {
     if (clip.from_device === V.device) return;
+    const name = V.DEVICES.includes(clip.from_device) ? V.deviceName(clip.from_device) : 'another device';
     if (V.desktop) {
       if (V.prefs && V.prefs.clipboardReceive) {
-        V.pc.setClipboard(clip.text).then(() => V.pc.notify('Copied from your phone', clip.text.slice(0, 120))).catch(() => {});
+        V.pc.setClipboard(clip.text).then(() => V.pc.notify(`Copied from ${name}`, clip.text.slice(0, 120))).catch(() => {});
       }
     } else if (!V.away()) {
-      V.toast('Your PC copied: ' + clip.text.slice(0, 60), { action: 'Copy', onAction: () => V.copy(clip.text) });
+      V.toast(`${name.charAt(0).toUpperCase() + name.slice(1)} copied: ${clip.text.slice(0, 60)}`,
+        { action: 'Copy', onAction: () => V.copy(clip.text) });
     }
   });
   V.on('pc:clipboard', ({ text }) => { if (V.prefs && V.prefs.clipboardShare && V.data.user) V.cloud.insertClip(text).catch(() => {}); });

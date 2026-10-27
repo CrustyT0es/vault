@@ -114,11 +114,14 @@ V.settings = (() => {
 
   function phoneCard() {
     if (!V.desktop) {
-      return card('This phone',
+      const phone = V.device === 'phone';
+      return card(phone ? 'This phone' : V.deviceKind.chromebook ? 'This Chromebook' : 'This browser',
+        V.send.deviceSetting(),  // which device this is (js/send.js)
         installPrompt ? line('Install Vault', 'Puts it on your home screen like any app, and lets you share to it.',
           V.button('Install', { kind: 'primary', icon: 'download', onClick: async () => { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; draw(); } }))
-          : line('On your home screen', window.matchMedia('(display-mode: standalone)').matches ? 'Vault is installed.'
-            : 'In Chrome: the ⋮ menu > Add to Home screen > Install.', null),
+          : line(phone ? 'On your home screen' : 'Install as an app', window.matchMedia('(display-mode: standalone)').matches ? 'Vault is installed.'
+            : phone ? 'In Chrome: the ⋮ menu > Add to Home screen > Install.'
+              : 'In Chrome: the ⋮ menu > Cast, save and share > Install page as app (if your school allows it).', null),
         line('Connected to', (V.config || {}).url ? new URL(V.config.url).host : '', null));
     }
     const link = V.connectLink();
@@ -222,6 +225,7 @@ V.settings = (() => {
       card('Sync',
         line(status, V.cloud.live ? 'Changes arrive the moment they\'re made.' : 'Checking for changes every 20 seconds.',
           V.button('Sync now', { icon: 'restore', onClick: () => V.cloud.sync() }))),
+      V.backup ? V.backup.card({ card, line, toggle, draw }) : null,  // js/history.js
       aboutCard()));
   }
 

@@ -4,11 +4,49 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.1.0';
+V.VERSION = '1.2.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
-V.device = V.desktop ? 'pc' : 'phone';
-V.other = V.desktop ? 'phone' : 'pc';
-V.otherName = V.desktop ? 'your phone' : 'your PC';
+
+/* Which device this is: 'pc' (the PC app), 'phone' (the owner's Android phone: Vault installed there, or a tab of its
+   Chrome) or 'web' (any other browser: a school Chromebook, a laptop). Each device only takes in what was sent to it,
+   so a Chromebook never marks the phone's files as received. A wrong guess (Chrome on the phone set to ask for desktop
+   sites leaves "Android" out) is put right in Settings, which keeps the answer in localStorage 'vault-device'. */
+V.DEVICES = ['pc', 'phone', 'web'];
+V.deviceKind = (() => {
+  const agent = navigator.userAgent || '';
+  const hints = navigator.userAgentData || {};
+  const chromebook = /\bCrOS\b/.test(agent) || /^chrome ?os$/i.test(hints.platform || '');
+  if (V.desktop) return { id: 'pc', chromebook: false };
+  let chosen = '';
+  try { chosen = localStorage.getItem('vault-device') || ''; } catch (error) { /* private browsing */ }
+  if (chosen === 'phone' || chosen === 'web') return { id: chosen, chromebook };
+  const android = /Android/i.test(agent) || hints.platform === 'Android';
+  // Installed, on a touch screen that isn't a Chromebook, Windows or a Mac: the phone, even asking for desktop sites.
+  const installed = window.matchMedia('(display-mode: standalone)').matches && navigator.maxTouchPoints > 0
+    && !/Windows|Macintosh|iPhone|iPad/.test(agent);
+  return { id: !chromebook && (android || installed) ? 'phone' : 'web', chromebook };
+})();
+V.device = V.deviceKind.id;
+V.other = V.device === 'pc' ? 'phone' : 'pc';
+V.otherName = V.device === 'pc' ? 'your phone' : 'your PC';
+/* 'PC', 'Phone', and for 'web' what that browser said it is ('Chromebook' or 'Browser', kept in the settings row's
+   extra.devices by js/send.js). */
+V.deviceLabel = (id) => {
+  if (id === 'pc') return 'PC';
+  if (id === 'phone') return 'Phone';
+  if (id !== 'web') return 'Another device';
+  if (V.device === 'web') return V.deviceKind.chromebook ? 'Chromebook' : 'Browser';
+  const seen = V.data && V.data.settings && V.data.settings.extra && V.data.settings.extra.devices;
+  return seen && seen.web && seen.web.label === 'Browser' ? 'Browser' : 'Chromebook';
+};
+V.deviceName = (id) => ({ PC: 'your PC', Phone: 'your phone', Chromebook: 'your Chromebook', Browser: 'your web browser' })[
+  V.deviceLabel(id)] || 'another device';
+V.deviceIcon = (id) => (id === 'pc' ? 'pc' : id === 'phone' ? 'phone' : 'laptop');
+V.setDevice = (id) => {
+  if (V.desktop || id === V.device || !['phone', 'web'].includes(id)) return;
+  try { localStorage.setItem('vault-device', id); } catch (error) { /* private browsing: until it closes */ }
+  location.reload();
+};
 
 /* ---------------------------------------------------------------- light or dark
 
@@ -159,6 +197,9 @@ const ICONS = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
   moon: '<path d="M19.5 14.6A7.5 7.5 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/>',
   alert: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/>',
+  laptop: '<rect x="4.5" y="5" width="15" height="10.5" rx="2"/><path d="M2.5 19h19"/>',
+  play: '<path d="M8.5 6.2v11.6a.9.9 0 0 0 1.38.76l9-5.8a.9.9 0 0 0 0-1.52l-9-5.8a.9.9 0 0 0-1.38.76z" fill="currentColor" stroke="none"/>',
+  next: '<path d="m9.5 6 6 6-6 6"/>',
 };
 
 V.icon = function icon(name, cls) {

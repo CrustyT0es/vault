@@ -181,7 +181,8 @@ V.update = (() => {
   async function whenSafe() {
     if (!ready || applying || !started || !V.away() || onGate() || dialogOpen() || inUse()) return false;
     const settled = await V.editor.settled();
-    if (!settled || V.send.busy() || applying || !V.away() || onGate() || dialogOpen() || inUse()) return false;
+    if (!settled || V.send.busy() || (V.files && V.files.busy()) || applying || !V.away() || onGate() || dialogOpen()
+      || inUse()) return false;
     return apply();
   }
 
@@ -324,7 +325,7 @@ V.update = (() => {
     whatsNew,
     /* Settings' "Update now": the owner asked, so it goes now, once nothing would be lost. */
     async now() {
-      if (!(await V.editor.settled()) || V.send.busy()) {
+      if (!(await V.editor.settled()) || V.send.busy() || V.files.busy()) {
         V.toast('Vault updates as soon as what\'s being saved or sent is done.');
         return false;
       }

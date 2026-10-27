@@ -1,6 +1,11 @@
-/* Vault: the Notes tab. Folders (starter ones for school, work, personal and gaming), smart lists (Pinned, Due
-   soon, Trash), search, and the list of notes. Opening one hands it to V.editor: beside the list on a wide
-   screen, over everything on a phone. */
+/* Vault: the Notes tab. Folders (starter ones for school, work, personal and gaming, and your own), smart lists
+   (Pinned, Upcoming: the week by day from js/reminders.js, Archive, Trash), #tags, search with filters, and the list of
+   notes as a list or a grid. Opening one hands it to V.editor: beside the list on a wide screen, over everything on a
+   phone.
+
+   Picking several notes (a long press with a finger or the S Pen, or Ctrl/Shift+click on the PC) shows a bar to move,
+   pin, archive or delete them together; on the PC a card can also be dragged onto a folder. What those do, and what
+   the search box understands, is in organise.js. */
 'use strict';
 
 V.STARTER_FOLDERS = [['Inbox', '📥'], ['School', '📚'], ['Work', '💼'], ['Personal', '🏠'], ['Gaming', '🎮']];
@@ -23,17 +28,28 @@ V.TEMPLATES = [
 
 V.notes = (() => {
   const CHECK = /^(\s*)[-*]\s*\[( |x|X)\]\s?(.*)$/;
-  let filter = 'all';
+  const O = V.organise;
+  const LONG_PRESS = 450;     // ms a finger or the S Pen stays on a card to start picking
+  const DRAG = 'application/x-vault-notes';
+  let filter = 'all';         // all, pinned, due, archive, trash, tag:<key> or a folder's id
   let query = '';
   let root = null;
   let parts = null;
+  let picking = false;        // several notes being picked
+  const picked = new Set();
+  let anchor = null;          // where a Shift+click range starts
+  let press = null;           // a finger on a card: {id, x, y, timer, fired}
 
   const folders = () => [...V.data.folders.values()].filter((f) => !f.deleted)
     .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
-  const live = () => [...V.data.notes.values()].filter((n) => !n.deleted && !n._purge);
+  // The notes the lists are made of (templates are kept apart, for the new-note sheet).
+  const live = () => [...V.data.notes.values()].filter((n) => !n.deleted && !n._purge && !O.isTemplate(n));
+  const listed = () => live().filter((n) => !O.isArchived(n));
   const edited = (n) => n._edited || n.updated_at || n.created_at || '';
   const folderOf = (n) => V.data.folders.get(n.folder_id);
   const inbox = () => folders().find((f) => f.name.toLowerCase() === 'inbox');
+  const isTag = (value) => typeof value === 'string' && value.startsWith('tag:');
+  const tagKey = (value) => value.slice(4);
 
   function plain(note) {
     return (note.body || '').split('\n').map((line) => {
@@ -53,25 +69,29 @@ V.notes = (() => {
 
   V.noteTitle = (note) => (note.title || '').trim() || (!note.locked && plain(note).slice(0, 60)) || 'Untitled';
 
-  function matches(note, words) {
-    const title = (note.title || '').toLowerCase();
-    const body = note.locked ? '' : (note.body || '').toLowerCase();
-    return words.every((w) => title.includes(w) || body.includes(w));
-  }
-
   function shown() {
     if (filter === 'trash') {
       return [...V.data.notes.values()].filter((n) => n.deleted && !n._purge)
         .sort((a, b) => (b.deleted_at || '').localeCompare(a.deleted_at || ''));
     }
-    let list = live();
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (words.length) list = list.filter((n) => matches(n, words));
-    else if (filter === 'pinned') list = list.filter((n) => n.pinned);
-    else if (filter === 'due') list = list.filter((n) => n.due && !n.done);
-    else if (filter !== 'all') list = list.filter((n) => n.folder_id === filter);
-    if (filter === 'due' && !words.length) return list.sort((a, b) => a.due.localeCompare(b.due));
-    return list.sort((a, b) => (b.pinned - a.pinned) || edited(b).localeCompare(edited(a)));
+    const q = O.parseQuery(query);
+    let list;
+    if (!q.empty) {
+      // Searching looks through every note (not just this folder); the Archive only with is:archived, or from there.
+      const archived = q.is.includes('archived') || filter === 'archive';
+      list = live().filter((n) => O.isArchived(n) === archived).filter(O.matcher(q));
+    } else if (filter === 'archive') {
+      list = live().filter(O.isArchived);
+    } else {
+      list = listed();
+      if (filter === 'pinned') list = list.filter((n) => n.pinned);
+      else if (filter === 'due') list = list.filter((n) => (V.reminders ? V.reminders.inUpcoming(n) : n.due && !n.done));
+      else if (isTag(filter)) list = list.filter((n) => O.tagsOf(n).some((t) => t.key === tagKey(filter)));
+      else if (filter !== 'all') list = list.filter((n) => n.folder_id === filter);
+    }
+    if (filter === 'due' && q.empty) return list.sort((a, b) => (a.due || '').localeCompare(b.due || ''));
+    const order = O.comparator(O.sort());
+    return list.sort((a, b) => (b.pinned - a.pinned) || order(a, b));
   }
 
   /* -- making things */
@@ -99,23 +119,32 @@ V.notes = (() => {
     };
   }
 
+  /* A template's {date} (or {today}) as today's date, {longdate} as "Tuesday 27 October". */
   function fill(text) {
     const now = new Date();
-    return text.replace('{today}', now.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }))
-      .replace('{longdate}', now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }));
+    return String(text || '').replace(/\{(?:today|date)\}/gi, now.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }))
+      .replace(/\{longdate\}/gi, now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }));
   }
 
   async function create(template = V.TEMPLATES[0], extra = {}) {
     let folderId = filter !== 'all' && V.data.folders.has(filter) ? filter : null;
+    const own = template.folderId && V.data.folders.get(template.folderId);
+    if (!folderId && own && !own.deleted) folderId = own.id;
     if (!folderId && template.folder) {
       const named = folders().find((f) => f.name.toLowerCase() === template.folder.toLowerCase());
       folderId = named ? named.id : null;
     }
     if (!folderId) folderId = (inbox() || {}).id || null;
+    const title = fill(template.title || '');
+    let body = fill(template.body || '');
+    if (isTag(filter)) {  // made while looking at a tag: it gets the tag, so it's in the list it was made from
+      const tag = (O.allTags(live()).find((t) => t.key === tagKey(filter)) || { name: tagKey(filter) }).name;
+      if (!O.tagsOf({ title, body }).some((t) => t.key === tagKey(filter))) body += (body.trim() ? '\n\n' : '') + '#' + tag;
+    }
     const note = await V.cloud.save('notes', blankNote({
-      folder_id: folderId, title: fill(template.title || ''), body: fill(template.body || ''),
+      folder_id: folderId, title, body,
       due: template.due !== undefined ? V.addDays(V.today(), template.due) : null,
-      pinned: filter === 'pinned', template: template.id === 'blank' ? '' : template.id, ...extra,
+      pinned: filter === 'pinned', template: template.id === 'blank' || template.own ? '' : template.id, ...extra,
     }));
     open(note.id, { focusTitle: true });
     return note;
@@ -127,79 +156,281 @@ V.notes = (() => {
       const fit = (t) => (here && t.folder && t.folder.toLowerCase() === here.name.toLowerCase() ? 0 : 1);
       return (a.id === 'blank' ? -1 : b.id === 'blank' ? 1 : fit(a) - fit(b));
     });
-    let picked = null;
+    let chosen = null;
     const sheet = V.sheet({
       title: here ? `New note in ${here.name}` : 'New note',
-      content: V.h('div.templates', {}, list.map((t) => V.h('button.template', {
-        type: 'button', onclick: () => { picked = t; sheet.close(); },
-      }, V.icon(t.icon), V.h('span.t-name', { text: t.name }),
-      V.h('span.t-hint', { text: t.hint || (t.folder ? t.folder : '') })))),
-      onClose: () => { if (picked) create(picked); },
+      content: [
+        V.h('div.templates', {}, list.map((t) => V.h('button.template', {
+          type: 'button', onclick: () => { chosen = t; sheet.close(); },
+        }, V.icon(t.icon), V.h('span.t-name', { text: t.name }),
+        V.h('span.t-hint', { text: t.hint || (t.folder ? t.folder : '') })))),
+        O.templateSection((t) => { chosen = t; sheet.close(); }, () => sheet.close()),
+      ],
+      onClose: () => { if (chosen) create(chosen).catch(V.problem); },
     });
   }
 
   /* -- folders */
 
   async function newFolder() {
-    const name = await V.ask('New folder', { placeholder: 'Name, like Science or Minecraft', ok: 'Make it' });
-    if (!name || !name.trim()) return;
-    const icon = /^\p{Extended_Pictographic}/u.test(name.trim()) ? '' : '📁';
-    const folder = await V.cloud.save('folders', {
-      id: V.uuid(), name: name.trim().slice(0, 60), icon, sort: folders().length, deleted: false, extra: {},
-    });
-    setFilter(folder.id);
+    const folder = await O.newFolder();
+    if (folder) setFilter(folder.id);
   }
 
-  async function folderMenu(folder, anchor) {
-    V.menu(anchor, [
-      { label: 'Rename', icon: 'text', onClick: async () => {
-        const name = await V.ask('Rename folder', { value: folder.name, ok: 'Rename' });
-        if (name && name.trim()) await V.cloud.save('folders', { ...folder, name: name.trim().slice(0, 60) });
+  const folderMenu = (folder, anchorEl) => O.folderMenu(folder, anchorEl, { onGone: () => { if (filter === folder.id) setFilter('all'); } });
+
+  /* -- picking several notes */
+
+  const cardEls = () => (parts ? [...parts.list.querySelectorAll('button.card[data-id]')] : []);
+
+  function startPicking() {
+    if (picking) return;
+    picking = true;
+    anchor = null;
+    // On a phone the Back button stops picking (instead of leaving Vault).
+    if (!V.desktop) history.pushState({ vault: 'select' }, '');
+  }
+
+  function stopPicking({ fromHistory = false } = {}) {
+    if (!picking) return;
+    picking = false;
+    picked.clear();
+    anchor = null;
+    if (!fromHistory && history.state && history.state.vault === 'select') {
+      // The step back happens a moment later: a note opened before then waits for it, or the step back would close it.
+      backing = { open: null };
+      history.back();
+      setTimeout(backDone, 600);
+    }
+    showPicked();
+  }
+
+  let backing = null;
+  function backDone() {
+    if (!backing) return;
+    const then = backing.open;
+    backing = null;
+    // After every other popstate listener (the editor's closes a full-screen note on Back).
+    if (then) setTimeout(() => open(...then));
+  }
+
+  function toggle(id) {
+    if (!picking) startPicking();
+    if (picked.has(id)) picked.delete(id);
+    else picked.add(id);
+    anchor = id;
+    if (!picked.size) stopPicking();
+    else showPicked();
+  }
+
+  /* Shift+click: every card from the last one picked (or the open note) to this one. */
+  function pickRange(id) {
+    const order = cardEls().map((el) => el.dataset.id);
+    const open = V.editor.openId();
+    const from = anchor && order.includes(anchor) ? anchor : open && order.includes(open) ? open : id;
+    const [a, b] = [order.indexOf(from), order.indexOf(id)].sort((x, y) => x - y);
+    startPicking();
+    for (const each of order.slice(a, b + 1)) picked.add(each);
+    anchor = from;
+    showPicked();
+  }
+
+  function pickAll() {
+    startPicking();
+    for (const el of cardEls()) picked.add(el.dataset.id);
+    showPicked();
+  }
+
+  /* The picked cards marked where they are (nothing redrawn, so a finger still on a card stays on it), and the bar. */
+  function showPicked() {
+    if (!parts) return;
+    parts.layout.classList.toggle('selecting', picking);
+    parts.list.classList.toggle('picking', picking);
+    parts.fab.hidden = picking;
+    for (const el of cardEls()) {
+      el.classList.toggle('selected', picked.has(el.dataset.id));
+      if (picking) el.setAttribute('aria-pressed', String(picked.has(el.dataset.id)));
+      else el.removeAttribute('aria-pressed');
+    }
+    drawPickBar();
+  }
+
+  function drawPickBar() {
+    const bar = parts.pickBar;
+    if (!picking) { bar.hidden = true; V.clear(bar); return; }
+    const ids = [...picked];
+    const rows = ids.map((id) => V.data.notes.get(id)).filter(Boolean);
+    const allPinned = rows.length > 0 && rows.every((n) => n.pinned);
+    const allArchived = rows.length > 0 && rows.every(O.isArchived);
+    const everything = cardEls().every((el) => picked.has(el.dataset.id));
+    const act = (icon, label, run, cls = '') => V.h('button.pick-action' + (cls ? '.' + cls : ''), {
+      type: 'button', onclick: () => run(ids).catch(V.problem),
+    }, V.icon(icon), V.h('span', { text: label }));
+    const done = (fn) => async (list) => { stopPicking(); await fn(list); };
+    bar.hidden = false;
+    V.clear(bar,
+      V.h('div.pick-top', {},
+        V.iconButton('x', 'Stop picking (Esc)', () => stopPicking(), 'quiet'),
+        V.h('span.pick-count', { text: `${ids.length} picked` }),
+        everything ? null : V.h('button.link-btn.pick-all', { type: 'button', onclick: pickAll, text: 'Pick all' })),
+      V.h('div.pick-actions', {},
+        act('folder-move', 'Move to', async (list) => {
+          const folder = await O.chooseFolder({ title: list.length === 1 ? 'Move to' : `Move ${list.length} notes to` });
+          if (folder) await done((l) => O.move(l, folder.id))(list);
+        }),
+        filter === 'archive' ? null : act(allPinned ? 'pin-on' : 'pin', allPinned ? 'Unpin' : 'Pin', done((l) => O.pin(l, !allPinned))),
+        act('archive', allArchived ? 'Unarchive' : 'Archive', done((l) => O.archive(l, !allArchived))),
+        act('trash', 'Delete', done((l) => O.trash(l)), 'danger')));
+  }
+
+  window.addEventListener('popstate', () => {
+    if (picking && !(history.state && history.state.vault === 'select')) stopPicking({ fromHistory: true });
+    backDone();
+  });
+
+  /* A finger or the S Pen held on a card picks it (the first one starts picking); a mouse uses Ctrl/Shift+click. */
+  function pressStart(event, id) {
+    press = null;
+    if (event.pointerType === 'mouse' || !event.isPrimary || filter === 'trash') return;
+    const mine = { id, x: event.clientX, y: event.clientY, fired: false };
+    mine.timer = setTimeout(() => {
+      if (press !== mine) return;
+      mine.fired = true;
+      try { if (navigator.vibrate) navigator.vibrate(12); } catch (error) { /* no buzz, no matter */ }
+      toggle(id);
+    }, LONG_PRESS);
+    press = mine;
+  }
+  function pressMove(event) {
+    if (press && !press.fired && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+      clearTimeout(press.timer);
+      press = null;  // it's a scroll
+    }
+  }
+  function pressEnd() {
+    if (!press) return;
+    clearTimeout(press.timer);
+    const was = press;
+    if (!was.fired) { press = null; return; }
+    setTimeout(() => { if (press === was) press = null; }, 400);  // the click right after a long press is its own
+  }
+
+  function cardClick(event, note) {
+    if (press && press.fired) {
+      const was = press.id;
+      press = null;
+      if (was === note.id) return;
+    }
+    if (filter === 'trash') return trashMenu(note);
+    if (event.shiftKey) return pickRange(note.id);
+    if (picking || event.ctrlKey || event.metaKey) return toggle(note.id);
+    open(note.id);
+  }
+
+  function cardContext(event, note) {
+    event.preventDefault();
+    if (filter === 'trash') return;
+    if (press && press.fired) return;  // the long press has picked it already
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      // The phone's own long press came first: it's the one that picks (the timer doesn't as well).
+      if (press) clearTimeout(press.timer);
+      press = { id: note.id, fired: true };  // (let go of when the finger lifts: pressEnd)
+      toggle(note.id);
+      return;
+    }
+    // A right-click on the PC: what can be done with this note.
+    const at = event.clientX || event.clientY  // (the keyboard's menu key: by the card itself)
+      ? { getBoundingClientRect: () => ({ left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY }) }
+      : event.currentTarget;
+    const archived = O.isArchived(note);
+    V.menu(at, [
+      { label: 'Open', icon: 'open', onClick: () => open(note.id) },
+      { label: 'Pick', icon: 'select', onClick: () => { if (!picked.has(note.id)) toggle(note.id); } },
+      { label: 'Move to...', icon: 'folder-move', onClick: async () => {
+        const folder = await O.chooseFolder({ current: note.folder_id });
+        if (folder) await O.move([note.id], folder.id);
       } },
-      { label: 'Change its emoji', icon: 'image', onClick: async () => {
-        const icon = await V.ask('Folder emoji', { value: folder.icon, placeholder: 'Type or paste one emoji', ok: 'Use it' });
-        if (icon !== null) await V.cloud.save('folders', { ...folder, icon: [...icon.trim()].slice(0, 2).join('') });
-      } },
-      { label: 'Delete folder', icon: 'trash', danger: true, onClick: async () => {
-        const inside = live().filter((n) => n.folder_id === folder.id);
-        const home = inbox();
-        const ok = await V.confirm(`Delete ${folder.name}?`, inside.length
-          ? `Its ${inside.length} note${inside.length > 1 ? 's go' : ' goes'} to ${home && home.id !== folder.id ? 'Inbox' : 'All notes'}.`
-          : 'It\'s empty.', { ok: 'Delete', danger: true });
-        if (!ok) return;
-        for (const note of inside) {
-          await V.cloud.save('notes', { ...note, folder_id: home && home.id !== folder.id ? home.id : null });
-        }
-        await V.cloud.save('folders', { ...folder, deleted: true });
-        if (filter === folder.id) setFilter('all');
-      } },
+      archived ? null : { label: note.pinned ? 'Unpin' : 'Pin to the top', icon: note.pinned ? 'pin-on' : 'pin', onClick: () => O.pin([note.id], !note.pinned) },
+      { label: archived ? 'Unarchive' : 'Archive', icon: 'archive', onClick: () => O.archive([note.id], !archived) },
+      { label: 'Move to Trash', icon: 'trash', danger: true, onClick: () => O.trash([note.id]) },
     ]);
+  }
+
+  /* -- dragging cards onto a folder (the PC) */
+
+  const canDrag = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const dragging = (event) => !!event.dataTransfer && [...event.dataTransfer.types].includes(DRAG);
+
+  function dragStart(event, id) {
+    const ids = picking && picked.has(id) ? [...picked] : [id];
+    event.dataTransfer.setData(DRAG, JSON.stringify(ids));
+    event.dataTransfer.effectAllowed = 'move';
+    document.documentElement.classList.add('dragging-notes');
+  }
+  function dragEnd() {
+    document.documentElement.classList.remove('dragging-notes');
+    for (const el of document.querySelectorAll('.drop-on')) el.classList.remove('drop-on');
+  }
+
+  /* `el` takes dropped cards: a folder moves them there; Pinned pins, Archive archives and Trash deletes them. */
+  function dropTarget(el, target) {
+    if (!['pinned', 'archive', 'trash'].includes(target) && !V.data.folders.has(target)) return el;
+    el.addEventListener('dragover', (event) => {
+      if (!dragging(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-on');
+    });
+    el.addEventListener('dragleave', (event) => { if (!el.contains(event.relatedTarget)) el.classList.remove('drop-on'); });
+    el.addEventListener('drop', (event) => {
+      if (!dragging(event)) return;
+      event.preventDefault();
+      dragEnd();
+      let ids = [];
+      try { ids = JSON.parse(event.dataTransfer.getData(DRAG)); } catch (error) { return; }
+      ids = (Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && V.data.notes.has(id));
+      if (!ids.length) return;
+      stopPicking();
+      const run = target === 'pinned' ? O.pin(ids, true) : target === 'archive' ? O.archive(ids, true)
+        : target === 'trash' ? O.trash(ids) : O.move(ids, target);
+      run.catch(V.problem);
+    });
+    return el;
   }
 
   /* -- drawing */
 
   function setFilter(value) {
+    stopPicking();
     filter = value;
     query = '';
     if (parts) parts.search.value = '';
     draw();
   }
 
+  function tagLabel(key) {
+    const tag = O.allTags(live()).find((t) => t.key === key);
+    return '#' + (tag ? tag.name : key);
+  }
+
   function filterTitle() {
     if (query) return 'Search';
     if (filter === 'all') return 'All notes';
     if (filter === 'pinned') return 'Pinned';
-    if (filter === 'due') return 'Due soon';
+    if (filter === 'due') return 'Upcoming';
+    if (filter === 'archive') return 'Archive';
     if (filter === 'trash') return 'Trash';
+    if (isTag(filter)) return tagLabel(tagKey(filter));
     const f = V.data.folders.get(filter);
     return f ? f.name : 'All notes';
   }
 
   function counts() {
-    const all = live();
+    const all = listed();
     const by = {};
     for (const n of all) by[n.folder_id] = (by[n.folder_id] || 0) + 1;
-    return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter((n) => n.due && !n.done).length, by };
+    const due = (n) => (V.reminders ? V.reminders.pending(n) : n.due && !n.done);
+    return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter(due).length, by };
   }
 
   /* A folder shows its emoji; one without gets a colour dot (by its place in the list), unless its name starts with
@@ -215,39 +446,45 @@ V.notes = (() => {
 
   function navItem(id, icon, label, count) {
     const folder = V.data.folders.get(id);
-    return V.h('button.nav-item' + (filter === id && !query ? '.on' : ''), {
+    return dropTarget(V.h('button.nav-item' + (filter === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id), dataset: { id },
       oncontextmenu: folder ? (event) => { event.preventDefault(); folderMenu(folder, event.currentTarget); } : null,
     }, folder ? folderBadge(folder, true) : V.icon(icon), V.h('span.nav-label', { text: label }),
-    count ? V.h('span.count', { text: String(count) }) : null);
+    count ? V.h('span.count', { text: String(count) }) : null), id);
   }
 
   function drawFolders() {
     const c = counts();
+    const tags = O.allTags(listed());
     const list = [
       navItem('all', 'stack', 'All notes', c.all),
       navItem('pinned', 'pin', 'Pinned', c.pinned),
-      navItem('due', 'clock', 'Due soon', c.due),
+      navItem('due', 'clock', 'Upcoming', c.due),
       V.h('div.nav-heading', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')),
       folders().map((f) => V.h('div.folder-row', {},
         navItem(f.id, 'folder', f.name, c.by[f.id]),
         V.iconButton('more', `${f.name} options`, (event) => folderMenu(f, event.currentTarget), 'tiny folder-more'))),
+      tags.length ? [V.h('div.nav-heading', {}, V.h('span', { text: 'Tags' })),
+        tags.map((t) => navItem('tag:' + t.key, 'hash', t.name, t.count))] : null,
       V.h('div.nav-spacer'),
+      navItem('archive', 'archive', 'Archive', 0),
       navItem('trash', 'trash', 'Trash', 0),
     ];
     V.clear(parts.folders, list);
     // The phone's folder chips (and a narrow window's): the same choices in a row.
-    const chip = (id, label, lead, count) => V.h('button.chip' + (filter === id && !query ? '.on' : ''), {
-      type: 'button', onclick: () => setFilter(id),
+    const chip = (id, label, lead, count) => dropTarget(V.h('button.chip' + (filter === id && !query ? '.on' : ''), {
+      type: 'button', onclick: () => setFilter(id), dataset: { id },
       oncontextmenu: V.data.folders.has(id) ? (event) => { event.preventDefault(); folderMenu(V.data.folders.get(id), event.currentTarget); } : null,
-    }, lead, label, count ? V.h('span.count', { text: String(count) }) : null);
+    }, lead, label, count ? V.h('span.count', { text: String(count) }) : null), id);
     V.clear(parts.chips,
       chip('all', 'All', null, c.all),
       chip('pinned', 'Pinned', V.icon('pin')),
-      chip('due', 'Due', V.icon('clock'), c.due),
+      chip('due', 'Upcoming', V.icon('clock'), c.due),
       folders().map((f) => chip(f.id, f.name, folderBadge(f))),
-      chip('trash', 'Trash', V.icon('trash')),
-      V.h('button.chip.add', { type: 'button', onclick: newFolder, 'aria-label': 'New folder', title: 'New folder' }, V.icon('plus')));
+      V.h('button.chip.add', { type: 'button', onclick: newFolder, title: 'New folder' }, V.icon('plus'), 'New folder'),
+      tags.map((t) => chip('tag:' + t.key, '#' + t.name, null)),
+      chip('archive', 'Archive', V.icon('archive')),
+      chip('trash', 'Trash', V.icon('trash')));
     const on = parts.chips.querySelector('.chip.on');
     if (on && parts.chips.offsetParent) {  // only on the phone, where the chips show
       const left = on.offsetLeft - parts.chips.offsetLeft;
@@ -260,26 +497,48 @@ V.notes = (() => {
   /* "Due today" on a card is just "Today" beside its calendar. */
   const shortDue = (label) => { const words = label.replace(/^Due /, ''); return words[0].toUpperCase() + words.slice(1); };
 
-  function card(note) {
+  function card(note, look) {
     const folder = folderOf(note);
     const due = V.due(note.due, note.done);
     const prog = note.locked ? null : progress(note);
     const pictures = (note.attachments || []).length;
-    const showFolder = filter === 'all' || filter === 'pinned' || filter === 'due' || query;
-    return V.h('button.card' + (V.editor.openId() === note.id ? '.open' : '') + (note.done ? '.done' : ''), {
-      type: 'button', onclick: () => (filter === 'trash' ? trashMenu(note) : open(note.id)), dataset: { id: note.id },
+    const showFolder = filter === 'all' || filter === 'pinned' || filter === 'due' || filter === 'archive' || isTag(filter) || query;
+    const words = note.locked ? '' : plain(note);
+    const titled = !!(note.title || '').trim();
+    // Searching: the words round the first match, when they're further in than the start shows.
+    const around = look.terms.length ? O.snippet(words, look.terms, look.size) : words.slice(0, look.size);
+    const snippet = titled || around.startsWith('…') ? around : '';
+    const tags = O.tagsOf(note);
+    return V.h('button.card' + (V.editor.openId() === note.id ? '.open' : '') + (note.done ? '.done' : '')
+      + (picked.has(note.id) ? '.selected' : ''), {
+      type: 'button', dataset: { id: note.id },
+      'aria-pressed': picking ? String(picked.has(note.id)) : null,
+      draggable: look.drag ? 'true' : null,
+      onclick: (event) => cardClick(event, note),
+      oncontextmenu: (event) => cardContext(event, note),
+      onpointerdown: (event) => pressStart(event, note.id),
+      onpointermove: pressMove,
+      onpointerup: pressEnd,
+      onpointercancel: pressEnd,
+      ondragstart: (event) => dragStart(event, note.id),
+      ondragend: dragEnd,
     },
     V.h('div.card-top', {},
-      V.h('span.card-title', { text: V.noteTitle(note) }),
+      V.h('span.pick', { 'aria-hidden': 'true' }, V.icon('check')),
+      V.h('span.card-title', {}, O.marked(V.noteTitle(note), look.terms)),
       note.pinned ? V.icon('pin-on', 'pinned') : null),
     note.locked ? V.h('div.card-snippet.locked', {}, V.icon('lock'), V.h('span', { text: 'Locked: open it with your PIN' }))
-      : plain(note) && (note.title || '').trim() ? V.h('div.card-snippet', { text: plain(note).slice(0, 160) }) : null,
+      : snippet ? V.h('div.card-snippet', {}, O.marked(snippet, look.terms)) : null,
     V.h('div.card-meta', {},
       showFolder && folder ? V.h('span.tag', {}, folderBadge(folder), V.h('span', { text: folder.name })) : null,
+      O.isTemplate(note) ? V.h('span.tag', {}, V.icon('notes'), V.h('span', { text: 'Template' })) : null,
       due ? V.h('span.due.' + (due.cls || 'later'), {}, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
+      V.reminders ? V.reminders.cardChip(note) : null,
       prog ? V.h('span.progress', {}, V.h('span.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
         V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
       pictures ? V.h('span.tag', {}, V.icon('image'), String(pictures)) : null,
+      tags.length ? V.h('span.note-tags', {}, tags.slice(0, 3).map((t) => V.h('span.note-tag', {}, O.marked('#' + t.name, look.terms))),
+        tags.length > 3 ? V.h('span.note-tag.more', { text: `+${tags.length - 3}` }) : null) : null,
       V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) })));
   }
 
@@ -297,29 +556,46 @@ V.notes = (() => {
     });
   }
 
-  /* All notes, not searching: what's pinned, then what's due in the coming week, then the rest. */
-  function sections(list) {
+  /* All notes, not searching: what's pinned, then (newest first) what's due in the coming week, then the rest. */
+  function sections(list, make) {
     if (filter !== 'all' || query) return null;
     const pinned = list.filter((n) => n.pinned);
-    const soon = list.filter((n) => !n.pinned && n.due && !n.done && V.due(n.due).days <= 7)
+    const soon = O.sort() !== 'edited' ? [] : list.filter((n) => !n.pinned && n.due && !n.done && V.due(n.due).days <= 7)
       .sort((a, b) => a.due.localeCompare(b.due));
     if (!pinned.length && !soon.length) return null;
     const rest = list.filter((n) => !n.pinned && !soon.includes(n));
     const part = (title, notes) => (notes.length ? [V.h('h2.list-section', {}, V.h('span', { text: title }),
-      V.h('span.count', { text: String(notes.length) })), notes.map(card)] : null);
+      V.h('span.count', { text: String(notes.length) })), notes.map(make)] : null);
     return [part('Pinned', pinned), part('Due soon', soon), part('Other notes', rest)];
   }
 
   function drawList() {
     const list = shown();
+    const q = O.parseQuery(query);
+    const grid = O.view() === 'grid';
     parts.heading.textContent = filterTitle();
     parts.headCount.textContent = list.length ? String(list.length) : '';
+    parts.layout.classList.toggle('grid-view', grid);
+    parts.list.classList.toggle('grid', grid);
+    const folder = V.data.folders.get(filter);
+    V.clear(parts.titleTools,
+      folder && !query ? V.iconButton('more', `${folder.name} options`, (event) => folderMenu(folder, event.currentTarget), 'folder-options') : null,
+      V.iconButton('sort', 'Sort notes', (event) => sortMenu(event.currentTarget)),
+      V.iconButton(grid ? 'rows' : 'grid', grid ? 'Show as a list' : 'Show as a grid', () => {
+        O.setView(grid ? 'list' : 'grid');
+        draw();
+      }));
     const empty = () => {
       const say = (text, ...more) => V.h('div.empty', {}, V.mark(40), V.h('p', { text }), more);
-      if (query) return say(`Nothing matches "${query}".`);
+      if (query) {
+        const { missing } = O.foldersFor(q);
+        return say(missing ? `No folder is called "${missing}".` : `Nothing matches "${query}".`);
+      }
       if (filter === 'trash') return say('The Trash is empty.');
-      if (filter === 'due') return say('Nothing due. Homework notes get a due date.');
+      if (filter === 'due') return say('Nothing coming up. Type a day in a note, like "test fri 9am", or give it a due date.');
       if (filter === 'pinned') return say('Pin a note to keep it at the top.');
+      if (filter === 'archive') return say('Nothing archived. Archive notes you\'re done with: they leave your lists but stay here, and in search with is:archived.');
+      if (isTag(filter)) return say(`No notes have ${tagLabel(tagKey(filter))} any more.`);
       return say('No notes here yet.', V.button('New note', { kind: 'primary', icon: 'plus', onClick: chooseTemplate }));
     };
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
@@ -328,47 +604,121 @@ V.notes = (() => {
         for (const note of list) await V.cloud.purgeNote(note);
       },
     })) : null;
-    V.clear(parts.list, trashBar, list.length ? sections(list) || list.map(card) : empty());
+    const look = { terms: O.terms(q), size: grid ? 280 : 160, drag: canDrag() && filter !== 'trash' };
+    const make = (note) => card(note, look);
+    if (V.study && filter !== 'trash') V.study.resetDue(list);  // repeating checklists whose day has turned over
+    // Upcoming: by day (Overdue, Today, Tomorrow, the weekdays, Later), each with a tick and its day to move it.
+    const byDay = filter === 'due' && q.empty && V.reminders ? V.reminders.upcoming(list, make) : null;
+    parts.list.classList.toggle('upcoming', !!byDay);
+    V.clear(parts.list, trashBar, list.length ? byDay || sections(list, make) || list.map(make) : empty());
+    // Picked notes that have gone (deleted on the other device, or no longer in this list) aren't picked any more.
+    const here = new Set(list.map((n) => n.id));
+    for (const id of picked) if (!here.has(id)) picked.delete(id);
+    if (picking && !picked.size) stopPicking();
+    else showPicked();
   }
 
+  function sortMenu(anchorEl) {
+    const now = O.sort();
+    const grid = O.view() === 'grid';
+    V.menu(anchorEl, [
+      ...O.SORTS.map(([id, label]) => ({ label, icon: now === id ? 'check' : 'blank', onClick: () => { O.setSort(id); draw(); } })),
+      { label: grid ? 'Show as a list' : 'Show as a grid', icon: grid ? 'rows' : 'grid', onClick: () => { O.setView(grid ? 'list' : 'grid'); draw(); } },
+    ]);
+  }
+
+  /* The filters the search box knows, as buttons that type them in (the keyboard stays up). */
+  function drawHelp() {
+    const folder = V.data.folders.get(filter);
+    const inName = folder ? (/\s/.test(folder.name) ? `in:"${folder.name}"` : `in:${folder.name}`) : 'in:';
+    const pill = (label, token) => V.h('button.filter-pill', {
+      type: 'button', title: `Add ${label} to the search`,
+      onmousedown: (event) => event.preventDefault(),
+      onclick: () => addFilter(token),
+    }, label);
+    V.clear(parts.help, V.h('span.help-word', { text: 'Filters' }),
+      pill('#tag', '#'), pill(folder ? inName : 'in:folder', inName), pill('has:checklist', 'has:checklist'),
+      pill('has:picture', 'has:picture'), pill('due:week', 'due:week'), pill('due:late', 'due:late'),
+      pill('is:pinned', 'is:pinned'), pill('is:archived', 'is:archived'));
+  }
+
+  function addFilter(token) {
+    const search = parts.search;
+    const before = search.value.replace(/\s+$/, '');
+    if (before.split(/\s+/).includes(token)) return;
+    search.value = (before ? before + ' ' : '') + token + (/[:#]$/.test(token) ? '' : ' ');
+    search.focus({ preventScroll: true });
+    search.setSelectionRange(search.value.length, search.value.length);
+    query = search.value.trim();
+    stopPicking();
+    draw();
+    showHelp();
+  }
+
+  /* The filters show while the search box is being used (and are only there then). */
+  let helpTimer = null;
+  function showHelp() {
+    clearTimeout(helpTimer);
+    if (!parts) return;
+    const on = document.activeElement === parts.search || !!parts.search.value.trim();
+    parts.help.hidden = !on;
+    if (on) drawHelp();
+    else V.clear(parts.help);
+  }
+
+  const SMART = ['all', 'pinned', 'due', 'archive', 'trash'];
   function draw() {
     if (!parts) return;
+    const folder = V.data.folders.get(filter);
+    if (!SMART.includes(filter) && !isTag(filter) && (!folder || folder.deleted)) filter = 'all';  // deleted elsewhere
     drawFolders();
+    if (!parts.help.hidden) drawHelp();
     drawList();
   }
 
   function open(id, opts = {}) {
+    if (backing) { backing.open = [id, opts]; return; }
     if (V.wide()) V.editor.open(id, { pane: parts.pane, ...opts });
     else V.editor.open(id, opts);
     for (const el of parts.list.querySelectorAll('.card')) el.classList.toggle('open', el.dataset.id === id);
   }
 
   function render(container) {
+    stopPicking();
     root = container;
     const search = V.h('input.search', {
-      type: 'search', placeholder: 'Search notes', 'aria-label': 'Search notes', value: query,
-      oninput: V.debounce(() => { query = search.value.trim(); draw(); }, 120),
-      onkeydown: (event) => { if (event.key === 'Escape') { search.value = ''; query = ''; draw(); } },
+      type: 'search', placeholder: 'Search notes', 'aria-label': 'Search notes', value: query, enterkeyhint: 'search',
+      oninput: V.debounce(() => { query = search.value.trim(); draw(); showHelp(); }, 120),
+      onkeydown: (event) => { if (event.key === 'Escape') { search.value = ''; query = ''; draw(); showHelp(); } },
+      onfocus: showHelp,
+      // Hidden a moment later, so a tap on a card that blurs the box lands before the list moves up.
+      onblur: () => { clearTimeout(helpTimer); helpTimer = setTimeout(showHelp, 300); },
     });
     parts = {
       search,
       folders: V.h('nav.folders', { 'aria-label': 'Folders' }),
       chips: V.h('div.chips', { role: 'tablist' }),
+      help: V.h('div.search-help', { hidden: true }),
       heading: V.h('h1'),
       headCount: V.h('span.head-count'),
+      titleTools: V.h('div.list-tools'),
       list: V.h('div.list'),
       pane: V.h('section.pane'),
+      pickBar: V.h('div.pick-bar', { role: 'toolbar', 'aria-label': 'Picked notes', hidden: true }),
+      fab: V.h('button.fab', { type: 'button', onclick: chooseTemplate, 'aria-label': 'New note' }, V.icon('plus')),
     };
     const listColumn = V.h('section.list-column', {},
       V.h('div.list-head', {},
         V.h('div.search-box', {}, V.icon('search'), search, V.h('kbd.search-hint', { text: 'Ctrl F' })),
         V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: 'New note (Ctrl+N)' })),
+      parts.help,
       parts.chips,
-      V.h('div.list-title', {}, parts.heading, parts.headCount, V.statusPill()),
+      V.h('div.list-title', {}, parts.heading, parts.headCount, parts.titleTools, V.statusPill()),
       parts.list);
-    V.clear(container, V.h('div.notes-layout', {}, parts.folders, listColumn, parts.pane),
-      V.h('button.fab', { type: 'button', onclick: chooseTemplate, 'aria-label': 'New note' }, V.icon('plus')));
+    parts.layout = V.h('div.notes-layout', {}, parts.folders, listColumn, parts.pane, parts.pickBar);
+    V.clear(container, parts.layout, parts.fab);
     draw();
+    showHelp();
     V.editor.placeholder(parts.pane);
     const opened = V.editor.openId();
     if (opened && V.wide()) V.editor.open(opened, { pane: parts.pane });
@@ -384,21 +734,36 @@ V.notes = (() => {
     draw();
   });
 
-  const showing = () => !!root && root.isConnected && root.dataset.tab === 'notes';
+  const showing = () => !!root && root.isConnected && root.dataset.tab === 'notes' && !!parts && root.contains(parts.list);
   // Behind the phone's full-screen note there's nothing to redraw (it's redrawn as the note closes).
   const redraw = V.debounce(() => { if (showing() && !V.editor.covering()) draw(); }, 60);
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
+  const typing = (target) => !!target && (target.matches('input, textarea, select') || target.isContentEditable);
   document.addEventListener('keydown', (event) => {
     if (!showing()) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n' && !event.shiftKey) {
+    const ctrl = event.ctrlKey || event.metaKey;
+    if (picking && !V.editor.covering() && !document.querySelector('#layers > .layer:not(.leaving)')) {
+      if (event.key === 'Escape') { event.preventDefault(); stopPicking(); return; }
+      if (ctrl && event.key.toLowerCase() === 'a' && !typing(event.target)) { event.preventDefault(); pickAll(); return; }
+      if (event.key === 'Delete' && !typing(event.target)) {
+        event.preventDefault();
+        const ids = [...picked];
+        stopPicking();
+        O.trash(ids).catch(V.problem);
+        return;
+      }
+    }
+    if (ctrl && event.key.toLowerCase() === 'n' && !event.shiftKey) {
       event.preventDefault();
+      stopPicking();
       chooseTemplate();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && parts) {
+    if (ctrl && event.key.toLowerCase() === 'f' && parts) {
       event.preventDefault();
       parts.search.focus();
     }
   });
 
-  return { render, create, chooseTemplate, ensureStarterFolders, blankNote, open, folders, inbox, setFilter, plain };
+  return { render, create, chooseTemplate, ensureStarterFolders, blankNote, open, folders, inbox, setFilter, plain,
+    folderBadge, picking: () => picking };
 })();

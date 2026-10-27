@@ -1,15 +1,17 @@
 {
  "format": 1,
- "version": "1.1.0",
+ "version": "1.2.0",
  "min_shell": 1,
  "notes": [
-  "A new look and a new logo: clean and calm, in light and dark (Settings > Appearance, or it follows your phone or PC).",
-  "Typing on the phone stays where you put it: the page no longer jumps while you write, and ticking items keeps the keyboard up.",
-  "If your PC (or Jarvis) changes a note while you're writing in it, both of your changes are kept.",
-  "Settings stops taking over: it only shows when you open it.",
-  "Vault updates itself now, on your phone and your PC, when you're not using it."
+  "Folders with emoji: make your own, and move, pin or archive notes (hold one, or drag). Tags with #, and better search.",
+  "Paste a link and it becomes a tidy chip. Headings, lists that carry on when you press Enter, a Read view, Undo, word count, files and voice memos in notes.",
+  "Draw and write by hand with the S Pen (pressure-sensitive; your palm is ignored), and mark up pictures.",
+  "Type a date like \"test fri 9am\" and Vault asks if you want a reminder. Plus an Upcoming week, flash cards, a focus timer and repeating checklists.",
+  "See pictures before you send them, and use Vault on a Chromebook (or any browser).",
+  "A Files tab: browse the PC folders you choose from your phone, and keep files in Vault Drive.",
+  "Safety nets: note history with Restore, \"Download everything\", weekly PC backups, and a conflict copy instead of lost words."
  ],
- "build": "1.1.0-da3f8dbd4049",
+ "build": "1.2.0-07cd273c00e5",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -64,64 +66,92 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "5549a09e5e1733de66247638e5ee9b0f8b8afdebdb5ed580cab935e84a10e5d0",
-   "size": 4252
+   "sha256": "85bd182a220470231f98d0a1e6c6b146fbbfefb7ae6a221652cb50d632e3a89c",
+   "size": 4526
   },
   "js/clips.js": {
-   "sha256": "5311c4b6ec7de14f7c19e360d01b712c7d8afae68b3c481c2f972c4bc6e06832",
-   "size": 5114
+   "sha256": "0dc52effee764094d298707a3551c7fc72749a3736294536d49af9fac23c51aa",
+   "size": 5788
   },
   "js/cloud.js": {
-   "sha256": "a2f64eb17ea36dfc4361357e020ce62c81b3f0f3c61a0c3c0a886a9602806f23",
-   "size": 22604
+   "sha256": "c9e80ab9b5d36da16ee5251b193fce66f44dc19885e07817890484cb43bb090f",
+   "size": 33601
   },
   "js/db.js": {
    "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
    "size": 3536
   },
   "js/editor.js": {
-   "sha256": "576694ce9e8a54c35398d69b82d7d12770cd2be914698d4b0f06263c60e00c25",
-   "size": 47727
+   "sha256": "c2621a8ed9ba8ebf1be1c1f3e40a1087a9ad93e9477d8aa0b60c76031207785e",
+   "size": 106982
+  },
+  "js/files.js": {
+   "sha256": "e30b34d1d18b42e41bf0c91da35059844ef085fad5757d103c4749b7517f73b0",
+   "size": 64517
+  },
+  "js/format.js": {
+   "sha256": "02f7ee5dddcd9a992da5926f38422212fa8f4fb2eae0ee03ac0ed68bccceedd5",
+   "size": 22428
+  },
+  "js/history.js": {
+   "sha256": "e5e4009c7c6bdc8d70749f216fb3ac98518e8545d5fc720a3641e2fa7affa0d5",
+   "size": 23764
+  },
+  "js/ink.js": {
+   "sha256": "a42e3e1061f4bb515063da2a7ce92d2e503900aa516e6390f717abfa720bae6c",
+   "size": 46552
   },
   "js/lock.js": {
    "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
    "size": 7054
   },
   "js/notes.js": {
-   "sha256": "dfbfee3f14cc610a6ad10da2dbb9566e01997302e4349bb5b2e1c909601b1337",
-   "size": 20103
+   "sha256": "9d8ed65c9ebeabcd3b75d4ad9845b4eaedf7ad5d404417a7ecd8b895e29e1205",
+   "size": 37839
+  },
+  "js/organise.js": {
+   "sha256": "ae7a68f3a7254f026ec0b1ead2dc717c8219ba6148b0f441ac8a85120da1acbe",
+   "size": 29795
+  },
+  "js/reminders.js": {
+   "sha256": "ff9b3b3e0215082f652c48b8946fed10b21e57e367d3e470952f5b1c783c4e35",
+   "size": 38060
   },
   "js/send.js": {
-   "sha256": "7fe4b65037d3bab74ef931c1497aa035e3aab297dfc006923e47bfd01dbc1966",
-   "size": 17446
+   "sha256": "03b80d701c3dac7edbad0596897542ab5547d355029d8aac7dea555a2c085ac9",
+   "size": 49295
   },
   "js/settings.js": {
-   "sha256": "c7a048935f235e5919175497cd17a14dc702284eeefd78a670a82359ad03cb9b",
-   "size": 12752
+   "sha256": "8ee0466a22b1bebfb8de544708afa39f27fd6c3ae3c629370d1325f0502f20f4",
+   "size": 13175
   },
   "js/start.js": {
-   "sha256": "a02945729145bd243755ae39c5f2f508a70a3b129f8baf77011bd5542c796811",
-   "size": 18005
+   "sha256": "ace5bb9228b2ed051a81b0ab7f236770ac49e1aa9fa52e7c25ba918a3163ee35",
+   "size": 18177
+  },
+  "js/study.js": {
+   "sha256": "82356aca15a4532c74324a347e7b609acb20c0f8e8f3eca030919afc4f6d9f73",
+   "size": 25659
   },
   "js/update.js": {
-   "sha256": "23e24dde088d3fc93db96b9f5fae9b25314110318817d42476242c7e9d66ae3d",
-   "size": 14927
+   "sha256": "f1da20f8bc0aa13525df8e0c43b88d42405fd278c2acb5e7f356b44691dd8c7f",
+   "size": 14982
   },
   "js/util.js": {
-   "sha256": "1881a896b7afa284b7d1d4d0d9148dd0c2b6caef81817228ec591b825483ef12",
-   "size": 26226
+   "sha256": "f2a6d8035272e5821cf79a94d5a9ab96fcc054fb5fa3a5514f3d6e0ac180a151",
+   "size": 28974
   },
   "manifest.webmanifest": {
    "sha256": "2a52d0c0a17d48ddc1a072a5df27e7cd100e04b195e04d4a6aa61976f9a8ce75",
    "size": 1327
   },
   "styles.css": {
-   "sha256": "e2474f0054ee0e9ff7160f592259d8f69f116af13ec622a8e1e78db65f666ad1",
-   "size": 52716
+   "sha256": "269bc44022df1144cd6d275fca2347de148b1d44901d680ee182c100e6008953",
+   "size": 105130
   },
   "sw.js": {
-   "sha256": "e9ed65f0d0c653de037148b380da284b590a4f81d9e0106bdeec4bd103385fc5",
-   "size": 7545
+   "sha256": "37f491acf1b6f16b04edd7f80b074225f591cebbc2949f55a6ef1288eb4701f4",
+   "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {
    "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",
