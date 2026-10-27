@@ -345,10 +345,12 @@ V.notes = (() => {
     if (opened && V.wide()) V.editor.open(opened, { pane: parts.pane });
   }
 
-  const redraw = V.debounce(() => { if (root && root.isConnected) draw(); }, 60);
+  const showing = () => !!root && root.isConnected && root.dataset.tab === 'notes';
+  // Behind the phone's full-screen note there's nothing to redraw (it's redrawn as the note closes).
+  const redraw = V.debounce(() => { if (showing() && !V.editor.covering()) draw(); }, 60);
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
   document.addEventListener('keydown', (event) => {
-    if (!root || !root.isConnected) return;
+    if (!showing()) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n' && !event.shiftKey) {
       event.preventDefault();
       chooseTemplate();

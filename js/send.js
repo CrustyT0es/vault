@@ -255,7 +255,7 @@ V.send = (() => {
   }
 
   function draw() {
-    if (!parts || !root || !root.isConnected) return;
+    if (!parts || !root || !root.isConnected || root.dataset.tab !== 'send') return;
     drawQueue();
     const list = mine();
     V.clear(parts.list, list.length ? list.map(row)

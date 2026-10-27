@@ -148,7 +148,9 @@ V.settings = (() => {
   }
 
   function draw() {
-    if (!root || !root.isConnected) return;
+    // The view is shared by every tab: drawing while another tab shows put Settings over it ("it keeps going back to
+    // Settings").
+    if (!root || !root.isConnected || root.dataset.tab !== 'settings') return;
     const user = V.data.user || {};
     const status = { synced: 'Up to date', syncing: 'Syncing...', offline: 'Offline: changes wait on this device',
       error: 'Having trouble reaching the cloud', asleep: 'Your free cloud is asleep (tap the red dot at the top)',

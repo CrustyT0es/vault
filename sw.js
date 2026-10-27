@@ -3,7 +3,7 @@
    the page (V.send.takeShared). The cloud itself is never cached here: only the app's own files. */
 'use strict';
 
-const CACHE = 'vault-1.0.0';
+const CACHE = 'vault-1.0.1';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'vendor/supabase.js', 'vendor/qrcode.js',
@@ -13,7 +13,10 @@ const FILES = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
+  // Fetched afresh (cache: 'reload'): from the browser's own cache an update could install the old files again.
+  event.waitUntil(caches.open(CACHE)
+    .then((cache) => cache.addAll(FILES.map((file) => new Request(file, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

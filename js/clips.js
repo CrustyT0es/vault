@@ -62,7 +62,7 @@ V.clips = (() => {
   }
 
   function draw() {
-    if (!parts || !root || !root.isConnected) return;
+    if (!parts || !root || !root.isConnected || root.dataset.tab !== 'clips') return;
     const latest = latestFrom(V.other);
     V.clear(parts.latest, latest ? V.h('div.card.latest', {},
       V.h('div.section', { text: `Latest from ${V.otherName}` }),

@@ -361,17 +361,19 @@ button.card.done .card-title { text-decoration: line-through; color: var(--muted
 .editor-scroll { flex: 1; overflow: auto; padding: 18px 20px 30px; }
 .note-title { width: 100%; background: none; border: none; outline: none; font-size: 24px; font-weight: 650; color: #fff; padding: 0 0 10px; }
 .note-title::placeholder { color: #3d4c63; }
-.blocks { display: grid; gap: 2px; }
-.block-input { width: 100%; background: none; border: none; outline: none; resize: none; overflow: hidden; line-height: 1.55; padding: 3px 0; color: var(--text); font-size: 15.5px; min-height: 28px; }
+.blocks { display: grid; gap: 2px; grid-template-columns: minmax(0, 1fr); }
+.block-input { width: 100%; background: none; border: none; outline: none; resize: none; overflow: hidden; line-height: 1.55; padding: 3px 0; color: var(--text); font-size: 15.5px; min-height: 28px; field-sizing: content; }
 .block-input::placeholder { color: #3d4c63; }
 .check-row { display: flex; align-items: flex-start; gap: 10px; border-radius: 8px; }
-.check-row .block-input { flex: 1; }
+.check-row .block-input { flex: 1; min-width: 0; }
 .tick { margin-top: 4px; width: 22px; height: 22px; border-radius: 7px; border: 2px solid #3a4d6b; background: transparent; display: grid; place-items: center; padding: 0; flex: none; color: transparent; transition: all 0.15s; }
 .tick .icon { width: 14px; height: 14px; }
 .check-row.done .tick { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; box-shadow: 0 0 10px rgba(31, 134, 208, 0.5); }
 .check-row.done .block-input { text-decoration: line-through; color: var(--muted); }
 .remove-item { opacity: 0; background: none; border: none; color: var(--muted); padding: 5px; }
 .check-row:hover .remove-item, .check-row:focus-within .remove-item { opacity: 1; }
+/* No hover on a phone: an invisible button there was still tapped by accident, so it shows, softly. */
+@media (hover: none) { .remove-item { opacity: 0.45; } }
 .editor-tools { display: flex; align-items: center; gap: 6px; padding: 8px 12px calc(8px + var(--safe-bottom)); border-top: 1px solid var(--line); background: rgba(9, 14, 24, 0.6); }
 .save-state { color: var(--faint); font-size: 12px; padding-right: 6px; }
 .pictures { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 18px; }

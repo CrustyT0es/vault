@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.0.0';
+V.VERSION = '1.0.1';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 V.device = V.desktop ? 'pc' : 'phone';
 V.other = V.desktop ? 'phone' : 'pc';
@@ -216,6 +216,7 @@ V.debounce = (fn, ms) => {
   const run = (...args) => { clearTimeout(timer); timer = setTimeout(() => { timer = null; fn(...args); }, ms); };
   run.flush = (...args) => { if (timer) { clearTimeout(timer); timer = null; fn(...args); } };
   run.pending = () => timer !== null;
+  run.cancel = () => { clearTimeout(timer); timer = null; };
   return run;
 };
 
@@ -292,3 +293,82 @@ V.copy = async (text) => {
 };
 
 V.wide = () => window.matchMedia('(min-width: 900px)').matches;
+
+/* Words changed on two devices from the same starting point, put together line by line (a three-way merge, like
+   diff3). Each side's changes are runs of lines replaced, added or removed; runs that touch different lines are all
+   kept (when both add lines at the same spot, this device's come first: it's the line being typed). Where both
+   changed the same lines differently, this device's lines stay and `conflict` says so. Lines that differ only by
+   spaces at their end count as the same (Jarvis tidies those). `map(line)` tells where a line of `mine` ended up
+   (-1 if it went), so the caret can follow its words. */
+V.mergeLines = (start, mine, theirs) => {
+  const B = start.split('\n');
+  const M = mine.split('\n');
+  const T = theirs.split('\n');
+  const same = (a, b) => a === b || a.trimEnd() === b.trimEnd();
+  function diff(to) {
+    const n = B.length;
+    const m = to.length;
+    if (n * m > 4000000) return null;  // a huge note: not worth the memory
+    const w = m + 1;
+    const L = new Int32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        L[i * w + j] = same(B[i], to[j]) ? L[(i + 1) * w + j + 1] + 1 : Math.max(L[(i + 1) * w + j], L[i * w + j + 1]);
+      }
+    }
+    const hunks = [];
+    const at = new Array(n).fill(-1);  // a starting line kept: where it is in `to`
+    let i = 0;
+    let j = 0;
+    let hunk = null;
+    while (i < n || j < m) {
+      if (i < n && j < m && same(B[i], to[j])) { hunk = null; at[i] = j; i++; j++; continue; }
+      if (!hunk) { hunk = { a: i, b: i, from: j, lines: [] }; hunks.push(hunk); }
+      if (j < m && (i === n || L[i * w + j + 1] >= L[(i + 1) * w + j])) { hunk.lines.push(to[j]); j++; }
+      else { i++; hunk.b = i; }
+    }
+    return { hunks, at };
+  }
+  const dm = diff(M);
+  const dt = diff(T);
+  if (!dm || !dt) return { text: mine, conflict: theirs !== start && theirs !== mine, map: (k) => k };
+  const inside = (p, h) => h.a < p && p < h.b;
+  const overlap = (x, y) => (x.a < y.b && y.a < x.b) || (x.a === x.b && inside(x.a, y)) || (y.a === y.b && inside(y.a, x));
+  const alike = (x, y) => x.a === y.a && x.b === y.b && x.lines.length === y.lines.length
+    && x.lines.every((line, k) => same(line, y.lines[k]));
+  let conflict = false;
+  const kept = dt.hunks.filter((t) => !dm.hunks.some((h) => {
+    if (alike(h, t)) return true;  // the very same change on both: once
+    if (overlap(h, t)) { conflict = true; return true; }
+    return false;
+  }));
+  const all = [...dm.hunks.map((h) => ({ ...h, mine: true })), ...kept.map((h) => ({ ...h, mine: false }))];
+  const covered = new Array(B.length).fill(false);
+  for (const h of all) for (let q = h.a; q < h.b; q++) covered[q] = true;
+  const out = [];
+  const where = new Array(M.length).fill(-1);
+  const emit = (h) => {
+    // A line of `mine` that the other side rewrote (one this side left alone) is followed to its new version.
+    if (!h.mine && h.lines.length) {
+      for (let q = h.a; q < h.b; q++) if (dm.at[q] >= 0) where[dm.at[q]] = out.length + Math.min(q - h.a, h.lines.length - 1);
+    }
+    h.lines.forEach((line, k) => { if (h.mine) where[h.from + k] = out.length; out.push(line); });
+  };
+  for (let p = 0; p <= B.length; p++) {
+    for (const h of all) if (h.mine && h.a === p && h.a === h.b) emit(h);
+    for (const h of all) if (!h.mine && h.a === p && h.a === h.b) emit(h);
+    for (const h of all) if (h.a === p && h.b > h.a) emit(h);
+    if (p < B.length && !covered[p]) { const k = dm.at[p]; where[k] = out.length; out.push(M[k]); }
+  }
+  return { text: out.join('\n'), conflict, map: (k) => (k >= 0 && k < where.length ? where[k] : -1) };
+};
+
+/* How much differs between two texts (what's left once their common start and end are taken away). */
+V.changeSize = (a, b) => {
+  let from = 0;
+  const most = Math.min(a.length, b.length);
+  while (from < most && a[from] === b[from]) from++;
+  let tail = 0;
+  while (tail < most - from && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  return a.length + b.length - 2 * (from + tail);
+};
