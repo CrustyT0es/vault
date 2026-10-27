@@ -1,11 +1,11 @@
-/* Vault: keeping notes in order. Folders (made with a name and an emoji, renamed, put in order, deleted), moving
-   notes (one at a time, or several picked at once), the Archive, your own templates, #tags read from the words, and
-   what the search box understands (in:School, #tag, has:checklist, due:week, is:pinned...). notes.js draws the Notes
-   tab with these, and the editor's folder picker and More menu use them too.
+/* Vault: keeping notes in order. Folders (made with a name and an emoji, renamed, put in order, put inside each other
+   up to DEPTH levels, deleted), moving notes (one at a time, or several picked at once), the Archive, your own
+   templates, #tags read from the words, and what the search box understands (in:School, #tag, has:checklist, due:week,
+   is:pinned...). notes.js draws the Notes tab with these, and the editor's folder picker and More menu use them too.
 
    Nothing new is stored but in a note's `extra`: archived, is_template and template_name, with organised_at saying
-   when one of those was last changed (see keepOrganised). Tags aren't stored at all: they're read from the words
-   each time, so Jarvis and the other device see the same ones. */
+   when one of those was last changed (see keepOrganised); and in a folder's, its parent (extra.parent). Tags aren't
+   stored at all: they're read from the words each time, so Jarvis and the other device see the same ones. */
 'use strict';
 
 V.organise = (() => {
@@ -168,8 +168,8 @@ V.organise = (() => {
 
   const squash = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
-  /* The folders the query's in: filters can mean (by name, or the start of one: in:sci for Science), and the first
-     name no folder has. */
+  /* The folders the query's in: filters can mean (by name, or the start of one: in:sci for Science), with the folders
+     inside them, and the first name no folder has. */
   function foldersFor(q) {
     if (!q.folders.length) return { ids: null, missing: null };
     const all = V.notes.folders();
@@ -180,7 +180,10 @@ V.organise = (() => {
       const exact = all.filter((f) => squash(f.name) === want);
       const found = exact.length ? exact : want ? all.filter((f) => squash(f.name).startsWith(want)) : [];
       if (!found.length && !missing) missing = name;
-      for (const folder of found) ids.add(folder.id);
+      for (const folder of found) {
+        ids.add(folder.id);
+        for (const id of inside(folder.id)) ids.add(id);  // and the folders inside it
+      }
     }
     return { ids, missing };
   }
@@ -277,8 +280,111 @@ V.organise = (() => {
   const STARTS_WITH_EMOJI = /^\p{Extended_Pictographic}/u;
   const isInbox = (folder) => !!folder && (folder.name || '').trim().toLowerCase() === 'inbox';
 
-  /* The sheet for a folder's name and emoji (or one of them). Resolves {name, icon}, or null if it was closed. */
-  function folderSheet({ title, ok, folder = null, askName = true, askIcon = true }) {
+  /* -- folders inside folders
+
+     A folder's parent is kept in its own extra (extra.parent = the parent's id; none = the top level), as the cloud's
+     tables can't change any more; a Vault from before shows them all at the top level. A parent that's gone (deleted,
+     or not on this device yet) or that would make a loop (two devices moving folders into each other at once) counts
+     as none, so every folder always shows somewhere. Inbox is always at the top. */
+
+  const DEPTH = 5;  // levels at most: a folder in a folder in a folder in a folder in a folder
+  const TOP = { id: null, top: true };  // "the top level", as chooseFolder answers it
+  const liveFolder = (id) => { const f = id ? V.data.folders.get(id) : null; return f && !f.deleted ? f : null; };
+  const rawParent = (f) => (f && !isInbox(f) && f.extra && typeof f.extra.parent === 'string' ? f.extra.parent : null);
+
+  /* The id of the folder `folder` is drawn in, or null at the top level. Only a folder on a loop loses its parent (a
+     loop further up is broken there), so the folders below one stay where they were put. */
+  function parentId(folder) {
+    const first = liveFolder(rawParent(folder));
+    const seen = new Set();
+    for (let up = first; up && !seen.has(up.id); up = liveFolder(rawParent(up))) {
+      if (up.id === folder.id) return null;
+      seen.add(up.id);
+    }
+    return first ? first.id : null;
+  }
+
+  const children = (id) => V.notes.folders().filter((f) => parentId(f) === id);
+
+  /* The folders `folder` is in, the top one first. */
+  function ancestors(folder) {
+    const out = [];
+    for (let up = liveFolder(parentId(folder)); up && out.length < 50; up = liveFolder(parentId(up))) out.unshift(up);
+    return out;
+  }
+  const depthOf = (folder) => ancestors(folder).length + 1;
+  const pathOf = (folder) => [...ancestors(folder), folder];
+
+  /* The ids of every folder inside folder `id`, at any depth. */
+  function inside(id) {
+    const found = new Set();
+    const all = V.notes.folders();
+    for (let more = [id]; more.length;) {
+      const next = all.filter((f) => !found.has(f.id) && more.includes(parentId(f)));
+      for (const f of next) found.add(f.id);
+      more = next.map((f) => f.id);
+    }
+    return found;
+  }
+
+  /* How many levels `folder` and the folders inside it take (1 when it has none). */
+  const height = (folder) => 1 + Math.max(0, ...[...inside(folder.id)].map((id) =>
+    ancestors(V.data.folders.get(id)).length - ancestors(folder).length));
+
+  /* Every folder in order, each followed by the ones inside it: [{folder, depth (0 = the top), kids}]. */
+  function tree() {
+    const all = V.notes.folders();
+    const under = new Map();
+    for (const f of all) {
+      const p = parentId(f);
+      if (!under.has(p)) under.set(p, []);
+      under.get(p).push(f);
+    }
+    const out = [];
+    const walk = (id, depth) => {
+      for (const folder of under.get(id) || []) {
+        out.push({ folder, depth, kids: (under.get(folder.id) || []).length });
+        walk(folder.id, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return out;
+  }
+
+  /* `folder` saved with some fields changed and some of its extra (null takes one away), from the copy this device has
+     now, so nothing else kept in its extra is lost. Last device to send wins, as for every folder change. */
+  function saveFolder(folder, fields = {}, extras = {}) {
+    const now = V.data.folders.get(folder.id) || folder;
+    const extra = { ...(now.extra || {}) };
+    for (const [key, value] of Object.entries(extras)) {
+      if (value === null || value === undefined) delete extra[key];
+      else extra[key] = value;
+    }
+    return V.cloud.save('folders', { ...now, ...fields, extra });
+  }
+
+  /* What's wrong with a folder called `name` in `parent` (null = the top level), or '': two folders side by side never
+     share a name. */
+  function nameTaken(name, parent, except = null) {
+    const same = children(parent ? parent.id : null).find((f) => f.id !== except && f.name.trim().toLowerCase() === name.toLowerCase());
+    if (!same) return '';
+    return parent ? `${parent.name} already has a folder called ${same.name}.` : `You already have a folder called ${same.name}.`;
+  }
+
+  /* Why `folder` can't go into `parent` (null = the top level), or ''. */
+  function cantMove(folder, parent) {
+    if (isInbox(folder)) return 'Inbox stays at the top.';
+    if (!parent) return '';
+    if (parent.id === folder.id) return 'A folder can\'t go inside itself.';
+    if (inside(folder.id).has(parent.id)) return `A folder can't go inside itself: ${parent.name} is inside ${folder.name}.`;
+    if (depthOf(parent) + height(folder) > DEPTH) return `Folders go ${DEPTH} levels deep at most: ${folder.name} won't fit in ${parent.name}.`;
+    return '';
+  }
+  const canHoldMore = (folder) => depthOf(folder) < DEPTH;
+
+  /* The sheet for a folder's name and emoji (or one of them), and where a new one goes. Resolves {name, icon, parent},
+     or null if it was closed. */
+  function folderSheet({ title, ok, folder = null, askName = true, askIcon = true, askParent = false, parent = null }) {
     return new Promise((resolve) => {
       let result = null;
       let icon = folder ? folder.icon || '' : '📁';
@@ -288,6 +394,13 @@ V.organise = (() => {
         autocomplete: 'off', autocapitalize: 'words', 'aria-label': 'Folder name',
         oninput: () => { error.textContent = ''; },
       }) : null;
+      // Inside: the top level or any folder with room for one more level, indented as a tree.
+      const within = askParent ? V.h('select.field.folder-parent', {
+        'aria-label': 'Inside', onchange: () => { error.textContent = ''; },
+      }, V.h('option', { value: '', text: 'Nothing (the top level)' }), tree().map(({ folder: f, depth }) => V.h('option', {
+        value: f.id, disabled: !canHoldMore(f), text: ' '.repeat(depth) + (f.icon ? f.icon + ' ' : '') + f.name,
+      }))) : null;
+      if (within) within.value = parent && canHoldMore(parent) ? parent.id : '';
       const error = V.h('p.error-text', { role: 'alert' });
       const cells = [];
       const own = V.h('input.field.emoji-own', {
@@ -336,15 +449,16 @@ V.organise = (() => {
         }
         if (!words) { error.textContent = 'Give the folder a name.'; return null; }
         words = words.slice(0, 60);
-        const same = V.notes.folders().find((f) => (!folder || f.id !== folder.id)
-          && f.name.trim().toLowerCase() === words.toLowerCase());
-        if (same) { error.textContent = `You already have a folder called ${same.name}.`; return null; }
-        return { name: words, icon: chosen };
+        const home = within ? liveFolder(within.value) : folder ? liveFolder(parentId(folder)) : null;
+        const taken = nameTaken(words, home, folder && folder.id);
+        if (taken) { error.textContent = taken; return null; }
+        return { name: words, icon: chosen, parent: home };
       }
       V.sheet({
         title,
         content: [
           askName ? V.h('label.label', { text: 'Name' }, name) : null,
+          within ? V.h('label.label', { text: 'Inside' }, within) : null,
           askIcon ? V.h('div.label', { text: 'Emoji' }) : null, grid, askIcon ? own : null, error,
         ],
         actions: [{ label: 'Cancel' }, { label: ok, kind: 'primary', onClick: () => {
@@ -358,29 +472,59 @@ V.organise = (() => {
     });
   }
 
-  /* A new folder, at the end of the list. Resolves the folder, or null. */
-  async function newFolder() {
-    const made = await folderSheet({ title: 'New folder', ok: 'Make folder' });
+  /* A new folder, at the end of the list (or of `parent`'s). Resolves the folder, or null. */
+  async function newFolder({ parent = null } = {}) {
+    const made = await folderSheet({ title: parent ? `New folder in ${parent.name}` : 'New folder', ok: 'Make folder',
+      askParent: true, parent });
     if (!made) return null;
     const sort = Math.max(-1, ...V.notes.folders().map((f) => Number(f.sort) || 0)) + 1;
-    const folder = await V.cloud.save('folders', { id: V.uuid(), name: made.name, icon: made.icon, sort, deleted: false, extra: {} });
-    V.toast(`Made the folder ${folder.name}`);
+    const folder = await V.cloud.save('folders', { id: V.uuid(), name: made.name, icon: made.icon, sort, deleted: false,
+      extra: made.parent ? { parent: made.parent.id } : {} });
+    V.toast(made.parent ? `Made the folder ${folder.name} in ${made.parent.name}` : `Made the folder ${folder.name}`);
     return folder;
   }
 
-  /* The ⋯ menu of a folder. Inbox keeps its name (quick notes and Jarvis's notes go there) and can't be deleted. */
-  function folderMenu(folder, anchor, { onGone } = {}) {
-    const list = V.notes.folders();
+  /* `folder` put in folder `toId` (null = the top level), unless that would make a loop, go too deep or give two folders
+     side by side the same name (then a toast says why). Resolves true when it moved. */
+  async function moveFolder(folder, toId) {
+    const now = V.data.folders.get(folder.id) || folder;
+    const parent = liveFolder(toId);
+    if (toId && !parent) return false;
+    const was = parentId(now);
+    if (was === (parent ? parent.id : null)) {
+      V.toast(parent ? `${now.name} is already in ${parent.name}` : `${now.name} is already at the top`);
+      return false;
+    }
+    const why = cantMove(now, parent) || nameTaken(now.name, parent, now.id);
+    if (why) { V.toast(why, { kind: 'err', ms: 5000 }); return false; }
+    await saveFolder(now, {}, { parent: parent ? parent.id : null });
+    V.toast(parent ? `Moved ${now.name} into ${parent.name}` : `Moved ${now.name} to the top`, { action: 'Undo',
+      onAction: () => { const back = liveFolder(was); saveFolder(now, {}, { parent: back ? back.id : null }).catch(V.problem); } });
+    return true;
+  }
+
+  /* The ⋯ menu of a folder. Inbox keeps its name and its place (quick notes and Jarvis's notes go there) and can't be
+     deleted. */
+  function folderMenu(folder, anchor, { onGone, onMade } = {}) {
+    const list = children(parentId(folder));  // up and down go among the folders beside it
     const at = list.findIndex((f) => f.id === folder.id);
     const home = isInbox(folder);
     V.menu(anchor, [
       home ? null : { label: 'Rename', icon: 'edit', onClick: async () => {
         const changed = await folderSheet({ title: 'Rename folder', ok: 'Rename', folder, askIcon: false });
-        if (changed) await V.cloud.save('folders', { ...V.data.folders.get(folder.id) || folder, name: changed.name });
+        if (changed) await saveFolder(folder, { name: changed.name });
       } },
       { label: 'Change its emoji', icon: 'smile', onClick: async () => {
         const changed = await folderSheet({ title: `Emoji for ${folder.name}`, ok: 'Use it', folder, askName: false });
-        if (changed) await V.cloud.save('folders', { ...V.data.folders.get(folder.id) || folder, icon: changed.icon });
+        if (changed) await saveFolder(folder, { icon: changed.icon });
+      } },
+      canHoldMore(folder) ? { label: 'New folder inside', icon: 'folder-plus', onClick: async () => {
+        const made = await newFolder({ parent: V.data.folders.get(folder.id) || folder });
+        if (made && onMade) onMade(made);
+      } } : null,
+      home ? null : { label: 'Move folder to...', icon: 'folder-move', onClick: async () => {
+        const to = await chooseFolder({ title: `Move ${folder.name} to`, moving: folder });
+        if (to) await moveFolder(folder, to.id);
       } },
       at > 0 ? { label: 'Move up', icon: 'up', onClick: () => reorder(folder, -1) } : null,
       at >= 0 && at < list.length - 1 ? { label: 'Move down', icon: 'down', onClick: () => reorder(folder, 1) } : null,
@@ -389,46 +533,67 @@ V.organise = (() => {
   }
 
   async function reorder(folder, step) {
-    const list = V.notes.folders();
+    const list = children(parentId(folder));
     const at = list.findIndex((f) => f.id === folder.id);
     const to = at + step;
     if (at < 0 || to < 0 || to >= list.length) return;
     [list[at], list[to]] = [list[to], list[at]];
     for (let i = 0; i < list.length; i++) {
-      if (Number(list[i].sort) !== i) await V.cloud.save('folders', { ...list[i], sort: i });
+      if (Number(list[i].sort) !== i) await saveFolder(list[i], { sort: i });
     }
   }
 
+  /* A folder deleted: its own notes go to Inbox (as always), and the folders inside it move up to where it was. */
   async function deleteFolder(folder, onGone) {
     const home = V.notes.inbox();
     const to = home && home.id !== folder.id ? home : null;
-    const inside = [...V.data.notes.values()].filter((n) => n.folder_id === folder.id && !n._purge);
-    const count = inside.filter((n) => !n.deleted && !isTemplate(n)).length;
+    const own = [...V.data.notes.values()].filter((n) => n.folder_id === folder.id && !n._purge);
+    const count = own.filter((n) => !n.deleted && !isTemplate(n)).length;
     const where = to ? 'Inbox' : 'All notes';
-    const ok = await V.confirm(`Delete ${folder.name}?`, count
-      ? `Its ${count} note${count === 1 ? ' goes' : 's go'} to ${where}. Only the folder is deleted, not the notes.`
+    const up = liveFolder(parentId(folder));
+    const kids = children(folder.id);
+    const above = up ? up.name : 'the top level';
+    const said = [count ? `Its ${count} note${count === 1 ? ' goes' : 's go'} to ${where}.` : kids.length ? 'It has no notes of its own.' : '',
+      kids.length === 1 ? `The folder inside it, ${kids[0].name}, moves up to ${above}.`
+        : kids.length ? `The ${kids.length} folders inside it move up to ${above}.` : ''].filter(Boolean);
+    const ok = await V.confirm(`Delete ${folder.name}?`, said.length
+      ? `${said.join(' ')} Only the folder is deleted, not ${kids.length ? 'what was in it' : 'the notes'}.`
       : 'It\'s empty, so only the folder goes.', { ok: 'Delete folder', danger: true });
     if (!ok) return;
-    await change(inside.map((n) => n.id), (row) => ({ ...row, folder_id: to ? to.id : null }));
-    await V.cloud.save('folders', { ...V.data.folders.get(folder.id) || folder, deleted: true });
+    for (const kid of kids) await saveFolder(kid, {}, { parent: up ? up.id : null });
+    await change(own.map((n) => n.id), (row) => ({ ...row, folder_id: to ? to.id : null }));
+    await saveFolder(folder, { deleted: true });
     if (onGone) onGone();
-    V.toast(count ? `Deleted ${folder.name}. Its notes are in ${where}.` : `Deleted ${folder.name}`);
+    const moved = kids.length ? ` ${kids.length === 1 ? kids[0].name + ' is' : 'Its folders are'} in ${above}.` : '';
+    V.toast(count ? `Deleted ${folder.name}. Its notes are in ${where}.${moved}` : moved ? `Deleted ${folder.name}.${moved}` : `Deleted ${folder.name}`);
   }
 
-  /* A sheet listing the folders (and "New folder..."). Resolves the folder picked, or null. */
-  function chooseFolder({ title = 'Move to', current = null } = {}) {
+  /* A sheet listing the folders as a tree (and "New folder..."). Resolves the folder picked, or null. Moving a folder
+     (`moving`), "The top level" comes first, and the folder itself, the ones inside it and any too deep can't be
+     picked; it resolves TOP for the top level. */
+  function chooseFolder({ title = 'Move to', current = null, moving = null } = {}) {
     return new Promise((resolve) => {
       let picked = null;
       let making = false;
-      const row = (folder) => V.h('button.folder-choice' + (folder.id === current ? '.on' : ''), {
-        type: 'button', 'aria-current': folder.id === current ? 'true' : null,
-        onclick: () => { picked = folder; sheet.close(); },
-      }, V.h('span.fc-badge', {}, V.notes.folderBadge(folder) || V.icon('folder')), V.h('span.fc-name', { text: folder.name }),
-      folder.id === current ? V.icon('check', 'fc-check') : null);
+      const here = moving ? parentId(V.data.folders.get(moving.id) || moving) : current;
+      const row = (folder, depth) => {
+        const why = moving ? cantMove(moving, folder) : '';
+        return V.h('button.folder-choice' + (folder.id === here ? '.on' : ''), {
+          type: 'button', 'aria-current': folder.id === here ? 'true' : null, dataset: { id: folder.id, depth: String(Math.min(depth, 4)) },
+          disabled: !!why, title: why || null,
+          onclick: () => { picked = folder; sheet.close(); },
+        }, V.h('span.fc-badge', {}, V.notes.folderBadge(folder) || V.icon('folder')), V.h('span.fc-name', { text: folder.name }),
+        folder.id === here ? V.icon('check', 'fc-check') : null);
+      };
       const sheet = V.sheet({
         title,
-        content: V.h('div.folder-choices', {}, V.notes.folders().map(row),
-          V.h('button.folder-choice.new', { type: 'button', onclick: () => { making = true; sheet.close(); } },
+        content: V.h('div.folder-choices', {},
+          moving ? V.h('button.folder-choice.top' + (here ? '' : '.on'), {
+            type: 'button', 'aria-current': here ? null : 'true', onclick: () => { picked = TOP; sheet.close(); },
+          }, V.h('span.fc-badge', {}, V.icon('stack')), V.h('span.fc-name', { text: 'The top level' }),
+          here ? null : V.icon('check', 'fc-check')) : null,
+          tree().map(({ folder, depth }) => row(folder, depth)),
+          moving ? null : V.h('button.folder-choice.new', { type: 'button', onclick: () => { making = true; sheet.close(); } },
             V.h('span.fc-badge', {}, V.icon('folder-plus')), V.h('span.fc-name', { text: 'New folder...' }))),
         onClose: () => {
           if (making) newFolder().then(resolve, (error) => { V.problem(error); resolve(null); });
@@ -565,6 +730,7 @@ V.organise = (() => {
     isArchived, isTemplate, stamped, tagsOf, allTags, parseQuery, foldersFor, matcher, terms, marked, snippet,
     SORTS, sort, view, setSort: (value) => setPref('vault-sort', value), setView: (value) => setPref('vault-view', value),
     comparator, newFolder, folderSheet, folderMenu, chooseFolder, isInbox, move, pin, archive, trash, change,
+    DEPTH, TOP, parentId, children, ancestors, pathOf, depthOf, inside, tree, saveFolder, moveFolder, cantMove,
     saveTemplate, ownTemplates, templateName, templateSection,
   };
 })();

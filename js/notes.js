@@ -5,7 +5,12 @@
 
    Picking several notes (a long press with a finger or the S Pen, or Ctrl/Shift+click on the PC) shows a bar to move,
    pin, archive or delete them together; on the PC a card can also be dragged onto a folder. What those do, and what
-   the search box understands, is in organise.js. */
+   the search box understands, is in organise.js.
+
+   Folders inside folders: the PC's side list shows them as a tree (each with a chevron to fold it away, remembered on
+   this device; a folder can be dragged onto another, or onto "Folders" for the top), the phone's chips only the top
+   ones, and an open folder its own folders above its notes, with the folders it's in above its name. A folder's count
+   is every note in it, its own folders' too; opening it lists its own notes. */
 'use strict';
 
 V.STARTER_FOLDERS = [['Inbox', '📥'], ['School', '📚'], ['Work', '💼'], ['Personal', '🏠'], ['Gaming', '🎮']];
@@ -31,6 +36,7 @@ V.notes = (() => {
   const O = V.organise;
   const LONG_PRESS = 450;     // ms a finger or the S Pen stays on a card to start picking
   const DRAG = 'application/x-vault-notes';
+  const FOLDER_DRAG = 'application/x-vault-folder';
   let filter = 'all';         // all, pinned, due, archive, trash, tag:<key> or a folder's id
   let query = '';
   let root = null;
@@ -160,6 +166,7 @@ V.notes = (() => {
     const sheet = V.sheet({
       title: here ? `New note in ${here.name}` : 'New note',
       content: [
+        V.notetaker ? V.notetaker.sheetEntry(() => sheet.close()) : null,  // js/notetaker.js
         V.h('div.templates', {}, list.map((t) => V.h('button.template', {
           type: 'button', onclick: () => { chosen = t; sheet.close(); },
         }, V.icon(t.icon), V.h('span.t-name', { text: t.name }),
@@ -177,7 +184,30 @@ V.notes = (() => {
     if (folder) setFilter(folder.id);
   }
 
-  const folderMenu = (folder, anchorEl) => O.folderMenu(folder, anchorEl, { onGone: () => { if (filter === folder.id) setFilter('all'); } });
+  const folderMenu = (folder, anchorEl) => O.folderMenu(folder, anchorEl, {
+    onGone: () => { if (filter === folder.id) setFilter('all'); },
+    onMade: (made) => setFilter(made.id),
+  });
+
+  /* The folders folded away in the side list (their ids), kept on this device only. */
+  const SHUT = 'vault-folders-shut';
+  let shut = null;
+  function shutSet() {
+    if (shut) return shut;
+    try {
+      const saved = JSON.parse(localStorage.getItem(SHUT) || '[]');
+      shut = new Set(Array.isArray(saved) ? saved.filter((id) => typeof id === 'string') : []);
+    } catch (error) {
+      shut = new Set();
+    }
+    return shut;
+  }
+  function setShut(id, on) {
+    const set = shutSet();
+    if (on) set.add(id);
+    else set.delete(id);
+    try { localStorage.setItem(SHUT, JSON.stringify([...set].filter((each) => V.data.folders.has(each)))); } catch (error) { /* lasts until the page closes */ }
+  }
 
   /* -- picking several notes */
 
@@ -358,34 +388,53 @@ V.notes = (() => {
 
   /* -- dragging cards onto a folder (the PC) */
 
+  let dragSince = 0;  // when the card or folder being dragged was picked up
   const canDrag = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-  const dragging = (event) => !!event.dataTransfer && [...event.dataTransfer.types].includes(DRAG);
+  const dragging = (event, type = DRAG) => !!event.dataTransfer && [...event.dataTransfer.types].includes(type);
 
   function dragStart(event, id) {
     const ids = picking && picked.has(id) ? [...picked] : [id];
     event.dataTransfer.setData(DRAG, JSON.stringify(ids));
     event.dataTransfer.effectAllowed = 'move';
     document.documentElement.classList.add('dragging-notes');
+    dragSince = Date.now();
   }
   function dragEnd() {
     document.documentElement.classList.remove('dragging-notes');
     for (const el of document.querySelectorAll('.drop-on')) el.classList.remove('drop-on');
   }
 
-  /* `el` takes dropped cards: a folder moves them there; Pinned pins, Archive archives and Trash deletes them. */
+  /* A folder in the side list dragged (onto another folder, or onto "Folders" for the top level). */
+  function folderDragStart(event, id) {
+    event.dataTransfer.setData(FOLDER_DRAG, id);
+    event.dataTransfer.effectAllowed = 'move';
+    document.documentElement.classList.add('dragging-notes');
+    dragSince = Date.now();
+  }
+
+  /* `el` takes dropped cards: a folder moves them there; Pinned pins, Archive archives and Trash deletes them. A folder
+     (or 'top', the top level) takes dropped folders too. */
   function dropTarget(el, target) {
-    if (!['pinned', 'archive', 'trash'].includes(target) && !V.data.folders.has(target)) return el;
+    const folderish = target === 'top' || V.data.folders.has(target);
+    if (!['pinned', 'archive', 'trash'].includes(target) && !folderish) return el;
+    const takes = (event) => (target !== 'top' && dragging(event)) || (folderish && dragging(event, FOLDER_DRAG));
     el.addEventListener('dragover', (event) => {
-      if (!dragging(event)) return;
+      if (!takes(event)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       el.classList.add('drop-on');
     });
     el.addEventListener('dragleave', (event) => { if (!el.contains(event.relatedTarget)) el.classList.remove('drop-on'); });
     el.addEventListener('drop', (event) => {
-      if (!dragging(event)) return;
+      if (!takes(event)) return;
       event.preventDefault();
       dragEnd();
+      if (dragging(event, FOLDER_DRAG)) {
+        const moving = V.data.folders.get(event.dataTransfer.getData(FOLDER_DRAG));
+        if (moving && moving.id !== target) O.moveFolder(moving, target === 'top' ? null : target).catch(V.problem);
+        else if (moving) V.toast(O.cantMove(moving, moving), { kind: 'err' });
+        return;
+      }
       let ids = [];
       try { ids = JSON.parse(event.dataTransfer.getData(DRAG)); } catch (error) { return; }
       ids = (Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && V.data.notes.has(id));
@@ -403,6 +452,8 @@ V.notes = (() => {
   function setFilter(value) {
     stopPicking();
     filter = value;
+    const folder = V.data.folders.get(value);
+    if (folder) for (const up of O.ancestors(folder)) if (shutSet().has(up.id)) setShut(up.id, false);  // so it shows
     query = '';
     if (parts) parts.search.value = '';
     draw();
@@ -425,10 +476,13 @@ V.notes = (() => {
     return f ? f.name : 'All notes';
   }
 
+  /* How many notes each folder has (with its own folders' notes), and in the smart lists. */
   function counts() {
     const all = listed();
+    const own = {};
+    for (const n of all) own[n.folder_id] = (own[n.folder_id] || 0) + 1;
     const by = {};
-    for (const n of all) by[n.folder_id] = (by[n.folder_id] || 0) + 1;
+    for (const f of folders()) by[f.id] = [f.id, ...O.inside(f.id)].reduce((sum, id) => sum + (own[id] || 0), 0);
     const due = (n) => (V.reminders ? V.reminders.pending(n) : n.due && !n.done);
     return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter(due).length, by };
   }
@@ -446,9 +500,13 @@ V.notes = (() => {
 
   function navItem(id, icon, label, count) {
     const folder = V.data.folders.get(id);
+    const drags = !!folder && !O.isInbox(folder) && canDrag();
     return dropTarget(V.h('button.nav-item' + (filter === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id), dataset: { id },
       oncontextmenu: folder ? (event) => { event.preventDefault(); folderMenu(folder, event.currentTarget); } : null,
+      draggable: drags ? 'true' : null,
+      ondragstart: drags ? (event) => folderDragStart(event, id) : null,
+      ondragend: drags ? dragEnd : null,
     }, folder ? folderBadge(folder, true) : V.icon(icon), V.h('span.nav-label', { text: label }),
     count ? V.h('span.count', { text: String(count) }) : null), id);
   }
@@ -456,14 +514,25 @@ V.notes = (() => {
   function drawFolders() {
     const c = counts();
     const tags = O.allTags(listed());
+    const tree = O.tree();
+    const nested = tree.some((r) => r.depth > 0);
+    parts.folders.classList.toggle('nested', nested);
     const list = [
       navItem('all', 'stack', 'All notes', c.all),
       navItem('pinned', 'pin', 'Pinned', c.pinned),
       navItem('due', 'clock', 'Upcoming', c.due),
-      V.h('div.nav-heading', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')),
-      folders().map((f) => V.h('div.folder-row', {},
-        navItem(f.id, 'folder', f.name, c.by[f.id]),
-        V.iconButton('more', `${f.name} options`, (event) => folderMenu(f, event.currentTarget), 'tiny folder-more'))),
+      dropTarget(V.h('div.nav-heading', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')), 'top'),
+      tree.filter((r) => !O.ancestors(r.folder).some((up) => shutSet().has(up.id))).map(({ folder: f, depth, kids }) => {
+        const unfolded = !shutSet().has(f.id);
+        const say = `${unfolded ? 'Hide' : 'Show'} the folders in ${f.name}`;
+        return V.h('div.folder-row', { dataset: { depth: String(Math.min(depth, 4)) } },
+          nested && kids ? V.h('button.twist', {
+            type: 'button', 'aria-expanded': String(unfolded), title: say, 'aria-label': say,
+            onclick: () => { setShut(f.id, unfolded); drawFolders(); },
+          }, V.icon('next')) : nested ? V.h('span.twist-space') : null,
+          navItem(f.id, 'folder', f.name, c.by[f.id]),
+          V.iconButton('more', `${f.name} options`, (event) => folderMenu(f, event.currentTarget), 'tiny folder-more'));
+      }),
       tags.length ? [V.h('div.nav-heading', {}, V.h('span', { text: 'Tags' })),
         tags.map((t) => navItem('tag:' + t.key, 'hash', t.name, t.count))] : null,
       V.h('div.nav-spacer'),
@@ -471,8 +540,11 @@ V.notes = (() => {
       navItem('trash', 'trash', 'Trash', 0),
     ];
     V.clear(parts.folders, list);
-    // The phone's folder chips (and a narrow window's): the same choices in a row.
-    const chip = (id, label, lead, count) => dropTarget(V.h('button.chip' + (filter === id && !query ? '.on' : ''), {
+    // The phone's folder chips (and a narrow window's): the same choices in a row, with only the top folders (the one
+    // a folder's in is marked when it's open).
+    const here = V.data.folders.get(filter);
+    const top = here ? (O.ancestors(here)[0] || here).id : filter;
+    const chip = (id, label, lead, count) => dropTarget(V.h('button.chip' + (top === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id), dataset: { id },
       oncontextmenu: V.data.folders.has(id) ? (event) => { event.preventDefault(); folderMenu(V.data.folders.get(id), event.currentTarget); } : null,
     }, lead, label, count ? V.h('span.count', { text: String(count) }) : null), id);
@@ -480,7 +552,7 @@ V.notes = (() => {
       chip('all', 'All', null, c.all),
       chip('pinned', 'Pinned', V.icon('pin')),
       chip('due', 'Upcoming', V.icon('clock'), c.due),
-      folders().map((f) => chip(f.id, f.name, folderBadge(f))),
+      tree.filter((r) => !r.depth).map(({ folder: f }) => chip(f.id, f.name, folderBadge(f))),
       V.h('button.chip.add', { type: 'button', onclick: newFolder, title: 'New folder' }, V.icon('plus'), 'New folder'),
       tags.map((t) => chip('tag:' + t.key, '#' + t.name, null)),
       chip('archive', 'Archive', V.icon('archive')),
@@ -564,9 +636,56 @@ V.notes = (() => {
       .sort((a, b) => a.due.localeCompare(b.due));
     if (!pinned.length && !soon.length) return null;
     const rest = list.filter((n) => !n.pinned && !soon.includes(n));
-    const part = (title, notes) => (notes.length ? [V.h('h2.list-section', {}, V.h('span', { text: title }),
-      V.h('span.count', { text: String(notes.length) })), notes.map(make)] : null);
-    return [part('Pinned', pinned), part('Due soon', soon), part('Other notes', rest)];
+    const part = (title, notes, fold = false) => (notes.length ? [V.h('h2.list-section', {}, V.h('span', { text: title }),
+      V.h('span.count', { text: String(notes.length) })), fold ? folded(notes, make) : notes.map(make)] : null);
+    return [part('Pinned', pinned), part('Due soon', soon), part('Other notes', rest, true)];
+  }
+
+  /* A long list shows its first few notes, then folds the rest away by age (by "More notes" when sorted another way):
+     a tap opens one, and it stays open on this device. Searching shows everything. */
+  const FEW = 6;
+  const AGES = [['week', 'Past week', 7], ['month', 'Past month', 31], ['older', 'Older', Infinity]];
+  const OPEN_KEY = 'vault-list-open';
+
+  function openFolds() {
+    try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch (error) { return new Set(); }
+  }
+
+  function setFold(key, on) {
+    const keys = openFolds();
+    if (on) keys.add(key); else keys.delete(key);
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...keys])); } catch (error) { /* a private window */ }
+  }
+
+  function folded(notes, make) {
+    if (query || filter === 'trash' || notes.length <= FEW + 3) return notes.map(make);
+    const more = notes.slice(FEW);
+    let groups = [['more', 'More notes', more]];
+    if (O.sort() === 'edited') {
+      const now = Date.now();
+      groups = AGES.map(([key, title]) => [key, title, []]);
+      for (const n of more) {
+        const days = (now - (Date.parse(edited(n)) || 0)) / 86400000;
+        groups[AGES.findIndex(([, , most]) => days <= most)][2].push(n);
+      }
+      groups = groups.filter(([, , list]) => list.length);
+    }
+    const open = openFolds();
+    return [notes.slice(0, FEW).map(make), groups.map(([key, title, list]) => {
+      const shown = open.has(key);
+      const box = V.h('div.fold-notes', { hidden: !shown, dataset: { fold: key } }, shown ? list.map(make) : null);
+      const head = V.h('button.list-fold', {
+        type: 'button', 'aria-expanded': String(shown), onclick: () => {
+          const now = head.getAttribute('aria-expanded') !== 'true';
+          head.setAttribute('aria-expanded', String(now));
+          if (now && !box.childElementCount) V.clear(box, list.map(make));  // drawn the first time it opens
+          box.hidden = !now;
+          setFold(key, now);
+          showPicked();
+        },
+      }, V.icon('next', 'fold-twist'), V.h('span', { text: title }), V.h('span.count', { text: String(list.length) }));
+      return [head, box];
+    })];
   }
 
   function drawList() {
@@ -578,6 +697,13 @@ V.notes = (() => {
     parts.layout.classList.toggle('grid-view', grid);
     parts.list.classList.toggle('grid', grid);
     const folder = V.data.folders.get(filter);
+    // In a folder that's in another: a way up, and the folders it's in (each opens), above its name.
+    const above = folder && !query ? O.ancestors(folder) : [];
+    const up = above[above.length - 1];
+    V.clear(parts.crumbs, up ? V.iconButton('back', `Up to ${up.name}`, () => setFilter(up.id), 'quiet folder-up') : null,
+      above.map((f, i) => [i ? V.h('span.crumb-gap', { text: '›', 'aria-hidden': 'true' }) : null,
+        V.h('button.crumb', { type: 'button', onclick: () => setFilter(f.id) }, folderBadge(f), V.h('span', { text: f.name }))]));
+    parts.crumbs.hidden = !above.length;
     V.clear(parts.titleTools,
       folder && !query ? V.iconButton('more', `${folder.name} options`, (event) => folderMenu(folder, event.currentTarget), 'folder-options') : null,
       V.iconButton('sort', 'Sort notes', (event) => sortMenu(event.currentTarget)),
@@ -610,7 +736,27 @@ V.notes = (() => {
     // Upcoming: by day (Overdue, Today, Tomorrow, the weekdays, Later), each with a tick and its day to move it.
     const byDay = filter === 'due' && q.empty && V.reminders ? V.reminders.upcoming(list, make) : null;
     parts.list.classList.toggle('upcoming', !!byDay);
-    V.clear(parts.list, trashBar, list.length ? byDay || sections(list, make) || list.map(make) : empty());
+    // An open folder's own folders come first, as rows that open them (and take dropped notes and folders).
+    const subs = folder && !query ? O.children(folder.id) : [];
+    const c = subs.length ? counts() : null;
+    const subRows = subs.length ? [
+      V.h('h2.list-section', {}, V.h('span', { text: 'Folders' }), V.h('span.count', { text: String(subs.length) })),
+      V.h('div.subfolders', {}, subs.map((f) => {
+        const notes = c.by[f.id] || 0;
+        const kids = O.children(f.id).length;
+        const what = [notes ? `${notes} note${notes === 1 ? '' : 's'}` : '', kids ? `${kids} folder${kids === 1 ? '' : 's'}` : '']
+          .filter(Boolean).join(' · ') || 'Empty';
+        return dropTarget(V.h('button.subfolder', {
+          type: 'button', dataset: { id: f.id }, onclick: () => setFilter(f.id),
+          oncontextmenu: (event) => { event.preventDefault(); folderMenu(f, event.currentTarget); },
+        }, V.h('span.fc-badge', {}, folderBadge(f) || V.icon('folder')), V.h('span.sf-name', { text: f.name }),
+        V.h('span.sf-meta', { text: what }), V.icon('next', 'sf-go')), f.id);
+      })),
+      list.length ? V.h('h2.list-section', {}, V.h('span', { text: 'Notes' }), V.h('span.count', { text: String(list.length) })) : null,
+    ] : null;
+    const none = list.length ? null : empty();
+    if (none && subRows) none.classList.add('small');  // under its folders, a quieter "nothing here"
+    V.clear(parts.list, trashBar, subRows, list.length ? byDay || sections(list, make) || folded(list, make) : none);
     // Picked notes that have gone (deleted on the other device, or no longer in this list) aren't picked any more.
     const here = new Set(list.map((n) => n.id));
     for (const id of picked) if (!here.has(id)) picked.delete(id);
@@ -700,6 +846,7 @@ V.notes = (() => {
       chips: V.h('div.chips', { role: 'tablist' }),
       help: V.h('div.search-help', { hidden: true }),
       heading: V.h('h1'),
+      crumbs: V.h('nav.crumbs', { 'aria-label': 'The folders this one is in', hidden: true }),
       headCount: V.h('span.head-count'),
       titleTools: V.h('div.list-tools'),
       list: V.h('div.list'),
@@ -713,6 +860,7 @@ V.notes = (() => {
         V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: 'New note (Ctrl+N)' })),
       parts.help,
       parts.chips,
+      parts.crumbs,
       V.h('div.list-title', {}, parts.heading, parts.headCount, parts.titleTools, V.statusPill()),
       parts.list);
     parts.layout = V.h('div.notes-layout', {}, parts.folders, listColumn, parts.pane, parts.pickBar);
@@ -735,8 +883,12 @@ V.notes = (() => {
   });
 
   const showing = () => !!root && root.isConnected && root.dataset.tab === 'notes' && !!parts && root.contains(parts.list);
-  // Behind the phone's full-screen note there's nothing to redraw (it's redrawn as the note closes).
-  const redraw = V.debounce(() => { if (showing() && !V.editor.covering()) draw(); }, 60);
+  // Behind the phone's full-screen note there's nothing to redraw (it's redrawn as the note closes); while a card or a
+  // folder is being dragged, not until it's dropped (a sync landing then would take it from under the mouse).
+  const redraw = V.debounce(() => {
+    if (document.documentElement.classList.contains('dragging-notes') && Date.now() - dragSince < 20000) return redraw();
+    if (showing() && !V.editor.covering()) draw();
+  }, 60);
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
   const typing = (target) => !!target && (target.matches('input, textarea, select') || target.isContentEditable);
   document.addEventListener('keydown', (event) => {

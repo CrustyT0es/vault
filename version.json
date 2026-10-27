@@ -1,17 +1,16 @@
 {
  "format": 1,
- "version": "1.2.0",
+ "version": "1.3.0",
  "min_shell": 1,
  "notes": [
-  "Folders with emoji: make your own, and move, pin or archive notes (hold one, or drag). Tags with #, and better search.",
-  "Paste a link and it becomes a tidy chip. Headings, lists that carry on when you press Enter, a Read view, Undo, word count, files and voice memos in notes.",
-  "Draw and write by hand with the S Pen (pressure-sensitive; your palm is ignored), and mark up pictures.",
-  "Type a date like \"test fri 9am\" and Vault asks if you want a reminder. Plus an Upcoming week, flash cards, a focus timer and repeating checklists.",
-  "See pictures before you send them, and use Vault on a Chromebook (or any browser).",
-  "A Files tab: browse the PC folders you choose from your phone, and keep files in Vault Drive.",
-  "Safety nets: note history with Restore, \"Download everything\", weekly PC backups, and a conflict copy instead of lost words."
+  "Note-taker: tap it in class or a meeting and it writes down what's said. When you stop, Claude turns it into neat notes: a summary, key points, terms and homework.",
+  "Folders inside folders: make one inside another, or move a folder into another.",
+  "Long lists fold their older notes away (Past week, Past month, Older). Tap to open one.",
+  "One clipboard on all your devices: in the Clipboard tab, turn on \"Keep this phone's clipboard in step\". Copy anywhere, open Vault, then paste.",
+  "Share text from any app to Vault and pick \"Copy on all my devices\".",
+  "Fixed: some screens (like note history) looked unstyled on phones."
  ],
- "build": "1.2.0-07cd273c00e5",
+ "build": "1.3.0-4631283cc4f1",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -45,33 +44,37 @@
    "sha256": "ec8a5acffff8357d40a509d72b1ad669392f0c0186e3c42557591f85eeca2bdc",
    "size": 628
   },
-  "icons/icon-192.png": {
+  "icons/seam-192.png": {
    "sha256": "eae0d802b6ba9ced374e430b7c574d7ce58be5e6750cc3a8f535fc10d3f521fe",
    "size": 4465
   },
-  "icons/icon-512.png": {
+  "icons/seam-512.png": {
    "sha256": "1adbc1caa05027e0be040926c593d37730827dd50d1b24b2233a67486a073647",
    "size": 12590
   },
-  "icons/maskable-192.png": {
+  "icons/seam-maskable-192.png": {
    "sha256": "b5aeed212f07a8d64ce829c2cd02b374190bf663f871eaa8482b94c2f4f85b6a",
    "size": 2407
   },
-  "icons/maskable-512.png": {
+  "icons/seam-maskable-512.png": {
    "sha256": "18d11a888cc056b951ade76990ed09cc456f4c0a64b50027a3b3befeb23bf062",
    "size": 6978
   },
-  "icons/monochrome-512.png": {
+  "icons/seam-mono-512.png": {
    "sha256": "ead61221933f98adb1cfda44baaa472c3feab364a70103b09d5f867deedfa0e1",
    "size": 5653
   },
   "index.html": {
-   "sha256": "85bd182a220470231f98d0a1e6c6b146fbbfefb7ae6a221652cb50d632e3a89c",
-   "size": 4526
+   "sha256": "238021531620fd32cec3c7465c11d0ba0f56e54a0dc9e07fe8b8c0613f3a0755",
+   "size": 4629
+  },
+  "js/ai.js": {
+   "sha256": "e76efbfdd5843493d998bb9b4a573d62dcee3147ef7f5f492213d740bcbc6770",
+   "size": 15020
   },
   "js/clips.js": {
-   "sha256": "0dc52effee764094d298707a3551c7fc72749a3736294536d49af9fac23c51aa",
-   "size": 5788
+   "sha256": "2c0d1be32128f16f725fccec9f3e1e3556ca3094adbabbb3250433f3874086e5",
+   "size": 12062
   },
   "js/cloud.js": {
    "sha256": "c9e80ab9b5d36da16ee5251b193fce66f44dc19885e07817890484cb43bb090f",
@@ -82,8 +85,8 @@
    "size": 3536
   },
   "js/editor.js": {
-   "sha256": "c2621a8ed9ba8ebf1be1c1f3e40a1087a9ad93e9477d8aa0b60c76031207785e",
-   "size": 106982
+   "sha256": "6f9486cfeeebee5296c5a17a7fecc533138754757e30e93e52c327ddbf0177a7",
+   "size": 107059
   },
   "js/files.js": {
    "sha256": "e30b34d1d18b42e41bf0c91da35059844ef085fad5757d103c4749b7517f73b0",
@@ -94,8 +97,8 @@
    "size": 22428
   },
   "js/history.js": {
-   "sha256": "e5e4009c7c6bdc8d70749f216fb3ac98518e8545d5fc720a3641e2fa7affa0d5",
-   "size": 23764
+   "sha256": "6a6ae8e566628109fdbcc32b4d4df5eb8eddeb9113d52105e20db7ca35b211a5",
+   "size": 23927
   },
   "js/ink.js": {
    "sha256": "a42e3e1061f4bb515063da2a7ce92d2e503900aa516e6390f717abfa720bae6c",
@@ -106,24 +109,28 @@
    "size": 7054
   },
   "js/notes.js": {
-   "sha256": "9d8ed65c9ebeabcd3b75d4ad9845b4eaedf7ad5d404417a7ecd8b895e29e1205",
-   "size": 37839
+   "sha256": "d1686005430d92cf562b424695ddc6ffb9d082f1b982d6c1402391e95b855110",
+   "size": 46413
+  },
+  "js/notetaker.js": {
+   "sha256": "c1fe4cf64150576edd7bfc542c7f76f3eca6d06544a4c0e53b635c45be03063b",
+   "size": 37885
   },
   "js/organise.js": {
-   "sha256": "ae7a68f3a7254f026ec0b1ead2dc717c8219ba6148b0f441ac8a85120da1acbe",
-   "size": 29795
+   "sha256": "c20228b822410df359c971d40fed89536fd0b20b62071552374feaab6cfe6235",
+   "size": 39169
   },
   "js/reminders.js": {
-   "sha256": "ff9b3b3e0215082f652c48b8946fed10b21e57e367d3e470952f5b1c783c4e35",
-   "size": 38060
+   "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
+   "size": 38059
   },
   "js/send.js": {
-   "sha256": "03b80d701c3dac7edbad0596897542ab5547d355029d8aac7dea555a2c085ac9",
-   "size": 49295
+   "sha256": "775c2d9c147dc279119cb683700f86beb5483391f677e139456d50df08554e83",
+   "size": 49426
   },
   "js/settings.js": {
-   "sha256": "8ee0466a22b1bebfb8de544708afa39f27fd6c3ae3c629370d1325f0502f20f4",
-   "size": 13175
+   "sha256": "062b754e88602f42417841156628120dd452bde016c1872d5ab57f0c5b7587b5",
+   "size": 13277
   },
   "js/start.js": {
    "sha256": "ace5bb9228b2ed051a81b0ab7f236770ac49e1aa9fa52e7c25ba918a3163ee35",
@@ -134,23 +141,23 @@
    "size": 25659
   },
   "js/update.js": {
-   "sha256": "f1da20f8bc0aa13525df8e0c43b88d42405fd278c2acb5e7f356b44691dd8c7f",
-   "size": 14982
+   "sha256": "1db0c7fe7968aefc17b23f15e69b75139b69b51b753da47e3956e3f04fc0527a",
+   "size": 15028
   },
   "js/util.js": {
-   "sha256": "f2a6d8035272e5821cf79a94d5a9ab96fcc054fb5fa3a5514f3d6e0ac180a151",
+   "sha256": "d38605370ab5c1c961f02d14cf752a6f743545a52b3c9043d527ce4d37c6fe31",
    "size": 28974
   },
   "manifest.webmanifest": {
-   "sha256": "2a52d0c0a17d48ddc1a072a5df27e7cd100e04b195e04d4a6aa61976f9a8ce75",
-   "size": 1327
+   "sha256": "c19222ddfe2b25cdcc359ac588f6bb232ec62170905536987d47149b50310121",
+   "size": 1336
   },
   "styles.css": {
-   "sha256": "269bc44022df1144cd6d275fca2347de148b1d44901d680ee182c100e6008953",
-   "size": 105130
+   "sha256": "148c0dbdcfa987c251082a974fa8ec2d41e89a2c4cc9e173827a7e17977494fa",
+   "size": 117208
   },
   "sw.js": {
-   "sha256": "37f491acf1b6f16b04edd7f80b074225f591cebbc2949f55a6ef1288eb4701f4",
+   "sha256": "a994d42cb2dd5adddc25add11718b63fa91a1c23e47824879d700fbfe38fa6cc",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {

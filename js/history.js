@@ -386,12 +386,13 @@ V.backup = (() => {
     return lines.join('\n').replace(/\n{3,}$/, '\n') + '\n';
   }
 
-  /* Everything this device has (it's kept in step with the cloud) as one ZIP: a folder per Vault folder with a
-     Markdown file per note, and vault.json with every row. */
+  /* Everything this device has (it's kept in step with the cloud) as one ZIP: a folder per Vault folder (one inside
+     another as Vault has it) with a Markdown file per note, and vault.json with every row. */
   function build(now = new Date()) {
     const root = `Vault ${dateText(now)}`;
     const folders = [...V.data.folders.values()].filter((f) => !f.deleted);
-    const folderName = new Map(folders.map((f) => [f.id, safeName(f.name, 'Folder')]));
+    const pathOf = (f) => V.organise.pathOf(f);
+    const folderName = new Map(folders.map((f) => [f.id, pathOf(f).map((each) => safeName(each.name, 'Folder')).join('/')]));
     const used = new Set();
     const files = [];
     const notes = [...V.data.notes.values()].filter((n) => !n._purge)
@@ -405,7 +406,7 @@ V.backup = (() => {
       for (let n = 2; used.has(path.toLowerCase()); n++) path = `${root}/${dir}/${stem} (${n}).md`;
       used.add(path.toLowerCase());
       const folder = folders.find((f) => f.id === note.folder_id);
-      files.push({ name: path, data: markdown(note, folder ? folder.name : '') });
+      files.push({ name: path, data: markdown(note, folder ? pathOf(folder).map((each) => each.name).join(' / ') : '') });
     }
     const settings = V.data.settings || {};
     const everything = {

@@ -665,7 +665,7 @@ V.reminders = (() => {
     V.toast(`${late ? 'Missed reminder' : 'Reminder'}: ${title} (${clock(at)})`, { ms: 12000, action: 'Open', onAction: () => openNote(note.id) });
     try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (error) { /* no buzz */ }
     Promise.resolve(api.notify(title, { body: `${late ? 'Missed reminder' : 'Reminder'} · ${clock(at)}`, tag: 'vault-' + note.id,
-      data: { url: noteLink(note.id), id: note.id }, icon: 'icons/icon-192.png', badge: 'icons/monochrome-512.png' }))
+      data: { url: noteLink(note.id), id: note.id }, icon: 'icons/seam-192.png', badge: 'icons/seam-mono-512.png' }))
       .catch(() => {});
   }
 

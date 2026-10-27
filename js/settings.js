@@ -226,11 +226,13 @@ V.settings = (() => {
         line(status, V.cloud.live ? 'Changes arrive the moment they\'re made.' : 'Checking for changes every 20 seconds.',
           V.button('Sync now', { icon: 'restore', onClick: () => V.cloud.sync() }))),
       V.backup ? V.backup.card({ card, line, toggle, draw }) : null,  // js/history.js
+      V.ai ? V.ai.card({ card, line, toggle, draw }) : null,  // js/ai.js
       aboutCard()));
   }
 
   V.on('status', () => draw());
   V.on('update', () => draw());
+  V.on('ai', () => draw());
   V.on('data', (table) => { if (table === 'settings') draw(); });
 
   return { render: (container) => { root = container; draw(); } };

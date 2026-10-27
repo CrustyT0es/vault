@@ -532,6 +532,7 @@ V.send = (() => {
           });
           if (all.some((f) => isPicture(f.type))) await V.editor.addPictures(all);
         } },
+        ...(words && !all.length ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
         { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => {
           // Into the tray, with the words in the box: a look first, then Send.
           if (words) draft = draft.trim() ? `${draft}\n${words}` : words;

@@ -1457,8 +1457,8 @@ V.editor = (() => {
         if (note && note.id === id) { note.folder_id = folder.id; save(); drawBar(); }
         else await V.organise.move([id], folder.id);
       },
-    }, V.h('option', { value: '', text: 'No folder' }), V.notes.folders().map((f) => V.h('option', {
-      value: f.id, text: (f.icon ? f.icon + ' ' : '') + f.name,
+    }, V.h('option', { value: '', text: 'No folder' }), V.organise.tree().map(({ folder: f, depth }) => V.h('option', {
+      value: f.id, text: ' '.repeat(depth) + (f.icon ? f.icon + ' ' : '') + f.name,  // folders inside folders indented
     })), V.h('option', { value: NEW, text: 'New folder...' }));
     select.value = now();
     return select;

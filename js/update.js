@@ -175,7 +175,7 @@ V.update = (() => {
 
   const app = () => document.getElementById('app');
   const onGate = () => !app().classList.contains('ready') || app().classList.contains('gate');  // setup, sign-in
-  const dialogOpen = () => !!document.querySelector('#layers > .layer');
+  const dialogOpen = () => !!document.querySelector('#layers > .layer, #layers > .nt-layer');  // (the note-taker too)
 
   /* Only out of sight, with the note saved and settled, nothing being sent, no dialog: then nothing can be lost. */
   async function whenSafe() {
