@@ -43,9 +43,17 @@ V.pc = V.desktop ? (() => {
       bridge.call(id, name, JSON.stringify(args));
     });
   };
+  // What every PC app since Vault 1.0 answers. A newer one lists its calls in config's `can` (calls are only ever
+  // added, never taken away: tests/test_vault_desktop.py keeps this list), so a page newer than its PC app can ask
+  // V.pc.can() before using one.
+  const BRIDGE_V1 = ['appReady', 'quietClipboard', 'config', 'token', 'health', 'signIn', 'signOut', 'changePassword',
+    'setUp', 'saveFile', 'openFile', 'showFile', 'openLink', 'setClipboard', 'notify', 'setPref', 'pickFolder'];
+  let calls = BRIDGE_V1;
   return {
     ready,
     call,
+    can: (name) => calls.includes(name),
+    knows: (config) => { if (config && Array.isArray(config.can)) calls = config.can; },
     token: () => call('token').then((answer) => answer.token),
     setClipboard: (text) => call('setClipboard', { text }),
     notify: (title, text) => call('notify', { title, text }).catch(() => {}),
@@ -480,7 +488,7 @@ V.cloud = (() => {
     await loadLocal();
     window.addEventListener('online', () => sync());
     window.addEventListener('offline', () => setStatus('offline'));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+    V.on('back', () => sync());
     listen();
     schedule();
     return { firstSync: sync() };

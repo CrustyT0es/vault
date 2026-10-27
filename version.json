@@ -1,0 +1,143 @@
+{
+ "format": 1,
+ "version": "1.1.0",
+ "min_shell": 1,
+ "notes": [
+  "A new look and a new logo: clean and calm, in light and dark (Settings > Appearance, or it follows your phone or PC).",
+  "Typing on the phone stays where you put it: the page no longer jumps while you write, and ticking items keeps the keyboard up.",
+  "If your PC (or Jarvis) changes a note while you're writing in it, both of your changes are kept.",
+  "Settings stops taking over: it only shows when you open it.",
+  "Vault updates itself now, on your phone and your PC, when you're not using it."
+ ],
+ "build": "1.1.0-da3f8dbd4049",
+ "files": {
+  "fonts/Inter-Bold.woff2": {
+   "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
+   "size": 45100
+  },
+  "fonts/Inter-Medium.woff2": {
+   "sha256": "cfa3e3abe18a14a5f59cfa173355978573877c73072b6dc2acbb1f36ed02ab5a",
+   "size": 44892
+  },
+  "fonts/Inter-Regular.woff2": {
+   "sha256": "6fe17108aab0bb662ebc3454758b760831aee7f461a010756ecf113740c77b61",
+   "size": 41484
+  },
+  "fonts/Inter-SemiBold.woff2": {
+   "sha256": "878dcb92a1b216a084f15c272fab36599f83f3a68db5e21a851b4c39a2577f8e",
+   "size": 44856
+  },
+  "fonts/InterDisplay-SemiBold.woff2": {
+   "sha256": "87664feda509612c05afee63f7686f98e5bd84d3042a4aac5284278bfdf99ff2",
+   "size": 44272
+  },
+  "fonts/OFL.txt": {
+   "sha256": "58cbf162f2857e54774db7f7e6b00edcc18121a243b3a02831b60b7276d14172",
+   "size": 4262
+  },
+  "icons/favicon-32.png": {
+   "sha256": "2666c4e97047d7f2e4d76ec04729a01f180acdf4367c8c9d02827382a18f2a4a",
+   "size": 893
+  },
+  "icons/favicon.svg": {
+   "sha256": "ec8a5acffff8357d40a509d72b1ad669392f0c0186e3c42557591f85eeca2bdc",
+   "size": 628
+  },
+  "icons/icon-192.png": {
+   "sha256": "eae0d802b6ba9ced374e430b7c574d7ce58be5e6750cc3a8f535fc10d3f521fe",
+   "size": 4465
+  },
+  "icons/icon-512.png": {
+   "sha256": "1adbc1caa05027e0be040926c593d37730827dd50d1b24b2233a67486a073647",
+   "size": 12590
+  },
+  "icons/maskable-192.png": {
+   "sha256": "b5aeed212f07a8d64ce829c2cd02b374190bf663f871eaa8482b94c2f4f85b6a",
+   "size": 2407
+  },
+  "icons/maskable-512.png": {
+   "sha256": "18d11a888cc056b951ade76990ed09cc456f4c0a64b50027a3b3befeb23bf062",
+   "size": 6978
+  },
+  "icons/monochrome-512.png": {
+   "sha256": "ead61221933f98adb1cfda44baaa472c3feab364a70103b09d5f867deedfa0e1",
+   "size": 5653
+  },
+  "index.html": {
+   "sha256": "5549a09e5e1733de66247638e5ee9b0f8b8afdebdb5ed580cab935e84a10e5d0",
+   "size": 4252
+  },
+  "js/clips.js": {
+   "sha256": "5311c4b6ec7de14f7c19e360d01b712c7d8afae68b3c481c2f972c4bc6e06832",
+   "size": 5114
+  },
+  "js/cloud.js": {
+   "sha256": "a2f64eb17ea36dfc4361357e020ce62c81b3f0f3c61a0c3c0a886a9602806f23",
+   "size": 22604
+  },
+  "js/db.js": {
+   "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
+   "size": 3536
+  },
+  "js/editor.js": {
+   "sha256": "576694ce9e8a54c35398d69b82d7d12770cd2be914698d4b0f06263c60e00c25",
+   "size": 47727
+  },
+  "js/lock.js": {
+   "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
+   "size": 7054
+  },
+  "js/notes.js": {
+   "sha256": "dfbfee3f14cc610a6ad10da2dbb9566e01997302e4349bb5b2e1c909601b1337",
+   "size": 20103
+  },
+  "js/send.js": {
+   "sha256": "7fe4b65037d3bab74ef931c1497aa035e3aab297dfc006923e47bfd01dbc1966",
+   "size": 17446
+  },
+  "js/settings.js": {
+   "sha256": "c7a048935f235e5919175497cd17a14dc702284eeefd78a670a82359ad03cb9b",
+   "size": 12752
+  },
+  "js/start.js": {
+   "sha256": "a02945729145bd243755ae39c5f2f508a70a3b129f8baf77011bd5542c796811",
+   "size": 18005
+  },
+  "js/update.js": {
+   "sha256": "23e24dde088d3fc93db96b9f5fae9b25314110318817d42476242c7e9d66ae3d",
+   "size": 14927
+  },
+  "js/util.js": {
+   "sha256": "1881a896b7afa284b7d1d4d0d9148dd0c2b6caef81817228ec591b825483ef12",
+   "size": 26226
+  },
+  "manifest.webmanifest": {
+   "sha256": "2a52d0c0a17d48ddc1a072a5df27e7cd100e04b195e04d4a6aa61976f9a8ce75",
+   "size": 1327
+  },
+  "styles.css": {
+   "sha256": "e2474f0054ee0e9ff7160f592259d8f69f116af13ec622a8e1e78db65f666ad1",
+   "size": 52716
+  },
+  "sw.js": {
+   "sha256": "e9ed65f0d0c653de037148b380da284b590a4f81d9e0106bdeec4bd103385fc5",
+   "size": 7545
+  },
+  "vendor/LICENSE-supabase-js.txt": {
+   "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",
+   "size": 1065
+  },
+  "vendor/README.txt": {
+   "sha256": "a1cc2cd5250c2ac6949b265eeac79b0203227a8c3f7afdaad399627c917996a9",
+   "size": 309
+  },
+  "vendor/qrcode.js": {
+   "sha256": "79ec86f82856005b1c887905cfccfcfbec3821ca61c7fd5a952faa5f778f791c",
+   "size": 56694
+  },
+  "vendor/supabase.js": {
+   "sha256": "d6a5c4414a5d4ce646d9c1de223aa7067d3ff664c15394ffeb7fcffc763354a3",
+   "size": 217907
+  }
+ }
+}

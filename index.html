@@ -3,22 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#0a101b">
-  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.supabase.co http://127.0.0.1:*; media-src 'self' blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Vault</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon-192.png">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/Inter-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="app" class="booting">
-    <div id="boot"><div class="orb big"></div><div class="boot-word">VAULT</div></div>
+    <div id="boot"><svg class="wordmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 324.1 78.57" role="img" aria-label="Vault"><path class="wm-mark" d="M6.286 0L16.518 0A2.514 2.514 0 0 1 18.857 1.592L38.117 50.463A1.257 1.257 0 0 0 40.457 50.463L59.717 1.592A2.514 2.514 0 0 1 62.057 0L72.288 0A6.286 6.286 0 0 1 78.574 6.286L78.574 61.288A17.286 17.286 0 0 1 61.288 78.574L17.286 78.574A17.286 17.286 0 0 1 0 61.288L0 6.286A6.286 6.286 0 0 1 6.286 0Z"/><path class="wm-mark" d="M27.564 0L51.01 0A2.043 2.043 0 0 1 52.91 2.792L41.473 31.813A2.349 2.349 0 0 1 37.101 31.813L25.664 2.792A2.043 2.043 0 0 1 27.564 0Z"/><path class="wm-text" d="M415 0H691L1088 -1056H824L634 -506C607 -423 582 -339 557 -256C531 -339 505 -423 478 -506L285 -1056H18Z" transform="translate(102.15 75.66) scale(0.048828)"/><path class="wm-text" d="M1563.424 21C1701.424 21 1816.424 -39 1882.424 -159H1885.424V0H2132.424V-1056H1885.424V-909H1881.424C1816.424 -1021 1698.424 -1077 1561.424 -1077C1290.424 -1077 1106.424 -854 1106.424 -529C1106.424 -200 1287.424 21 1563.424 21ZM1622.424 -190C1466.424 -190 1361.424 -310 1361.424 -529C1361.424 -747 1466.424 -868 1622.424 -868C1787.424 -868 1895.424 -734 1895.424 -529C1895.424 -323 1787.424 -190 1622.424 -190Z" transform="translate(102.15 75.66) scale(0.048828)"/><path class="wm-text" d="M2707.848 21C2853.848 21 2960.848 -43 3032.848 -162V0H3280.848V-1056H3027.848V-459C3027.848 -279 2929.848 -200 2796.848 -200C2661.848 -200 2583.848 -281 2583.848 -436V-1056H2331.848V-396C2331.848 -125 2486.848 21 2707.848 21Z" transform="translate(102.15 75.66) scale(0.048828)"/><path class="wm-text" d="M3732.272 -1490H3480.272V0H3732.272Z" transform="translate(102.15 75.66) scale(0.048828)"/><path class="wm-text" d="M4498.696 -1056H4283.696V-1344H4030.696V-1056H3846.696V-853H4030.696V-266C4030.696 -85 4131.696 0 4346.696 0H4498.696V-203H4390.696C4308.696 -203 4283.696 -228 4283.696 -303V-853H4498.696Z" transform="translate(102.15 75.66) scale(0.048828)"/></svg></div>
   </div>
   <div id="layers"></div>
   <div id="toasts" aria-live="polite"></div>
-  <div id="drop-hint" hidden><div><div class="orb"></div><p>Drop to send to your phone</p></div></div>
+  <div id="drop-hint" hidden><div><span class="icon big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5v-11M7 9l5-5 5 5M5 20h14"/></svg></span><p>Drop to send to your phone</p></div></div>
   <script src="vendor/supabase.js"></script>
   <script src="vendor/qrcode.js"></script>
   <script src="js/util.js"></script>
@@ -30,6 +34,7 @@
   <script src="js/send.js"></script>
   <script src="js/clips.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/update.js"></script>
   <script src="js/start.js"></script>
 </body>
 </html>

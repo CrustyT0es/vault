@@ -4,17 +4,87 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.0.1';
+V.VERSION = '1.1.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 V.device = V.desktop ? 'pc' : 'phone';
 V.other = V.desktop ? 'phone' : 'pc';
 V.otherName = V.desktop ? 'your phone' : 'your PC';
+
+/* ---------------------------------------------------------------- light or dark
+
+   Set first, before anything is drawn (the page's rules allow no inline script, so it's here): this device's own
+   choice (Settings > Appearance, kept in localStorage 'vault-theme': system, light or dark), else the system's. In
+   the PC app "system" means Windows' own app theme, which vault/desktop.py hands over (VAULT_SCHEME at the start,
+   then a "scheme" event), as Qt's web view may not pass it on as prefers-color-scheme. */
+V.theme = (() => {
+  const KEY = 'vault-theme';
+  const BARS = { light: '#f5f6f8', dark: '#0e0f12' };  // --bg, for the phone's status bar (the theme-color metas)
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  let system = /^(light|dark)$/.test(window.VAULT_SCHEME || '') ? window.VAULT_SCHEME : '';
+  let shown = '';
+  const choice = () => {
+    try {
+      const saved = localStorage.getItem(KEY);
+      return saved === 'light' || saved === 'dark' ? saved : 'system';
+    } catch (error) {
+      return 'system';
+    }
+  };
+  const resolved = () => (choice() !== 'system' ? choice() : system || (media.matches ? 'dark' : 'light'));
+  function apply() {
+    const now = resolved();
+    document.documentElement.dataset.theme = now;
+    const own = choice() === 'system' && !system;  // each meta keeps its own colour, picked by the system
+    for (const meta of document.querySelectorAll('meta[name=theme-color]')) {
+      meta.content = own ? BARS[/dark/.test(meta.media) ? 'dark' : 'light'] : BARS[now];
+    }
+    if (now !== shown) {
+      shown = now;
+      if (V.emit) V.emit('theme', now);
+    }
+  }
+  media.addEventListener('change', apply);
+  window.addEventListener('storage', (event) => { if (event.key === KEY) apply(); });  // changed in another tab
+  apply();
+  return {
+    choice,
+    current: () => shown,
+    set(value) {
+      try {
+        if (value === 'light' || value === 'dark') localStorage.setItem(KEY, value);
+        else localStorage.removeItem(KEY);
+      } catch (error) { /* private browsing: it lasts until the page closes */ }
+      apply();
+    },
+    system(value) {
+      system = value === 'light' || value === 'dark' ? value : '';
+      apply();
+    },
+  };
+})();
 
 /* ---------------------------------------------------------------- events */
 
 V.bus = new EventTarget();
 V.on = (type, fn) => V.bus.addEventListener(type, (event) => fn(event.detail));
 V.emit = (type, detail) => V.bus.dispatchEvent(new CustomEvent(type, { detail }));
+
+/* Out of sight: the phone's app in the background, or the PC's window hidden in the tray or minimised. The PC app
+   keeps its page "visible" even then (a hidden page stops its timers and Realtime), so it says so itself (pc:window).
+   'away' and 'back' go out when that changes, with <html class="away"> stopping the animations meanwhile. */
+V.pcShown = true;
+V.away = () => document.hidden || (V.desktop && !V.pcShown);
+let wasAway = false;
+const awayChanged = () => {
+  const now = V.away();
+  if (now === wasAway) return;
+  wasAway = now;
+  document.documentElement.classList.toggle('away', now);
+  V.emit(now ? 'away' : 'back');
+};
+document.addEventListener('visibilitychange', awayChanged);
+V.on('pc:window', ({ shown }) => { V.pcShown = shown !== false; awayChanged(); });
+V.pcWindow = (shown) => { V.pcShown = shown !== false; awayChanged(); };
 
 /* ---------------------------------------------------------------- elements */
 
@@ -42,51 +112,90 @@ V.h = function h(tag, attrs, ...kids) {
 
 V.clear = (el, ...kids) => { el.replaceChildren(...kids.flat(Infinity).filter(Boolean)); return el; };
 
-/* Line icons (drawn after Feather's, MIT): only these fixed strings ever go through innerHTML. */
+/* Line icons (drawn after Lucide's and Feather's, ISC/MIT, on a 24 grid with a 1.75 stroke): only these fixed strings
+   ever go through innerHTML. */
 const ICONS = {
-  notes: '<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 12h8M8 16h6"/>',
-  send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
-  clip: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  notes: '<rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h3.5"/>',
+  send: '<path d="M20.5 3.5 3.5 10.2l7 3.1 3.1 7z"/><path d="M20.5 3.5 10.5 13.3"/>',
+  clip: '<rect x="8.5" y="3" width="7" height="4" rx="1.5"/><path d="M15.5 5h1.5A2.5 2.5 0 0 1 19.5 7.5v11A2.5 2.5 0 0 1 17 21H7a2.5 2.5 0 0 1-2.5-2.5v-11A2.5 2.5 0 0 1 7 5h1.5"/>',
+  settings: '<path d="M4 7.5h9M17.5 7.5H20M4 16.5h2.5M11 16.5h9"/><circle cx="15.2" cy="7.5" r="2.2"/><circle cx="8.8" cy="16.5" r="2.2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
-  back: '<path d="m15 18-6-6 6-6"/>',
-  more: '<circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/>',
-  pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z"/>',
-  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
-  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
-  camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>',
-  checklist: '<path d="m3 7 2 2 4-4"/><path d="M13 7h8"/><path d="m3 17 2 2 4-4"/><path d="M13 17h8"/>',
-  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
-  upload: '<path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/>',
-  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
-  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
-  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
-  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
-  text: '<path d="M4 7V4h16v3"/><path d="M9 20h6M12 4v16"/>',
-  x: '<path d="M18 6 6 18M6 6l12 12"/>',
-  phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
-  pc: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
-  cloud: '<path d="M18 10h-1.3A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
-  restore: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
-  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>',
-  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
-  open: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/>',
-  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  back: '<path d="m14.5 18-6-6 6-6"/>',
+  down: '<path d="m6.5 9.5 5.5 5.5 5.5-5.5"/>',
+  more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
+  pin: '<path d="M12 16v5"/><path d="M8.5 3.5h7l-1 5.5 3.5 3.5V15h-12v-2.5L9.5 9z"/>',
+  'pin-on': '<path d="M12 16v5"/><path d="M8.5 3.5h7l-1 5.5 3.5 3.5V15h-12v-2.5L9.5 9z" fill="currentColor"/>',
+  lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5v-3a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5v-3a4 4 0 0 1 7.6-1.75"/>',
+  trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6 7l1 13h10l1-13"/>',
+  camera: '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.8l1.5-2.5h4.4L15.7 6h1.8A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.6"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  checklist: '<rect x="3.5" y="4.5" width="6" height="6" rx="1.5"/><path d="m4.6 16.3 1.7 1.7 3.2-3.5"/><path d="M13 7.5h7.5M13 17h7.5"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  stack: '<path d="M12 3.5 3.5 8 12 12.5 20.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5M3.5 16l8.5 4.5 8.5-4.5"/>',
+  folder: '<path d="M3.5 7.5v10A2.5 2.5 0 0 0 6 20h12a2.5 2.5 0 0 0 2.5-2.5V10A2.5 2.5 0 0 0 18 7.5h-6.2L9.6 5H6a2.5 2.5 0 0 0-2.5 2.5z"/>',
+  download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
+  upload: '<path d="M12 15.5v-11M7 9l5-5 5 5M5 20h14"/>',
+  share: '<path d="M12 14V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
+  copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6A2.5 2.5 0 0 0 13 3.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>',
+  file: '<path d="M14 3H7a2.5 2.5 0 0 0-2.5 2.5v13A2.5 2.5 0 0 0 7 21h10a2.5 2.5 0 0 0 2.5-2.5V8.5z"/><path d="M14 3v5.5h5.5"/>',
+  image: '<rect x="3.5" y="4" width="17" height="16" rx="2.5"/><circle cx="9" cy="9.5" r="1.75"/><path d="m20.5 15.5-4.5-4.5L5.5 20"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+  text: '<path d="M4.5 6.5h15M4.5 11.5h15M4.5 16.5h9"/>',
+  x: '<path d="M17.5 6.5l-11 11M6.5 6.5l11 11"/>',
+  phone: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  pc: '<rect x="2.5" y="4" width="19" height="13" rx="2.5"/><path d="M8.5 21h7M12 17v4"/>',
+  'up-right': '<path d="M7 17 17 7M9 7h8v8"/>',
+  'down-left': '<path d="M17 7 7 17M15 17H7V9"/>',
+  'arrow-up': '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  cloud: '<path d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A4 4 0 0 1 17 18.5z"/>',
+  restore: '<path d="M19.5 10.5A7.5 7.5 0 0 0 6 6.6L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4.5 13.5A7.5 7.5 0 0 0 18 17.4l2-1.9"/><path d="M20 20v-4.5h-4.5"/>',
+  qr: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20.5 14v.01M14 20.5h.01M17 20.5h3.5V17"/>',
+  bolt: '<path d="M13 3 4.5 13.5h7L11 21l8.5-10.5h-7z"/>',
+  open: '<path d="M13.5 4.5h6v6M19.5 4.5 11 13"/><path d="M17.5 14v3.5A2.5 2.5 0 0 1 15 20H6.5A2.5 2.5 0 0 1 4 17.5V9a2.5 2.5 0 0 1 2.5-2.5H10"/>',
+  user: '<circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
+  moon: '<path d="M19.5 14.6A7.5 7.5 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/>',
+  alert: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/>',
 };
 
 V.icon = function icon(name, cls) {
   const span = document.createElement('span');
   span.className = 'icon' + (cls ? ' ' + cls : '');
   span.setAttribute('aria-hidden', 'true');
-  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
   return span;
 };
+
+/* Vault's mark: a rounded square split by a V-shaped seam (the wedge it frees is the note kept inside). One flat
+   colour (currentColor; .mark makes it --brand). */
+const MARK = [
+  'M8 0L21.022 0A3.2 3.2 0 0 1 23.999 2.027L48.511 64.223A1.6 1.6 0 0 0 51.489 64.223L76.001 2.027A3.2 3.2 0 0 1 78.978 0L92 0A8 8 0 0 1 100 8L100 78A22 22 0 0 1 78 100L22 100A22 22 0 0 1 0 78L0 8A8 8 0 0 1 8 0Z',
+  'M35.081 0L64.919 0A2.6 2.6 0 0 1 67.338 3.553L52.782 40.487A2.99 2.99 0 0 1 47.218 40.487L32.662 3.553A2.6 2.6 0 0 1 35.081 0Z',
+];
+const SVG = 'http://www.w3.org/2000/svg';
+V.mark = (size = 40, cls = '') => {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('class', 'mark' + (cls ? ' ' + cls : ''));
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of MARK) {
+    const path = document.createElementNS(SVG, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'currentColor');
+    svg.append(path);
+  }
+  return svg;
+};
+
+/* The mark with "vault" beside it, for the start and the screens before the app: the one drawn in index.html's boot
+   screen (outlined letters, so no font is needed), copied before the app replaces that screen. */
+const WORDMARK = document.querySelector('#boot .wordmark');
+V.wordmark = () => (WORDMARK ? WORDMARK.cloneNode(true) : V.mark(40));
 
 V.button = (label, opts = {}) => V.h('button.btn' + (opts.kind ? '.' + opts.kind : ''), {
   type: 'button', onclick: opts.onClick, title: opts.title, disabled: opts.disabled, 'aria-label': opts.aria || (label ? null : opts.title),
@@ -187,7 +296,8 @@ V.menu = function menu(anchor, items) {
 
 V.toast = function toast(text, { kind = '', action, onAction, ms = 3200 } = {}) {
   const box = document.getElementById('toasts');
-  const item = V.h('div.toast' + (kind ? '.' + kind : ''), { role: 'status' }, V.h('span', { text }),
+  const item = V.h('div.toast' + (kind ? '.' + kind : ''), { role: 'status' },
+    kind === 'err' ? V.icon('alert') : null, V.h('span', { text }),
     action ? V.h('button.toast-action', { type: 'button', text: action, onclick: () => { onAction(); gone(); } }) : null);
   const gone = () => { item.classList.add('leaving'); setTimeout(() => item.remove(), 200); };
   box.append(item);
@@ -292,7 +402,10 @@ V.copy = async (text) => {
   }
 };
 
-V.wide = () => window.matchMedia('(min-width: 900px)').matches;
+/* The side-by-side layout (styles.css's 900 px line). `V.onWide` hears the window crossing it either way. */
+const WIDE = window.matchMedia('(min-width: 900px)');
+V.wide = () => WIDE.matches;
+V.onWide = (fn) => WIDE.addEventListener('change', () => fn(WIDE.matches));
 
 /* Words changed on two devices from the same starting point, put together line by line (a three-way merge, like
    diff3). Each side's changes are runs of lines replaced, added or removed; runs that touch different lines are all
@@ -372,3 +485,11 @@ V.changeSize = (a, b) => {
   while (tail < most - from && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
   return a.length + b.length - 2 * (from + tail);
 };
+
+/* The PC app is told which theme shows (its window, the quick note box), and follows Windows' own. */
+if (V.desktop) {
+  V.on('pc:scheme', ({ scheme }) => V.theme.system(scheme));
+  const tell = () => { if (V.pc) V.pc.call('theme', { dark: V.theme.current() === 'dark' }).catch(() => {}); };
+  V.on('theme', tell);
+  window.addEventListener('DOMContentLoaded', tell);  // once cloud.js has made V.pc
+}

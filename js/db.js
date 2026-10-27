@@ -7,11 +7,14 @@
 V.db = (() => {
   const STORES = ['notes', 'folders', 'transfers', 'clips', 'meta', 'outgoing', 'files', 'shared'];
   let opening = null;
+  let latest = null;  // the connection in use
 
-  function open() {
-    if (opening) return opening;
-    opening = new Promise((resolve, reject) => {
-      const request = indexedDB.open('vault', 1);
+  /* Opened without a version number (whatever version is there) and upgraded only when a store is missing, so an
+     older or newer Vault and the service worker never fail on each other's version; closed when another one needs to
+     upgrade it (it would wait for this one otherwise). */
+  function connect(version) {
+    return new Promise((resolve, reject) => {
+      const request = version ? indexedDB.open('vault', version) : indexedDB.open('vault');
       request.onupgradeneeded = () => {
         for (const name of STORES) {
           if (!request.result.objectStoreNames.contains(name)) {
@@ -19,10 +22,26 @@ V.db = (() => {
           }
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => { db.close(); if (latest === db) opening = null; };
+        latest = db;
+        resolve(db);
+      };
       request.onerror = () => reject(request.error);
       request.onblocked = () => reject(new Error('Vault is open in another tab that needs closing first.'));
     });
+  }
+
+  function open() {
+    if (opening) return opening;
+    opening = connect().then((db) => {
+      if (STORES.every((name) => db.objectStoreNames.contains(name))) return db;
+      const next = db.version + 1;
+      db.close();
+      return connect(next);
+    });
+    opening.catch(() => { opening = null; });
     return opening;
   }
 

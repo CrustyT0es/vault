@@ -205,6 +205,7 @@ V.send = (() => {
     const status = out
       ? (t._dirty ? 'Sending...' : t.received_at ? (V.desktop ? 'Opened on your phone' : 'Saved on your PC') : `Waiting for ${V.otherName}`)
       : (saving.has(t.id) ? 'Saving...' : V.desktop && t.extra && t.extra.saved ? 'In your Downloads' : t.received_at ? 'Received' : 'New');
+    const arrived = out ? !!t.received_at && !t._dirty : !!t.received_at && !saving.has(t.id);
     const actions = [];
     if (t.kind === 'file' && !out) {
       if (V.desktop) {
@@ -232,18 +233,17 @@ V.send = (() => {
         V.h('div.t-name', { text: t.kind === 'file' ? t.name : (t.kind === 'link' ? t.text : t.name || t.text) }),
         t.kind === 'text' && t.text.length > (t.name || '').length ? V.h('div.t-text', { text: t.text.slice(0, 600) }) : null,
         V.h('div.t-meta', {},
-          V.icon(V.desktop ? 'phone' : 'pc'),
-          V.h('span', { text: (out ? 'To ' : 'From ') + V.otherName }),
+          V.h('span.t-dir', {}, V.icon(out ? 'up-right' : 'down-left'), (out ? 'To ' : 'From ') + V.otherName),
           t.size ? V.h('span', { text: V.size(t.size) }) : null,
           V.h('span', { text: V.ago(t.created_at || t._edited) }),
-          V.h('span.t-status', { text: status }))),
+          V.h('span.t-status' + (arrived ? '.ok' : ''), {}, arrived ? V.icon('check') : null, status))),
       V.h('div.t-actions', {}, actions));
   }
 
   function drawQueue() {
     if (!parts) return;
     V.db.all('outgoing').then((waiting) => {
-      V.clear(parts.queue, waiting.length ? V.h('h3.section', { text: navigator.onLine ? 'Sending' : 'Waiting for the internet' }) : null,
+      V.clear(parts.queue, waiting.length ? V.h('h2.section', { text: navigator.onLine ? 'Sending' : 'Waiting for the internet' }) : null,
         waiting.map((item) => V.h('div.transfer.out.pending', {},
           V.h('div.t-icon', {}, V.icon(item.mime.startsWith('image/') ? 'image' : 'file')),
           V.h('div.t-main', {}, V.h('div.t-name', { text: item.name }),
@@ -259,7 +259,7 @@ V.send = (() => {
     drawQueue();
     const list = mine();
     V.clear(parts.list, list.length ? list.map(row)
-      : V.h('div.empty.small', {}, V.h('p', { text: V.desktop ? 'Nothing sent yet. Drop a file here and it goes to your phone.'
+      : V.h('div.empty.small', {}, V.mark(36), V.h('p', { text: V.desktop ? 'Nothing sent yet. Drop a file here and it goes to your phone.'
         : 'Nothing sent yet. Share a photo to Vault, or pick files above.' })));
     const used = list.reduce((sum, t) => sum + (t.size || 0), 0) +
       [...V.data.notes.values()].reduce((sum, n) => sum + (n.attachments || []).reduce((s, a) => s + (a.size || 0), 0), 0);
@@ -277,23 +277,48 @@ V.send = (() => {
     for (const t of old.length ? old : mine().filter((x) => x.kind === 'file')) await remove(t);
   }
 
+  /* Where things go: the other device, and what happens to what's sent there. */
+  function deviceCard() {
+    return V.h('div.device-card', {}, V.icon(V.desktop ? 'phone' : 'pc'), V.h('div.device-text', {},
+      V.h('strong', { text: V.desktop ? 'Your phone' : 'Your PC' }),
+      V.h('span', { text: V.desktop ? 'Files wait in Vault on your phone until you open them there.'
+        : 'Files you send are saved in Downloads\\Vault on the PC by themselves.' })));
+  }
+
   function render(container) {
     root = container;
-    const area = V.h('textarea.field.send-text', { rows: 2, placeholder: 'Type or paste text or a link', 'aria-label': 'Text to send' });
-    const picker = V.h('input', { type: 'file', multiple: true, hidden: true, onchange: () => { files(picker.files); picker.value = ''; } });
+    const area = V.h('textarea.field.send-text', { rows: 1, placeholder: `Text or a link for ${V.otherName}`, 'aria-label': 'Text to send' });
+    const take = (input) => () => { files(input.files); input.value = ''; };
+    const picker = V.h('input', { type: 'file', multiple: true, hidden: true });
+    picker.addEventListener('change', take(picker));
     const sendWords = async () => { const words = area.value; if (!words.trim()) return; area.value = ''; await text(words); };
     area.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendWords(); } });
     parts = { queue: V.h('div.queue'), list: V.h('div.transfers'), space: V.h('div.space-row') };
+    let choose;
+    if (V.desktop) {
+      choose = V.h('button.drop-zone', { type: 'button', onclick: () => picker.click() },
+        V.icon('upload', 'big'), V.h('strong', { text: 'Choose files' }),
+        V.h('span', { text: 'or drop them anywhere in Vault (up to 50 MB each)' }));
+    } else {
+      // On the phone: photos from the gallery, any file, or a photo taken now.
+      const photos = V.h('input', { type: 'file', multiple: true, accept: 'image/*,video/*', hidden: true });
+      const camera = V.h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
+      photos.addEventListener('change', take(photos));
+      camera.addEventListener('change', take(camera));
+      const tile = (icon, label, hint, input) => V.h('button.tile', { type: 'button', onclick: () => input.click() },
+        V.icon(icon), V.h('span', {}, V.h('strong', { text: label }), V.h('small', { text: hint })));
+      choose = [V.h('div.tiles', {}, tile('image', 'Photos', 'Gallery', photos), tile('file', 'Files', 'Any type', picker),
+        tile('camera', 'Camera', 'Snap one', camera)), photos, camera];
+    }
     V.clear(container, V.h('div.page', {},
-      V.h('h1', { text: V.desktop ? 'Send to your phone' : 'Send to your PC' }),
+      V.h('div.page-head', {}, V.h('h1', { text: V.desktop ? 'Send to your phone' : 'Send to your PC' }), V.statusPill()),
       V.h('div.send-card', {},
-        V.h('button.drop-zone', { type: 'button', onclick: () => picker.click() },
-          V.icon('upload', 'big'), V.h('strong', { text: 'Choose files' }),
-          V.h('span', { text: V.desktop ? 'or drop them anywhere in Vault (up to 50 MB each)' : 'or share them to Vault from any app' })),
         picker,
-        V.h('div.send-row', {}, area, V.button('Send', { kind: 'primary', icon: 'send', onClick: sendWords }))),
+        deviceCard(),
+        choose,
+        V.h('div.send-row', {}, area, V.button('Send', { kind: 'primary', icon: 'arrow-up', onClick: sendWords }))),
       parts.queue,
-      V.h('h3.section', { text: 'Sent and received' }),
+      V.h('h2.section', { text: 'Sent and received' }),
       parts.list,
       parts.space));
     draw();
@@ -308,5 +333,6 @@ V.send = (() => {
   return {
     render, files, text, runQueue, takeShared, unseen,
     checkIncoming: () => arrived(incoming()),
+    busy: () => queueRunning || saving.size > 0,  // a file going up, or the PC saving one: not a moment to reload
   };
 })();

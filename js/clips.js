@@ -65,7 +65,7 @@ V.clips = (() => {
     if (!parts || !root || !root.isConnected || root.dataset.tab !== 'clips') return;
     const latest = latestFrom(V.other);
     V.clear(parts.latest, latest ? V.h('div.card.latest', {},
-      V.h('div.section', { text: `Latest from ${V.otherName}` }),
+      V.h('h2.section', { text: `Latest from ${V.otherName}` }),
       item(latest)) : V.h('div.card.latest.empty-latest', {},
       V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Vault > Clipboard > Share my clipboard.'
         : 'Nothing from your PC yet. Copy something there and it shows up here.' })));
@@ -77,12 +77,12 @@ V.clips = (() => {
     const paste = V.h('textarea.field', { rows: 2, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Vault' : 'Or paste here', 'aria-label': 'Text to share' });
     parts = { latest: V.h('div'), history: V.h('div.clips'), paste };
     V.clear(container, V.h('div.page', {},
-      V.h('h1', { text: 'Shared clipboard' }),
+      V.h('div.page-head', {}, V.h('h1', { text: 'Shared clipboard' }), V.statusPill()),
       switches(),
       parts.latest,
       V.desktop ? null : V.button('Share my clipboard with the PC', { kind: 'primary wide-btn', icon: 'upload', onClick: shareMine }),
       V.h('div.send-row', {}, paste, V.button('Share', { icon: 'send', onClick: () => { share(paste.value); paste.value = ''; } })),
-      V.h('h3.section', { text: 'Recent' }),
+      V.h('h2.section', { text: 'Recent' }),
       parts.history));
     draw();
   }
@@ -94,7 +94,7 @@ V.clips = (() => {
       if (V.prefs && V.prefs.clipboardReceive) {
         V.pc.setClipboard(clip.text).then(() => V.pc.notify('Copied from your phone', clip.text.slice(0, 120))).catch(() => {});
       }
-    } else if (!document.hidden) {
+    } else if (!V.away()) {
       V.toast('Your PC copied: ' + clip.text.slice(0, 60), { action: 'Copy', onAction: () => V.copy(clip.text) });
     }
   });

@@ -3,6 +3,12 @@
 'use strict';
 
 (() => {
+  // A page whose js/update.js didn't load still opens, only without updates this time (Vault 1.0.1's worker kept
+  // the new page and scripts but never js/update.js: opened offline right after the update came out).
+  V.update = V.update || { atBoot: async () => false, resume: () => null, started() {}, whatsNew() {},
+    check: async () => ({ state: 'error', message: 'Vault couldn\'t check just now.' }), now: async () => false,
+    useBuiltIn: async () => {}, state: () => ({ version: V.VERSION, ready: '', needsShell: '', checked: '',
+      canCheck: false, downloaded: false }) };
   const app = document.getElementById('app');
   const TABS = [['notes', 'notes', 'Notes'], ['send', 'send', 'Send'], ['clips', 'clip', 'Clipboard'], ['settings', 'settings', 'Settings']];
   let current = 'notes';
@@ -10,6 +16,7 @@
 
   /* ---------------------------------------------------------------- the app's frame */
 
+  V.tab = () => current;
   V.go = (tab) => {
     current = tab;
     if (!shell) return;
@@ -29,23 +36,24 @@
     dot.hidden = !count;
   }
 
-  function statusPill() {
-    const words = { synced: 'Synced', syncing: 'Syncing', offline: 'Offline', error: 'Can\'t sync', asleep: 'Cloud asleep',
-      'signed-out': 'Signed out', idle: '' };
-    const pill = V.h('button.status', { type: 'button', title: 'Sync now', onclick: () => {
-      if (V.cloud.status === 'asleep' || V.cloud.status === 'error') explainTrouble(); else V.cloud.sync();
-    } },
-      V.h('i.dot'), V.h('span.status-word'));
-    const set = (state) => {
-      pill.dataset.state = state;
-      pill.querySelector('.status-word').textContent = words[state] || '';
-      pill.title = state === 'offline' ? 'Offline: everything is saved on this device and goes up when you\'re back online'
-        : state === 'error' || state === 'asleep' ? 'Vault can\'t reach your cloud: click for what to do' : 'Sync now';
-    };
-    set(V.cloud.status);
-    V.on('status', set);
-    return pill;
+  /* The sync pill: on each page's title row on a phone, at the foot of the rail when the window is wide. Every pill
+     shows the same state (one listener sets them all). */
+  const STATE_WORDS = { synced: 'Synced', syncing: 'Syncing', offline: 'Offline', error: 'Can\'t sync', asleep: 'Cloud asleep',
+    'signed-out': 'Signed out', idle: '' };
+  function showState(pill, state) {
+    pill.dataset.state = state;
+    pill.querySelector('.status-word').textContent = STATE_WORDS[state] || '';
+    pill.title = state === 'offline' ? 'Offline: everything is saved on this device and goes up when you\'re back online'
+      : state === 'error' || state === 'asleep' ? 'Vault can\'t reach your cloud: click for what to do' : 'Sync now';
   }
+  V.statusPill = (cls = '') => {
+    const pill = V.h('button.status' + (cls ? '.' + cls : ''), { type: 'button', onclick: () => {
+      if (V.cloud.status === 'asleep' || V.cloud.status === 'error') explainTrouble(); else V.cloud.sync();
+    } }, V.h('i.dot'), V.h('span.status-word'));
+    showState(pill, V.cloud.status);
+    return pill;
+  };
+  V.on('status', (state) => { for (const pill of document.querySelectorAll('.status')) showState(pill, state); });
 
   function explainTrouble() {
     const asleep = V.cloud.status === 'asleep';
@@ -72,22 +80,32 @@
   }
 
   function buildShell() {
-    const nav = V.h('nav.tabs', { 'aria-label': 'Vault' }, TABS.map(([id, icon, label]) => V.h('button.tab', {
-      type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
-    }, V.icon(icon), V.h('span', { text: label }), id === 'send' ? V.h('span.badge', { hidden: true }) : null)));
+    const nav = V.h('nav.tabs', { 'aria-label': 'Vault' }, V.mark(30, 'rail-mark'),
+      TABS.map(([id, icon, label]) => V.h('button.tab', {
+        type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
+      }, V.h('span.pill', {}, V.icon(icon), id === 'send' ? V.h('span.badge', { hidden: true }) : null),
+      V.h('span.tab-label', { text: label }))),
+      V.h('span.rail-spacer'), V.statusPill('rail-status'));
     const view = V.h('main.view');
-    const top = V.h('header.top', {}, V.h('div.brand', {}, V.h('div.orb'), V.h('span.word', { text: 'VAULT' })),
-      V.h('div.top-spacer'), statusPill());
-    shell = { nav, view, top };
-    V.clear(app, top, nav, view);
+    shell = { nav, view };
+    V.clear(app, nav, view);
     app.className = 'ready ' + (V.desktop ? 'on-pc' : 'on-phone');
   }
 
   /* ---------------------------------------------------------------- screens before the app */
 
+  /* "This version started", to the PC app: said once the app, or the setup or sign-in screen, is up, so a downloaded
+     version that breaks while starting never says it and is taken back (an older PC app doesn't know the call). */
+  let saidHello = false;
+  function hello() {
+    if (!V.desktop || saidHello) return;
+    saidHello = true;
+    V.pc.call('hello', { version: V.VERSION }).catch(() => {});
+  }
+
   function screen(...kids) {
     app.className = 'ready gate ' + (V.desktop ? 'on-pc' : 'on-phone');
-    V.clear(app, V.h('div.gate-box', {}, V.h('div.gate-brand', {}, V.h('div.orb.big'), V.h('div.word', { text: 'VAULT' })), kids));
+    V.clear(app, V.h('div.gate-box', {}, V.h('div.gate-brand', {}, V.wordmark()), kids));
   }
 
   function field(label, attrs) {
@@ -121,6 +139,7 @@
         V.desktop ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different PC', onclick: () => {
           localStorage.removeItem('vault-config'); location.reload();
         } }));
+      hello();
       requestAnimationFrame(() => (email ? passBox : emailBox).focus());
     });
   }
@@ -193,6 +212,7 @@
           V.h('p.muted', { text: 'What you\'ll type on your phone. Your e-mail isn\'t sent anything.' }),
           emailRow, passRow, againRow)),
         problem, log, go);
+      hello();
     });
   }
 
@@ -211,23 +231,6 @@
       console.warn('Vault: that connect link was damaged', error);
     }
     history.replaceState(null, '', location.pathname + location.search);
-  }
-
-  function serviceWorker() {
-    if (!('serviceWorker' in navigator) || V.desktop || !/^https:$|^http:$/.test(location.protocol)) return;
-    if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
-    navigator.serviceWorker.register('sw.js').then((registration) => {
-      if (!registration) return;
-      registration.addEventListener('updatefound', () => {
-        const coming = registration.installing;
-        if (!coming) return;
-        coming.addEventListener('statechange', () => {
-          if (coming.state === 'installed' && navigator.serviceWorker.controller) {
-            V.toast('Vault has an update.', { action: 'Reload', onAction: () => location.reload(), ms: 15000 });
-          }
-        });
-      });
-    }).catch((error) => console.warn('Vault: no offline copy', error));
   }
 
   /* ---------------------------------------------------------------- dropping files anywhere */
@@ -259,9 +262,12 @@
   async function main() {
     buildShell();
     const { firstSync } = await V.cloud.start();
+    const kept = V.update.resume();  // where the owner was before Vault reloaded into an update
     const asked = location.hash;  // the home screen icon's shortcuts: "New note" and "Send to PC"
+    if (kept && TABS.some(([id]) => id === kept.tab)) current = kept.tab;
     if (asked === '#send') current = 'send';
     V.go(current);
+    if (kept && kept.note && current === 'notes' && V.data.notes.has(kept.note)) V.notes.open(kept.note);
     if (asked === '#new') V.notes.chooseTemplate();
     if (asked === '#new' || asked === '#send') history.replaceState(null, '', location.pathname + location.search);
     dropAnywhere();
@@ -293,6 +299,7 @@
         if (event.data && event.data.vault === 'shared') V.send.takeShared();
       });
     }
+    V.update.started(kept);
   }
 
   async function boot() {
@@ -300,6 +307,10 @@
       if (V.desktop) {
         await V.pc.ready;
         let config = await V.pc.call('config');
+        V.theme.system(config.scheme);  // Windows' own light or dark, for Settings > Appearance > System
+        V.pc.knows(config);
+        V.pcWindow(config.shown);
+        if (await V.update.atBoot(config)) return;
         if (!config.url) {
           await setupScreen();
           config = await V.pc.call('config');
@@ -314,7 +325,7 @@
         V.data.user = { id: config.userId, email: config.email };
       } else {
         takeConnectLink();
-        serviceWorker();
+        if (await V.update.atBoot()) return;
         const saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
         if (!saved) return connectScreen();
         V.config = { ...saved, phoneUrl: location.origin + location.pathname };
@@ -327,10 +338,14 @@
         V.data.user = user;
       }
       await main();
+      hello();
     } catch (error) {
       console.error(error);
+      // On the PC, a downloaded version that breaks after it started can be left from here too.
+      const builtIn = V.desktop && V.update.state().downloaded
+        ? V.button('Use the built-in copy', { onClick: () => V.update.useBuiltIn().catch(V.problem) }) : null;
       screen(V.h('h1', { text: 'Something went wrong' }), V.h('p.error-text', { text: error.message || String(error) }),
-        V.button('Try again', { kind: 'primary', onClick: () => location.reload() }));
+        V.button('Try again', { kind: 'primary', onClick: () => location.reload() }), builtIn);
     }
   }
 

@@ -202,38 +202,52 @@ V.notes = (() => {
     return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter((n) => n.due && !n.done).length, by };
   }
 
-  function navItem(id, icon, label, count, emoji) {
+  /* A folder shows its emoji; one without gets a colour dot (by its place in the list), unless its name starts with
+     an emoji of its own. */
+  const DOTS = ['slate', 'sky', 'amber', 'green', 'coral', 'teal', 'rose'];
+  const STARTS_WITH_EMOJI = /^\p{Extended_Pictographic}/u;
+  function folderBadge(folder, boxed) {
+    if (folder.icon) return V.h('span.emoji', { text: folder.icon });
+    if (STARTS_WITH_EMOJI.test(folder.name)) return null;
+    const dot = V.h('i.dot.' + DOTS[Math.max(0, folders().indexOf(folder)) % DOTS.length]);
+    return boxed ? V.h('span.dot-box', {}, dot) : dot;
+  }
+
+  function navItem(id, icon, label, count) {
+    const folder = V.data.folders.get(id);
     return V.h('button.nav-item' + (filter === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id), dataset: { id },
-      oncontextmenu: V.data.folders.has(id) ? (event) => { event.preventDefault(); folderMenu(V.data.folders.get(id), event.currentTarget); } : null,
-    }, emoji ? V.h('span.emoji', { text: emoji }) : V.icon(icon), V.h('span.nav-label', { text: label }),
+      oncontextmenu: folder ? (event) => { event.preventDefault(); folderMenu(folder, event.currentTarget); } : null,
+    }, folder ? folderBadge(folder, true) : V.icon(icon), V.h('span.nav-label', { text: label }),
     count ? V.h('span.count', { text: String(count) }) : null);
   }
 
   function drawFolders() {
     const c = counts();
     const list = [
-      navItem('all', 'notes', 'All notes', c.all),
+      navItem('all', 'stack', 'All notes', c.all),
       navItem('pinned', 'pin', 'Pinned', c.pinned),
-      navItem('due', 'calendar', 'Due soon', c.due),
+      navItem('due', 'clock', 'Due soon', c.due),
       V.h('div.nav-heading', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')),
       folders().map((f) => V.h('div.folder-row', {},
-        navItem(f.id, 'folder', f.name, c.by[f.id], f.icon),
+        navItem(f.id, 'folder', f.name, c.by[f.id]),
         V.iconButton('more', `${f.name} options`, (event) => folderMenu(f, event.currentTarget), 'tiny folder-more'))),
       V.h('div.nav-spacer'),
       navItem('trash', 'trash', 'Trash', 0),
     ];
     V.clear(parts.folders, list);
-    // The phone's folder chips: the same choices in a row.
-    const chips = [
-      ['all', 'All', null], ['pinned', 'Pinned', '📌'], ['due', `Due${c.due ? ' · ' + c.due : ''}`, '⏰'],
-      ...folders().map((f) => [f.id, f.name, f.icon || '📁']), ['trash', 'Trash', '🗑️'],
-    ];
-    V.clear(parts.chips, chips.map(([id, label, emoji]) => V.h('button.chip' + (filter === id && !query ? '.on' : ''), {
+    // The phone's folder chips (and a narrow window's): the same choices in a row.
+    const chip = (id, label, lead, count) => V.h('button.chip' + (filter === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id),
       oncontextmenu: V.data.folders.has(id) ? (event) => { event.preventDefault(); folderMenu(V.data.folders.get(id), event.currentTarget); } : null,
-    }, emoji ? V.h('span.emoji', { text: emoji }) : null, label)),
-    V.h('button.chip.add', { type: 'button', onclick: newFolder, 'aria-label': 'New folder' }, V.icon('plus')));
+    }, lead, label, count ? V.h('span.count', { text: String(count) }) : null);
+    V.clear(parts.chips,
+      chip('all', 'All', null, c.all),
+      chip('pinned', 'Pinned', V.icon('pin')),
+      chip('due', 'Due', V.icon('clock'), c.due),
+      folders().map((f) => chip(f.id, f.name, folderBadge(f))),
+      chip('trash', 'Trash', V.icon('trash')),
+      V.h('button.chip.add', { type: 'button', onclick: newFolder, 'aria-label': 'New folder', title: 'New folder' }, V.icon('plus')));
     const on = parts.chips.querySelector('.chip.on');
     if (on && parts.chips.offsetParent) {  // only on the phone, where the chips show
       const left = on.offsetLeft - parts.chips.offsetLeft;
@@ -242,6 +256,9 @@ V.notes = (() => {
       }
     }
   }
+
+  /* "Due today" on a card is just "Today" beside its calendar. */
+  const shortDue = (label) => { const words = label.replace(/^Due /, ''); return words[0].toUpperCase() + words.slice(1); };
 
   function card(note) {
     const folder = folderOf(note);
@@ -254,15 +271,14 @@ V.notes = (() => {
     },
     V.h('div.card-top', {},
       V.h('span.card-title', { text: V.noteTitle(note) }),
-      note.pinned ? V.icon('pin', 'pinned') : null,
-      note.locked ? V.icon('lock', 'locked') : null),
-    note.locked ? V.h('div.card-snippet.muted', { text: 'Locked: open it with your PIN' })
+      note.pinned ? V.icon('pin-on', 'pinned') : null),
+    note.locked ? V.h('div.card-snippet.locked', {}, V.icon('lock'), V.h('span', { text: 'Locked: open it with your PIN' }))
       : plain(note) && (note.title || '').trim() ? V.h('div.card-snippet', { text: plain(note).slice(0, 160) }) : null,
-    prog ? V.h('div.progress', {}, V.h('div.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
-      V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
     V.h('div.card-meta', {},
-      showFolder && folder ? V.h('span.tag', {}, folder.icon ? folder.icon + ' ' : '', folder.name) : null,
-      due ? V.h('span.due.' + (due.cls || 'later'), { text: due.label }) : null,
+      showFolder && folder ? V.h('span.tag', {}, folderBadge(folder), V.h('span', { text: folder.name })) : null,
+      due ? V.h('span.due.' + (due.cls || 'later'), {}, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
+      prog ? V.h('span.progress', {}, V.h('span.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
+        V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
       pictures ? V.h('span.tag', {}, V.icon('image'), String(pictures)) : null,
       V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) })));
   }
@@ -281,17 +297,30 @@ V.notes = (() => {
     });
   }
 
+  /* All notes, not searching: what's pinned, then what's due in the coming week, then the rest. */
+  function sections(list) {
+    if (filter !== 'all' || query) return null;
+    const pinned = list.filter((n) => n.pinned);
+    const soon = list.filter((n) => !n.pinned && n.due && !n.done && V.due(n.due).days <= 7)
+      .sort((a, b) => a.due.localeCompare(b.due));
+    if (!pinned.length && !soon.length) return null;
+    const rest = list.filter((n) => !n.pinned && !soon.includes(n));
+    const part = (title, notes) => (notes.length ? [V.h('h2.list-section', {}, V.h('span', { text: title }),
+      V.h('span.count', { text: String(notes.length) })), notes.map(card)] : null);
+    return [part('Pinned', pinned), part('Due soon', soon), part('Other notes', rest)];
+  }
+
   function drawList() {
     const list = shown();
     parts.heading.textContent = filterTitle();
     parts.headCount.textContent = list.length ? String(list.length) : '';
     const empty = () => {
-      if (query) return V.h('div.empty', {}, V.h('p', { text: `Nothing matches "${query}".` }));
-      if (filter === 'trash') return V.h('div.empty', {}, V.h('p', { text: 'The Trash is empty.' }));
-      if (filter === 'due') return V.h('div.empty', {}, V.h('div.empty-art', { text: '🎉' }), V.h('p', { text: 'Nothing due. Homework notes get a due date.' }));
-      if (filter === 'pinned') return V.h('div.empty', {}, V.h('p', { text: 'Pin a note to keep it at the top.' }));
-      return V.h('div.empty', {}, V.h('div.orb'), V.h('p', { text: 'No notes here yet.' }),
-        V.button('New note', { kind: 'primary', icon: 'plus', onClick: chooseTemplate }));
+      const say = (text, ...more) => V.h('div.empty', {}, V.mark(40), V.h('p', { text }), more);
+      if (query) return say(`Nothing matches "${query}".`);
+      if (filter === 'trash') return say('The Trash is empty.');
+      if (filter === 'due') return say('Nothing due. Homework notes get a due date.');
+      if (filter === 'pinned') return say('Pin a note to keep it at the top.');
+      return say('No notes here yet.', V.button('New note', { kind: 'primary', icon: 'plus', onClick: chooseTemplate }));
     };
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
       kind: 'danger-quiet', icon: 'trash', onClick: async () => {
@@ -299,7 +328,7 @@ V.notes = (() => {
         for (const note of list) await V.cloud.purgeNote(note);
       },
     })) : null;
-    V.clear(parts.list, trashBar, list.length ? list.map(card) : empty());
+    V.clear(parts.list, trashBar, list.length ? sections(list) || list.map(card) : empty());
   }
 
   function draw() {
@@ -332,10 +361,10 @@ V.notes = (() => {
     };
     const listColumn = V.h('section.list-column', {},
       V.h('div.list-head', {},
-        V.h('div.search-box', {}, V.icon('search'), search),
-        V.button('New', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: 'New note (Ctrl+N)' })),
+        V.h('div.search-box', {}, V.icon('search'), search, V.h('kbd.search-hint', { text: 'Ctrl F' })),
+        V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: 'New note (Ctrl+N)' })),
       parts.chips,
-      V.h('div.list-title', {}, parts.heading, parts.headCount),
+      V.h('div.list-title', {}, parts.heading, parts.headCount, V.statusPill()),
       parts.list);
     V.clear(container, V.h('div.notes-layout', {}, parts.folders, listColumn, parts.pane),
       V.h('button.fab', { type: 'button', onclick: chooseTemplate, 'aria-label': 'New note' }, V.icon('plus')));
@@ -344,6 +373,16 @@ V.notes = (() => {
     const opened = V.editor.openId();
     if (opened && V.wide()) V.editor.open(opened, { pane: parts.pane });
   }
+
+  /* The window crossed the wide/narrow line (a PC window snapped to half the screen, a Chromebook's resized): an open
+     note goes between the side pane and the full-screen layer as it is (words, caret and all), and the list is drawn
+     again for the other layout. */
+  V.onWide((wide) => {
+    if (!showing()) return;
+    if (V.editor.openId()) V.editor.move(wide ? parts.pane : null);
+    else if (wide) V.editor.placeholder(parts.pane);
+    draw();
+  });
 
   const showing = () => !!root && root.isConnected && root.dataset.tab === 'notes';
   // Behind the phone's full-screen note there's nothing to redraw (it's redrawn as the note closes).

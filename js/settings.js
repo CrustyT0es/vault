@@ -1,6 +1,6 @@
 /* Vault: the Settings tab. The account, connecting the phone (a QR code with the cloud's address and public key,
    never a password), the locked-notes PIN, the PC's own settings (start with Windows, the quick-note keys, the
-   clipboard, where received files go) and how much of the free space is used. */
+   clipboard, where received files go), how much of the free space is used, and Vault's own version and updates. */
 'use strict';
 
 V.settings = (() => {
@@ -39,7 +39,7 @@ V.settings = (() => {
     const back = document.createElementNS(svg.namespaceURI, 'rect');
     back.setAttribute('width', all); back.setAttribute('height', all); back.setAttribute('fill', '#ffffff');
     const dots = document.createElementNS(svg.namespaceURI, 'path');
-    dots.setAttribute('d', path); dots.setAttribute('fill', '#0a101b');
+    dots.setAttribute('d', path); dots.setAttribute('fill', '#0d0e11');
     svg.append(back, dots);
     return V.h('div.qr', {}, svg);
   };
@@ -133,6 +133,16 @@ V.settings = (() => {
         V.button('Copy the link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Copied. E-mail it to yourself and open it on the phone.'); } })));
   }
 
+  /* Light, dark, or as the phone (or Windows) is set: each device keeps its own (V.theme). */
+  function appearanceCard() {
+    const pick = V.h('div.segmented', { role: 'radiogroup', 'aria-label': 'Theme' },
+      [['system', 'System', V.desktop ? 'pc' : 'phone'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']].map(([value, label, icon]) =>
+        V.h('button', { type: 'button', role: 'radio', 'aria-checked': String(V.theme.choice() === value), dataset: { theme: value },
+          onclick: () => { V.theme.set(value); draw(); } }, V.icon(icon), V.h('span', { text: label }))));
+    return card('Appearance', line('Theme', V.desktop ? 'System follows Windows. Just for this PC.'
+      : 'System follows this phone (or Chromebook). Each device keeps its own.', pick));
+  }
+
   function pcCard() {
     if (!V.desktop || !V.prefs) return null;
     return card('This PC',
@@ -147,6 +157,46 @@ V.settings = (() => {
         } }))));
   }
 
+  /* Vault's own version and its updates (js/update.js): Vault is an app of its own, updated apart from Jarvis. */
+  let checking = false;
+  let lastAnswer = null;
+
+  async function checkNow() {
+    checking = true;
+    lastAnswer = null;
+    draw();
+    try {
+      lastAnswer = await V.update.check();
+    } finally {
+      checking = false;
+      draw();
+    }
+  }
+
+  function aboutCard() {
+    const now = V.update.state();
+    const answer = lastAnswer || {};
+    const said = checking ? 'Checking...'
+      : answer.state === 'error' ? `Couldn't check: ${answer.message || 'try again later'}`
+        : answer.state === 'current' && !now.ready ? 'Vault is up to date.'
+          : now.checked ? `Last checked ${V.ago(now.checked)}` : 'Not checked yet';
+    return card('About Vault',
+      line(`Vault ${now.version}`, said, now.canCheck ? V.button('Check for updates', {
+        icon: 'restore', disabled: checking, onClick: checkNow }) : null),
+      now.ready ? line(/^\d/.test(now.ready) ? `Vault ${now.ready} is ready` : 'An update is ready',
+        'It switches over by itself next time Vault is in the background, or now.',
+        V.button('Update now', { kind: 'primary', icon: 'download', onClick: () => V.update.now() })) : null,
+      now.needsShell ? line(`Vault ${now.needsShell} needs the PC part updated`,
+        'Open Jarvis and click Update: Vault comes with it.', null) : null,
+      V.h('div.setting-buttons', {},
+        V.button('What\'s new', { onClick: () => V.update.whatsNew() }),
+        now.downloaded ? V.button('Use the built-in copy', { kind: 'danger-quiet', onClick: async () => {
+          const sure = await V.confirm('Use the built-in copy?', 'Vault goes back to the version that came with Jarvis '
+            + 'and skips this update. A newer update still comes when there is one.', { ok: 'Go back' });
+          if (sure) V.update.useBuiltIn().catch(V.problem);
+        } }) : null));
+  }
+
   function draw() {
     // The view is shared by every tab: drawing while another tab shows put Settings over it ("it keeps going back to
     // Settings").
@@ -156,13 +206,14 @@ V.settings = (() => {
       error: 'Having trouble reaching the cloud', asleep: 'Your free cloud is asleep (tap the red dot at the top)',
       'signed-out': 'Signed out', idle: '' }[V.cloud.status] || '';
     V.clear(root, V.h('div.page.settings', {},
-      V.h('h1', { text: 'Settings' }),
+      V.h('div.page-head', {}, V.h('h1', { text: 'Settings' }), V.statusPill()),
       card('Your account',
         line(user.email || 'Signed in', 'Your notes, files and clipboard are only in your own cloud.', null),
         V.h('div.setting-buttons', {},
           V.button('Change password', { onClick: changePassword }),
           V.button('Sign out', { kind: 'danger-quiet', onClick: signOut }))),
       phoneCard(),
+      appearanceCard(),
       card('Locked notes',
         line(V.lock.hasPin() ? 'Your PIN is set' : 'No PIN yet',
           'Locked notes are scrambled on your device with your PIN. If you forget it, they can\'t be opened, by anyone.',
@@ -171,10 +222,11 @@ V.settings = (() => {
       card('Sync',
         line(status, V.cloud.live ? 'Changes arrive the moment they\'re made.' : 'Checking for changes every 20 seconds.',
           V.button('Sync now', { icon: 'restore', onClick: () => V.cloud.sync() }))),
-      V.h('p.about', { text: `Vault ${V.VERSION} · made for you by Jarvis` })));
+      aboutCard()));
   }
 
   V.on('status', () => draw());
+  V.on('update', () => draw());
   V.on('data', (table) => { if (table === 'settings') draw(); });
 
   return { render: (container) => { root = container; draw(); } };

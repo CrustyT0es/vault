@@ -22,6 +22,7 @@ V.editor = (() => {
   let pending = null;     // a change from elsewhere that came mid-save: put in once the save is stored
   let pendingFrom = null; // what this device had when it came
   let lastField = null;   // the text box last typed in, for the toolbar's buttons
+  let adding = 0;         // pictures going up to the cloud now
 
   /* -- the words as blocks */
 
@@ -388,6 +389,15 @@ V.editor = (() => {
     if (!images.length) return V.toast('Only pictures can go in a note. Send other files from the Send tab.');
     if (!navigator.onLine) return V.toast('Adding pictures needs the internet.', { kind: 'err' });
     const user = V.data.user;
+    adding++;
+    try {
+      await addEach(images, user);
+    } finally {
+      adding--;
+    }
+  }
+
+  async function addEach(images, user) {
     for (const file of images) {
       const holder = V.h('div.thumb.loading', {}, V.h('div.spinner'));
       parts.pictures.prepend(holder);
@@ -492,7 +502,7 @@ V.editor = (() => {
       host ? null : V.iconButton('back', 'Back to notes', close, 'back'),
       folderPicker(),
       V.h('div.bar-spacer'),
-      V.iconButton('pin', note.pinned ? 'Unpin' : 'Pin to the top', () => { note.pinned = !note.pinned; save(); drawBar(); },
+      V.iconButton(note.pinned ? 'pin-on' : 'pin', note.pinned ? 'Unpin' : 'Pin to the top', () => { note.pinned = !note.pinned; save(); drawBar(); },
         (note.pinned ? 'on ' : '') + 'keep-caret'),
       V.iconButton(note.locked ? 'lock' : 'unlock', note.locked ? 'Locked' : 'Lock this note', toggleLock, note.locked ? 'on' : ''),
       V.iconButton('more', 'More', (event) => moreMenu(event.currentTarget)));
@@ -725,17 +735,7 @@ V.editor = (() => {
     if (note && openId === id && el) {
       // Already open (the Notes tab drawn again, its own card tapped): the same editor moves, with its unsaved words,
       // caret and all.
-      host = pane || null;
-      if (before && before !== host) emptyPane(before);
-      if (pane) {
-        if (layer) { layer.remove(); layer = null; if (history.state && history.state.vault === 'note') history.back(); }
-        if (el.parentNode !== pane) V.clear(pane, el);
-      } else if (!layer) {
-        history.pushState({ vault: 'note' }, '');
-        layer = V.h('div.editor-layer.shown', {}, el);
-        document.getElementById('layers').append(layer);
-      }
-      drawBar();
+      move(pane);
       return;
     }
     if (note) { saveSoon.flush(); save(); }
@@ -795,9 +795,57 @@ V.editor = (() => {
   }
 
   function emptyPane(pane) {
-    V.clear(pane, V.h('div.pane-empty', {}, V.h('div.orb.big'), V.h('p', { text: 'Pick a note, or make a new one.' }),
-      V.h('p.hint', { text: 'Ctrl+N for a new note. Ctrl+Alt+N anywhere on the PC for a quick one.' })));
+    V.clear(pane, V.h('div.pane-empty', {}, V.mark(44), V.h('p', { text: 'Pick a note, or make a new one.' }),
+      V.h('p.hint', { text: V.desktop ? 'Ctrl+N for a new note. Ctrl+Alt+N anywhere on the PC for a quick one.'
+        : 'Ctrl+N for a new note.' })));
   }
+
+  /* The open note goes to `pane` (null: the full-screen layer) as it is: the Notes tab drawn again, its own card
+     tapped, or the window crossing the wide/narrow line (a PC window snapped to half the screen, a Chromebook's
+     resized). The same editor moves, so its words, the caret and any half-typed word stay; what's typed is saved
+     first when it changes place all the same. */
+  function move(pane) {
+    if (!el || !openId) return;
+    const to = pane || null;
+    const from = host;
+    const nowhere = !document.activeElement || document.activeElement === document.body;
+    const active = el.contains(document.activeElement) ? document.activeElement
+      : hiddenFocus && el.contains(hiddenFocus) && nowhere ? hiddenFocus : null;
+    const spot = active && active.setSelectionRange ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+    const scroller = el.querySelector('.editor-scroll');
+    const top = scroller ? scroller.scrollTop : 0;
+    if (from !== to) { saveSoon.flush(); save(); }
+    host = to;
+    if (from && from !== to && from.isConnected) emptyPane(from);  // the pane it was in keeps no old copy
+    if (to) {
+      if (layer) {
+        const leaving = layer;
+        layer = null;  // before going back: the popstate that follows mustn't close the note
+        leaving.remove();
+        if (history.state && history.state.vault === 'note') history.back();
+      }
+      if (el.parentNode !== to) V.clear(to, el);
+    } else if (!layer) {
+      history.pushState({ vault: 'note' }, '');
+      layer = V.h('div.editor-layer.shown', {}, el);
+      document.getElementById('layers').append(layer);
+    }
+    drawBar();  // the back button belongs to the full-screen note only
+    if (scroller && scroller.scrollTop !== top) scroller.scrollTop = top;
+    if (active && active.isConnected && document.activeElement !== active) {
+      active.focus({ preventScroll: true });
+      if (spot) active.setSelectionRange(spot[0], spot[1], spot[2] || 'none');
+    }
+  }
+
+  /* A window narrowed past the wide line hides the side pane before the layout's own change is heard, and the browser
+     lets go of the box being typed in then: which one it was is kept, so move() gives it back with its caret. */
+  let hiddenFocus = null;
+  document.addEventListener('focusout', (event) => {
+    const box = event.target;
+    hiddenFocus = el && el.contains(box) && !event.relatedTarget && !box.getClientRects().length ? box : null;
+  }, true);
+  document.addEventListener('focusin', () => { hiddenFocus = null; }, true);
 
   window.addEventListener('popstate', () => {
     if (!layer) return;
@@ -963,8 +1011,7 @@ V.editor = (() => {
     const keyboard = (window.screen && window.screen.height ? window.screen.height : window.innerHeight) * 0.2;
     if (grew > keyboard && window.innerHeight >= full.height - 60) document.activeElement.blur();
   });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) return;
+  V.on('away', () => {
     saveSoon.flush();
     // Saved (sealed with the key) first, then the words hidden and the key forgotten.
     save().finally(() => {
@@ -973,5 +1020,13 @@ V.editor = (() => {
     });
   });
 
-  return { open, close, placeholder, openId: () => openId, covering: () => !!layer, parse, addPictures };
+  /* Whether the open note can be left right now (Vault reloading into an update): every save done and nothing waiting
+     to be saved, no word half-written by the phone's keyboard, no picture going up. */
+  async function settled() {
+    saveSoon.flush();
+    for (let round = 0; saving && round < 20; round++) await chain;
+    return !saving && !saveSoon.pending() && !adding && !wordInProgress();
+  }
+
+  return { open, close, placeholder, move, openId: () => openId, covering: () => !!layer, parse, addPictures, settled };
 })();
