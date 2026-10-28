@@ -266,19 +266,21 @@
     buildShell();
     const { firstSync } = await V.cloud.start();
     const kept = V.update.resume();  // where the owner was before Vault reloaded into an update
-    const asked = location.hash;  // the home screen icon's shortcuts: "New note" and "Send to PC"
+    const asked = location.hash;  // the home screen icon's shortcuts: "New note", "Send to PC" and "Send clipboard"
     if (kept && TABS.some(([id]) => id === kept.tab)) current = kept.tab;
     if (asked === '#send') current = 'send';
+    if (asked === '#clip') current = 'clips';
     V.go(current);
     if (kept && kept.note && current === 'notes' && V.data.notes.has(kept.note)) V.notes.open(kept.note);
     if (asked === '#new') V.notes.chooseTemplate();
-    if (asked === '#new' || asked === '#send') history.replaceState(null, '', location.pathname + location.search);
+    if (asked === '#new' || asked === '#send' || asked === '#clip') history.replaceState(null, '', location.pathname + location.search);
     dropAnywhere();
     firstSync.then(async () => {
       if (V.cloud.status === 'synced') await V.notes.ensureStarterFolders();
       V.send.checkIncoming();
       V.send.runQueue();
       if (!V.desktop) V.send.takeShared();
+      if (asked === '#clip' && !V.desktop) V.clips.sendNow();
     });
     V.on('badge', badge);
     V.on('signed-out', async () => {

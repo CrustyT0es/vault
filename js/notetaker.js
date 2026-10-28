@@ -66,6 +66,23 @@ V.notetaker = (() => {
   /* -- how it hears */
 
   const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Chrome on Android, kept listening, hands each finished phrase over again with every phrase before it glued on (a
+  // known Chrome bug), so there it hears one phrase at a time and starts again after each.
+  const ANDROID = /Android/i.test(navigator.userAgent);
+  const plainWords = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+  /* What `text` adds after the words already kept, when it starts with them all again (else all of it). */
+  function newPart(kept, text) {
+    const before = plainWords(kept);
+    if (!before || !plainWords(text).startsWith(before)) return text;
+    const tokens = String(text).trim().split(/\s+/);
+    for (let n = 1; n <= tokens.length; n++) {
+      const so = plainWords(tokens.slice(0, n).join(' '));
+      if (so === before) return tokens.slice(n).join(' ');
+      if (so.length > before.length) break;
+    }
+    return text;
+  }
 
   /* 'pc' (Python listens), 'web' (the browser's speech recognition), or null with why not. */
   function engine() {
@@ -83,7 +100,11 @@ V.notetaker = (() => {
     let rec = null;
     let wanted = false;
     let pending = '';      // words heard but not final yet
-    let ends = [];         // when it stopped by itself lately
+    let ends = [];         // when it stopped by itself lately, having heard nothing
+    let taken = 0;         // this session's results already kept
+    let kept = '';         // and their words, to spot them handed over again
+    let last = '';         // the last phrase kept
+    let heard = false;     // this session heard something
     let restart = null;
     let finished = null;   // resolves when it has really stopped
 
@@ -93,16 +114,28 @@ V.notetaker = (() => {
       if (document.hidden) { on.waiting(true); return; }
       const R = Recognition();
       rec = new R();
-      rec.continuous = true;
+      rec.continuous = !ANDROID;
       rec.interimResults = true;
       rec.lang = navigator.language || 'en-US';
+      taken = 0;
+      kept = '';
+      last = '';
+      heard = false;
       rec.onresult = (event) => {
         let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+        for (let i = Math.min(event.resultIndex, taken); i < event.results.length; i++) {
           const result = event.results[i];
-          const words = (result[0] && result[0].transcript) || '';
-          if (result.isFinal) on.final(words);
-          else interim += words;
+          let words = (result[0] && result[0].transcript) || '';
+          if (!result.isFinal) { interim += words; continue; }
+          if (i < taken) continue;  // already kept
+          taken = i + 1;
+          // The words so far again, with the new ones after them: only the new ones.
+          words = newPart(kept, words);
+          if (!plainWords(words) || plainWords(words) === plainWords(last)) continue;
+          last = words.trim();
+          kept = kept ? `${kept} ${last}` : last;
+          heard = true;
+          on.final(words);
         }
         pending = interim;
         on.interim(interim);
@@ -126,14 +159,15 @@ V.notetaker = (() => {
       };
       rec.onend = () => {
         rec = null;
-        if (pending.trim()) on.final(pending);  // Android sometimes ends before the last words are final
+        // Android sometimes ends before the last words are final (but never twice over what was kept).
+        if (pending.trim() && !plainWords(kept).endsWith(plainWords(pending))) { heard = true; on.final(pending); }
         pending = '';
         on.interim('');
         if (!wanted) { if (finished) finished(); finished = null; return; }
         if (document.hidden) { on.waiting(true); return; }
         const now = Date.now();
-        ends = ends.filter((t) => now - t < 10000).concat(now);
-        restart = setTimeout(begin, ends.length > 4 ? 2000 : 150);  // stopping over and over: a breath first
+        ends = ends.filter((t) => now - t < 10000).concat(heard ? [] : [now]);
+        restart = setTimeout(begin, ends.length > 4 ? 2000 : 150);  // stopping over and over, hearing nothing: a breath first
       };
       try {
         rec.start();

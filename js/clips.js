@@ -78,7 +78,8 @@ V.clips = (() => {
       try {
         here = String((await navigator.clipboard.readText()) || '').trim();
       } catch (error) {
-        return;  // not allowed right now
+        offerTap();  // not allowed (no permission yet, or the phone wants a tap): one tap does it
+        return;
       }
       if (here && print(here) !== stored(SEEN)) {
         store(SEEN, print(here));
@@ -88,6 +89,42 @@ V.clips = (() => {
       await take(V.data.clips[0]);
     })().finally(() => { busy = null; });
     return busy;
+  }
+
+  /* Coming back to Vault: the page shows a moment before it has the focus the clipboard needs, so it looks again a few
+     times until it has (each look is one read: Android says so in a little note). */
+  let tries = 0;
+  let again = null;
+  function look() {
+    clearTimeout(again);
+    tries = 0;
+    const go = () => {
+      if (!stepping() || !V.data.user) return;
+      if (!inFront()) { if (++tries < 6) again = setTimeout(go, 300); return; }
+      step();
+    };
+    go();
+  }
+
+  // When reading by itself isn't allowed, a tap is: offered once each time Vault comes back.
+  let offered = false;
+  function offerTap() {
+    if (offered) return;
+    offered = true;
+    V.toast('Send what you copied to your other devices?', { action: 'Send', onAction: shareMine });
+  }
+
+  /* The home screen icon's "Send clipboard" (and the Clipboard tab's button): what's on this clipboard goes now. */
+  async function sendNow() {
+    let here;
+    try {
+      here = String((await navigator.clipboard.readText()) || '').trim();
+    } catch (error) {
+      offerTap();
+      return;
+    }
+    if (here) store(SEEN, print(here));
+    await share(here);
   }
 
   async function turnOn() {
@@ -133,7 +170,8 @@ V.clips = (() => {
 
   async function shareMine() {
     try {
-      const text = await navigator.clipboard.readText();
+      const text = String((await navigator.clipboard.readText()) || '').trim();
+      if (text) store(SEEN, print(text));  // so coming back doesn't send it again
       await share(text);
     } catch (error) {
       V.toast('Vault wasn\'t allowed to read the clipboard. Paste into the box below instead.');
@@ -204,8 +242,9 @@ V.clips = (() => {
     draw();
     if (!looked && V.data.user) { looked = true; step(); }
   });
-  V.on('back', step);
-  window.addEventListener('focus', step);
+  V.on('back', look);
+  V.on('away', () => { offered = false; clearTimeout(again); });
+  window.addEventListener('focus', look);
   V.on('clip-in', (clip) => {
     if (clip.from_device === V.device) return;
     const name = named(clip.from_device);
@@ -233,5 +272,5 @@ V.clips = (() => {
   V.on('pc:clipboard', ({ text }) => { if (V.prefs && V.prefs.clipboardShare && V.data.user) sendCopied(text); });
   V.on('status', (state) => { if (state === 'synced' && unsent) sendCopied(unsent); });
 
-  return { render, share, mayShare, step };
+  return { render, share, mayShare, step, sendNow };
 })();

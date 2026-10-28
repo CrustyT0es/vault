@@ -29,6 +29,7 @@
   },
   "shortcuts": [
     { "name": "New note", "url": "./#new", "icons": [{ "src": "icons/seam-192.png", "sizes": "192x192" }] },
-    { "name": "Send to PC", "url": "./#send", "icons": [{ "src": "icons/seam-192.png", "sizes": "192x192" }] }
+    { "name": "Send to PC", "url": "./#send", "icons": [{ "src": "icons/seam-192.png", "sizes": "192x192" }] },
+    { "name": "Send clipboard", "url": "./#clip", "icons": [{ "src": "icons/seam-192.png", "sizes": "192x192" }] }
   ]
 }

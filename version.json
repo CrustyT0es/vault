@@ -1,14 +1,13 @@
 {
  "format": 1,
- "version": "1.4.0",
+ "version": "1.4.1",
  "min_shell": 1,
  "notes": [
-  "New Claude tab: chat with Claude right in Vault. Pick the model for each chat (Haiku is quick and cheap; Sonnet, Opus and Fable are smarter and cost more).",
-  "Attach pictures (or take a photo of a worksheet), PDFs and text files, or ask about one of your notes.",
-  "Copy a reply or save it as a note. \"Think harder\" and \"Search the web\" switches for tricky questions.",
-  "Your chats sync between your phone, Chromebook and PC. Spending counts toward Vault's AI limit in Settings > AI."
+  "Note-taker: fixed on Android phones, where every phrase came out again and again.",
+  "Clipboard: opening Vault on your phone catches what you copied more reliably, and if your phone wants a tap first, Vault asks with a Send button.",
+  "New: hold the Vault icon on your home screen and pick \"Send clipboard\" to send what you copied to your other devices."
  ],
- "build": "1.4.0-11c35381f851",
+ "build": "1.4.1-553e8041abec",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -75,8 +74,8 @@
    "size": 64641
   },
   "js/clips.js": {
-   "sha256": "2c0d1be32128f16f725fccec9f3e1e3556ca3094adbabbb3250433f3874086e5",
-   "size": 12062
+   "sha256": "f48e8ceea1b7a90469408c8ccafb90e03f68e29c1f12d2123fce4c5e302ce645",
+   "size": 13468
   },
   "js/cloud.js": {
    "sha256": "c9e80ab9b5d36da16ee5251b193fce66f44dc19885e07817890484cb43bb090f",
@@ -115,8 +114,8 @@
    "size": 46413
   },
   "js/notetaker.js": {
-   "sha256": "c1fe4cf64150576edd7bfc542c7f76f3eca6d06544a4c0e53b635c45be03063b",
-   "size": 37885
+   "sha256": "f55efae2608ed6abb2fecd710eaca5af6c71b12c540d7282f6dc7e726cc1e00c",
+   "size": 39711
   },
   "js/organise.js": {
    "sha256": "c20228b822410df359c971d40fed89536fd0b20b62071552374feaab6cfe6235",
@@ -135,8 +134,8 @@
    "size": 13277
   },
   "js/start.js": {
-   "sha256": "d0123ba9a6da78afd7848ca8e0c0956a88117f000f9468c4dc3379bf0042c7e3",
-   "size": 18359
+   "sha256": "297f1bd05c5e99fd3508d80663f54e23f74909c8d27c95629c9bb7bcb104fa38",
+   "size": 18506
   },
   "js/study.js": {
    "sha256": "82356aca15a4532c74324a347e7b609acb20c0f8e8f3eca030919afc4f6d9f73",
@@ -147,19 +146,19 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "e2a7a412a84140084e4493d4b163a1108dde8f102729642c24f9bfdc2137afb8",
+   "sha256": "eee88c15641d288788827fec0b2c95f9e3162ca2a7f7bbb4f86597d3c6bea9d0",
    "size": 29524
   },
   "manifest.webmanifest": {
-   "sha256": "c19222ddfe2b25cdcc359ac588f6bb232ec62170905536987d47149b50310121",
-   "size": 1336
+   "sha256": "2ae901fea4b29bcbb13537bc2e390cedba196d4af203293fc2a0aeb0d6cb43dc",
+   "size": 1452
   },
   "styles.css": {
    "sha256": "38e8acdefa91ba2207f345b82dfae3a2267c557bb7a75fcbe921409817a7eaff",
    "size": 129827
   },
   "sw.js": {
-   "sha256": "77da2a237de077f6e043f51bc7c455cd1e7728a83c1a6219571cf93463e59c7a",
+   "sha256": "8e42101c1ab10a20f6061715daa07187842d6975ef7731ed865f324fb8cdf743",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {
