@@ -21,18 +21,27 @@
 
 V.chat = (() => {
   const MODELS = [
-    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', short: 'Haiku 5.5', about: 'Quick and cheap. Good for most questions.',
+    { id: 'claude-haiku-5-5', provider: 'claude', name: 'Claude Haiku 5.5', short: 'Haiku 5.5', about: 'Quick and cheap. Good for most questions.',
       search: 'web_search_20250305', fallback: false },
-    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', short: 'Sonnet 5.5', about: 'Smarter, for harder homework and longer writing.',
+    { id: 'claude-sonnet-5-5', provider: 'claude', name: 'Claude Sonnet 5.5', short: 'Sonnet 5.5', about: 'Smarter, for harder homework and longer writing.',
       search: 'web_search_20260209', fallback: true },
-    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', short: 'Opus 5.5', about: 'The smartest everyday model.',
+    { id: 'claude-opus-5-5', provider: 'claude', name: 'Claude Opus 5.5', short: 'Opus 5.5', about: 'The smartest everyday model.',
       search: 'web_search_20260209', fallback: true },
-    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', short: 'Fable 5.1', about: 'The most capable, and expensive: keep it for the hardest things.',
+    { id: 'claude-fable-5-1', provider: 'claude', name: 'Claude Fable 5.1', short: 'Fable 5.1', about: 'The most capable, and expensive: keep it for the hardest things.',
       search: 'web_search_20260209', fallback: true },
+    // Gemini (Google), free: for anyone without a paid Claude key. Add a free key in Settings > AI. Text and pictures;
+    // no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter (use mobile data).
+    { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
+      about: 'Google\'s free model. No Claude key needed — just a free Google key (Settings > AI).' },
   ];
+  const CLAUDE_MODELS = MODELS.filter((m) => m.provider !== 'gemini');
   const DEFAULT_MODEL = MODELS[0].id;
+  const GEMINI_MODEL = 'gemini-2.5-flash';
+  const isGemini = (id) => modelOf(id).provider === 'gemini';
+  /* A new chat defaults to Claude, unless only a free Gemini key is set up (a friend without a paid key). */
+  const defaultModel = () => (!V.ai.has('claude') && V.ai.has('gemini') ? GEMINI_MODEL : DEFAULT_MODEL);
   const SYSTEM = [
-    'You are Claude, helping the owner of Vault, their own notes app, which they use for school and for everything else. They are a student.',
+    'You are a helpful AI assistant built into Vault, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
     'Keep answers clear, friendly and no longer than they need to be. Use Markdown: short paragraphs, lists, **bold** for the key words, headings for long answers, and code blocks for code.',
     'They can save any answer as a note, so make answers worth keeping.',
     'When they share a note it comes inside <note> tags, and a text file inside <file> tags: help with what is in it.',
@@ -240,7 +249,7 @@ V.chat = (() => {
   const listOf = () => [...(chats || new Map()).values()].sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 
   function newChat() {
-    const chat = { format: 1, id: V.uuid(), title: '', created: now(), updated: now(), model: DEFAULT_MODEL, think: false,
+    const chat = { format: 1, id: V.uuid(), title: '', created: now(), updated: now(), model: defaultModel(), think: false,
       search: false, system: SYSTEM, turns: [] };
     unsent.set(chat.id, chat);
     return chat;
@@ -394,6 +403,7 @@ V.chat = (() => {
 
   /* What a PDF costs a message, roughly, on `model` (it's sent again with every message). */
   function pdfHint(f, model) {
+    if (isGemini(model)) return `A ${f.pages ? `${f.pages}-page ` : ''}PDF is free on Gemini.`;
     const cost = (f.tokens || 0) * V.ai.rates(model, f.tokens || 0).input / 1e6;
     return `A ${f.pages ? `${f.pages}-page ` : ''}PDF is about ${V.ai.money(cost)} a message on ${nameOf(model)} (less while it's cached).`;
   }
@@ -470,6 +480,49 @@ V.chat = (() => {
   async function userContent(turn, pc) {
     const files = await Promise.all((turn.files || []).map((f) => fileBlock(f, pc)));
     return [...files, ...turn.content];
+  }
+
+  /* ---- the same message, as Gemini's API wants it (text and pictures; no tools) ---- */
+
+  /* One turn's parts for Gemini: its pictures and PDFs inline, text files and the typed words as text. */
+  async function geminiParts(turn) {
+    const parts = [];
+    for (const f of turn.files || []) {
+      if (f.kind === 'image' || f.kind === 'pdf') parts.push({ inlineData: { mimeType: f.mime, data: await base64(await blobOf(f)) } });
+      else if (f.kind === 'text') parts.push({ text: `<file name="${f.name}">\n${await (await blobOf(f)).text()}\n</file>` });
+    }
+    for (const b of turn.content || []) if (b && b.type === 'text' && b.text) parts.push({ text: b.text });
+    return parts.length ? parts : [{ text: '' }];
+  }
+
+  /* The chat so far as Gemini contents: each sent turn (its answer as one text part), then this one. */
+  async function geminiContents(chat, turn) {
+    const contents = [];
+    for (const t of chat.turns) {
+      if (t === turn) break;
+      const answer = repliesOf(t);
+      if (!SENT.has(t.state) || !answer.length) continue;
+      contents.push({ role: 'user', parts: await geminiParts(t) });
+      const words = answer.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
+      contents.push({ role: 'model', parts: [{ text: words || '' }] });
+    }
+    contents.push({ role: 'user', parts: await geminiParts(turn) });
+    return contents;
+  }
+
+  /* One Gemini turn (not streamed: the whole answer comes at once). AiError kinds are turned into ChatError kinds so a
+     blocked network waits and sends later, exactly like Claude. */
+  async function geminiTurn(chat, turn, job) {
+    const contents = await geminiContents(chat, turn);
+    const maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
+    try {
+      return await V.ai.callGemini({ system: chat.system, contents, model: turn.model, maxTokens, signal: job.controller.signal });
+    } catch (error) {
+      if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
+      const kind = (error && error.kind) || 'bad';
+      const known = { offline: 'offline', away: 'away', busy: 'busy', key: 'key', nokey: 'nokey', bad: 'bad' };
+      throw new ChatError(known[kind] || 'bad', (error && error.message) || WORDS.dropped);
+    }
   }
 
   const toolsFor = (turn) => (turn.search ? [{ type: modelOf(turn.model).search, name: 'web_search', max_uses: SEARCHES }] : []);
@@ -622,6 +675,23 @@ V.chat = (() => {
     let failed = null;
     try {
       for (let n = 0; n < MOST_REPLIES; n++) {
+        if (isGemini(turn.model)) {  // Gemini: one call, the whole answer at once (no streaming, tools or fallback)
+          // On the PC the key lives with Jarvis and never enters the page: Gemini is a phone/Chromebook model.
+          if (V.desktop) throw new ChatError('bad', 'This chat uses Gemini — open it on your phone or Chromebook. On this PC, pick a Claude model.');
+          const reply = fresh(turn.model);
+          turn.replies.push(reply);
+          const out = await geminiTurn(chat, turn, job);
+          reply.content = tidy([{ type: 'text', text: out.text || '' }]);
+          reply.usage = out.usage || {};
+          reply.model = turn.model;
+          reply.cost = 0;  // free
+          reply.stop_reason = out.stopReason;
+          if (job.stopped) { turn.state = 'stopped'; break; }
+          if (!out.text && out.stopReason !== 'refusal') throw new ChatError('dropped', WORDS.dropped);
+          turn.state = out.stopReason === 'refusal' ? 'refused' : out.stopReason === 'max_tokens' ? 'cut' : 'done';
+          showLive();
+          break;
+        }
         const { body, betas } = await requestFor(chat, turn);
         const reply = fresh(body.model);
         turn.replies.push(reply);
@@ -1033,6 +1103,10 @@ V.chat = (() => {
     parts.hint.textContent = pdf ? pdfHint(pdf, chat.model) : '';
     parts.hint.hidden = !pdf;
     parts.model.querySelector('.chat-model-name').textContent = nameOf(chat.model);
+    const gem = isGemini(chat.model);  // Gemini has no "Think" or web search here
+    parts.think.hidden = gem;
+    parts.web.hidden = gem;
+    parts.input.placeholder = gem ? 'Ask Gemini anything' : 'Ask Claude anything';
     parts.think.setAttribute('aria-pressed', String(!!chat.think));
     parts.web.setAttribute('aria-pressed', String(!!chat.search));
     parts.input.disabled = old;
@@ -1125,7 +1199,15 @@ V.chat = (() => {
       draw();
       return refresh();
     }).then(() => { choose(); draw(); reflect(); pump().catch(() => {}); }).catch(() => {});
-    if (!V.desktop) V.ai.check().catch(() => {});
+    if (!V.desktop) V.ai.check().then(() => {
+      // Only a free Gemini key (no Claude key)? The blank chat that opened before the check finished starts on Claude
+      // by default — move it to the free Gemini model so the first message doesn't dead-end.
+      const c = chatOf(openId);
+      if (c && !c.turns.length && unsent.has(c.id) && c.model === DEFAULT_MODEL && !V.ai.has('claude') && V.ai.has('gemini')) {
+        c.model = GEMINI_MODEL;
+        drawBox();
+      }
+    }).catch(() => {});
   }
 
   const blank = () => [...unsent.values()].find((c) => !c.turns.length && !draftOf(c.id).text && !draftOf(c.id).files.length
@@ -1168,9 +1250,10 @@ V.chat = (() => {
     const cents = (d) => `${(d * 100).toFixed(d < 0.001 ? 2 : 1)}¢`;
     const sheet = V.sheet({
       title: 'Model',
-      content: [V.h('div.model-choices', {}, MODELS.map((m) => {
+      content: [V.h('div.model-choices', {}, (V.desktop ? CLAUDE_MODELS : MODELS).map((m) => {
         const r = V.ai.rates(m.id);
         const typical = (1500 * r.input + 600 * r.output) / 1e6;
+        const costLine = m.free ? 'Free — needs a free Google key (Settings > AI)' : `About ${cents(typical)} a short answer · ${per(r)}`;
         return V.h('button.model-choice' + (m.id === chat.model ? '.on' : ''), { type: 'button', dataset: { model: m.id },
           'aria-current': m.id === chat.model ? 'true' : null, onclick: async () => {
             sheet.close();
@@ -1180,7 +1263,7 @@ V.chat = (() => {
             if (chats.has(chat.id)) await persist(chat);
           } },
         V.h('span.mc-text', {}, V.h('span.mc-name', { text: m.name }), V.h('span.mc-about', { text: m.about }),
-          V.h('span.mc-cost', { text: `About ${cents(typical)} a short answer · ${per(r)}` })),
+          V.h('span.mc-cost', { text: costLine })),
         m.id === chat.model ? V.icon('check', 'mc-check') : null);
       })),
       V.h('p.hint', { text: 'Changing it in the middle of a chat is fine: the next answer uses the new one. "Think" makes any of them think longer (slower, and it costs more).' })],
@@ -1345,8 +1428,9 @@ V.chat = (() => {
     for (const turn of chat.turns) {
       const extras = [...(turn.files || []).map((f) => f.name), ...(turn.notes || []).map((n) => `note: ${n.title}`)];
       lines.push('**You:**', '', turn.text || '', ...(extras.length ? ['', `(Attached: ${extras.join(', ')})`] : []), '');
-      const words = turn.state === 'refused' ? '(Claude declined to answer this one.)' : textOf(turn) || '(No answer.)';
-      lines.push(`**Claude** (${nameOf(turn.model)}):`, '', words, '', '---', '');
+      const who = isGemini(turn.model) ? 'Gemini' : 'Claude';
+      const words = turn.state === 'refused' ? `(${who} declined to answer this one.)` : textOf(turn) || '(No answer.)';
+      lines.push(`**${who}** (${nameOf(turn.model)}):`, '', words, '', '---', '');
     }
     return lines.join('\n');
   }

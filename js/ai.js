@@ -38,8 +38,22 @@ V.ai = (() => {
   const KEY_SHAPE = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
   const CONSOLE = 'https://console.anthropic.com/settings/keys';
 
+  // Gemini (Google), the free backup brain. The note-taker and the Claude tab fall back to it when there's no Claude
+  // key — a friend or classmate with no paid key. It's called the same way: straight from this device to Google with
+  // that person's own free key (aistudio.google.com/apikey), kept in their own private storage at
+  // <owner>/private/gemini.json, in memory only on a phone or Chromebook, exactly like the Claude one and never shown.
+  // Google's free tier costs nothing, so Gemini answers are never charged or counted against the monthly limit. It is
+  // NOT a way past a school's content filter: like Claude, Google's API is blocked on a school network — use mobile
+  // data, or let the note wait and go when you're home.
+  const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+  const GEMINI_MODEL = 'gemini-2.5-flash';   // the free default; the Claude tab offers it as a model
+  const GEMINI_KEY_FILE = 'gemini.json';
+  const GEMINI_KEY_SHAPE = /^AIza[0-9A-Za-z_-]{30,}$/;
+  const GEMINI_CONSOLE = 'https://aistudio.google.com/apikey';
+
   let key = null;       // a phone's or Chromebook's copy of the key: in memory only
-  let known = null;     // { cloud, pc }: where the key is (never the key)
+  let geminiKey = null; // likewise for the Gemini key
+  let known = null;     // { cloud, pc, gemini }: where the keys are (never the key itself)
   let looking = null;
   let saving = false;
 
@@ -68,6 +82,7 @@ V.ai = (() => {
      (each priced as that model); web searches are a cent each. */
   function price(usage, model = MODEL) {
     const u = usage || {};
+    if (u.gemini) return 0;  // Google's free tier: never charged, never counted against the monthly limit
     const one = (part, who) => {
       const fresh = Number(part.input_tokens) || 0;
       const write = Number(part.cache_creation_input_tokens) || 0;
@@ -148,7 +163,9 @@ V.ai = (() => {
     }
     const { data, error } = await V.cloud.sb.storage.from('vault').list(folder(), { limit: 100 });
     if (error) throw error;
-    return { cloud: (data || []).some((f) => f.name === KEY_FILE && f.id) };
+    const files = data || [];
+    return { cloud: files.some((f) => f.name === KEY_FILE && f.id),
+      gemini: files.some((f) => f.name === GEMINI_KEY_FILE && f.id) };
   }
 
   function check() {
@@ -197,10 +214,45 @@ V.ai = (() => {
     key = null;
   }
 
+  /* -- the Gemini key (a phone's or Chromebook's, in the same private place, in memory only) */
+
+  const geminiPath = () => `${folder()}/${GEMINI_KEY_FILE}`;
+  const forgetGeminiKey = () => { geminiKey = null; };
+
+  async function getGeminiKey() {
+    if (geminiKey) return geminiKey;
+    const { data, error } = await V.cloud.sb.storage.from('vault').download(geminiPath());
+    if (error || !data) {
+      known = { ...(known || {}), gemini: false };
+      throw new AiError('nokey', 'Add a free Google key first: Settings > AI.');
+    }
+    let found = '';
+    try { found = String(JSON.parse(await data.text()).key || '').trim(); } catch (e) { /* not a key file */ }
+    if (!GEMINI_KEY_SHAPE.test(found)) throw new AiError('nokey', 'The Gemini key saved in your cloud isn\'t a Google key. Set it up again in Settings > AI.');
+    geminiKey = found;
+    return geminiKey;
+  }
+
+  async function saveGeminiKey(pasted) {
+    const clean = String(pasted || '').trim();
+    if (!GEMINI_KEY_SHAPE.test(clean)) throw new Error('That doesn\'t look like a Google key: they start with AIza and are long. Get one free at aistudio.google.com/apikey.');
+    const record = { format: 1, key: clean, from: V.device, at: new Date().toISOString() };
+    await V.cloud.upload(geminiPath(), new Blob([JSON.stringify(record)], { type: 'application/json' }), { mime: 'application/json' });
+    geminiKey = clean;
+    known = { ...(known || {}), gemini: true };
+  }
+
+  async function removeGeminiKey() {
+    await V.cloud.remove([geminiPath()]);
+    known = { ...(known || {}), gemini: false };
+    geminiKey = null;
+  }
+
   /* -- asking Claude */
 
   const WORDS = {
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
+    geminiKey: 'Google didn\'t accept the Gemini key. Set it up again in Settings > AI.',
     busy: 'Claude is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     away: 'You\'re offline. Your words are saved, and the notes will be made by themselves when you\'re back online.',
@@ -230,6 +282,48 @@ V.ai = (() => {
     }
     const words = (data.content || []).filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
     return { text: words, stopReason: data.stop_reason || '', usage: data.usage || {} };
+  }
+
+  /* One request straight to Google's Gemini API. `contents` is Gemini's own shape ([{ role:'user'|'model', parts:[...] }]);
+     the note-taker sends one user turn, the Claude tab a whole conversation. Returns { text, stopReason, usage } like
+     `direct`, with usage.gemini so it's priced as free. Never retried. */
+  async function callGemini({ system, contents, model = GEMINI_MODEL, maxTokens = MAX_TOKENS, signal } = {}) {
+    const sending = await getGeminiKey();
+    const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
+    if (system) body.systemInstruction = { parts: [{ text: system }] };
+    let response;
+    try {
+      response = await fetch(`${GEMINI_API}${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST', signal,
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': sending },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {  // stopped, no internet, or a network that blocks Google (a school's)
+      if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
+      throw new AiError('offline', navigator.onLine ? WORDS.offline : WORDS.away);
+    }
+    if (response.status === 401 || response.status === 403 || response.status === 400) {
+      // 400 is often a bad key too: forget it so a replaced one is read next time.
+      let said = ''; try { said = ((await response.json()).error || {}).message || ''; } catch (e) { /* not JSON */ }
+      geminiKey = null;
+      throw new AiError('key', said && !/key/i.test(said) ? `Google turned the request down (${said}).` : WORDS.geminiKey);
+    }
+    if (response.status === 429 || response.status >= 500) throw new AiError('busy', WORDS.busy);
+    let data = null;
+    try { data = await response.json(); } catch (error) { /* not JSON */ }
+    if (!response.ok || !data) {
+      const said = data && data.error && data.error.message;
+      if (response.status === 404) throw new AiError('bad', `The Gemini model "${model}" isn't available for this key${said ? ` (${said})` : ''}. Try again later.`);
+      throw new AiError('bad', `Gemini couldn't answer this${said ? ` (${said})` : ''}.`);
+    }
+    const cand = (data.candidates || [])[0] || {};
+    const finish = String(cand.finishReason || '');
+    const text = (((cand.content || {}).parts) || []).filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('');
+    const stopReason = finish === 'MAX_TOKENS' ? 'max_tokens'
+      : ['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION', 'SPII'].includes(finish) ? 'refusal'
+      : 'end_turn';
+    const m = data.usageMetadata || {};
+    return { text, stopReason, usage: { gemini: true, model, input_tokens: m.promptTokenCount || 0, output_tokens: m.candidatesTokenCount || 0 } };
   }
 
   async function viaPc(system, text) {
@@ -284,7 +378,12 @@ V.ai = (() => {
   async function ask({ system, text }) {
     const over = await overLimit();
     if (over) throw over;
-    const answer = V.desktop ? await viaPc(system, text) : await direct(system, text);
+    // Which brain: the PC uses Jarvis's Claude; elsewhere Claude if its key is set up, otherwise the free Gemini key.
+    if (!known && !V.desktop) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
+    const useGemini = !V.desktop && !(known && known.cloud) && !!(known && known.gemini);
+    const answer = V.desktop ? await viaPc(system, text)
+      : useGemini ? await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }] })
+      : await direct(system, text);
     const cost = price(answer.usage);
     await count(cost);
     return { ...answer, cost };
@@ -339,10 +438,38 @@ V.ai = (() => {
     } });
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
     const open = () => window.open(CONSOLE, '_blank', 'noopener');
-    return V.h('div.ai-key', {},
+    return V.h('div.ai-key.ai-key-claude', {},
       ui.line('Claude key', 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
+  }
+
+  /* The free Gemini key row: paste a free Google key on a phone or Chromebook (the owner uses Claude on the PC). */
+  function geminiKeyLine(ui) {
+    if (V.desktop) {
+      return ui.line('Gemini key (free)', 'A free backup from Google, for when there\'s no Claude key. Add it on your phone or Chromebook (Vault > Settings > AI there).', null);
+    }
+    if (known && known.gemini) {
+      const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
+      const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
+        const sure = await V.confirm('Remove the Gemini key?', 'This device stops using Google\'s free Gemini.', { ok: 'Remove', danger: true });
+        if (!sure) return;
+        try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
+        ui.draw();
+      } });
+      return ui.line('Gemini key (free)', 'Google\'s free model, used when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
+    }
+    const box = V.h('input.field', { type: 'password', placeholder: 'AIza...', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
+    const save = V.button('Save', { kind: 'primary', onClick: async () => {
+      try { await saveGeminiKey(box.value); box.value = ''; V.toast('Gemini key saved — it\'s free to use.'); ui.draw(); }
+      catch (error) { V.problem(error); }
+    } });
+    box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
+    const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
+    return V.h('div.ai-key.ai-key-gemini', {},
+      ui.line('Gemini key (free)', 'No Claude key? Google\'s Gemini is free. Get a key at aistudio.google.com/apikey and paste it here: it\'s kept in your own cloud and never shown. (Like Claude, it won\'t work on school wifi — use mobile data.)', null),
+      V.h('div.ai-key-row', {}, box, save),
+      V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }));
   }
 
   function card(ui) {
@@ -376,15 +503,19 @@ V.ai = (() => {
     } });
     return ui.card('AI',
       keyLine(ui),
+      geminiKeyLine(ui),
       V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn),
       ui.line(`This month (${monthName()})`, spent, limit),
-      V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic) only reads what you send it: a transcript when you make notes, '
-        + 'and your messages in the Claude tab. It never hears the sound itself.' }));
+      V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic), and Gemini (by Google) when you use it, only read what you send: '
+        + 'a transcript when you make notes, and your messages in the Claude tab. Neither hears the sound itself. Gemini is '
+        + 'free, so it isn\'t counted here.' }));
   }
 
   V.on('signed-out', () => { key = null; known = null; });
 
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
-    removeKey, AiError, WORDS, PRICES, state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc))),
-    MODEL, API, API_VERSION };
+    removeKey, callGemini, getGeminiKey, saveGeminiKey, removeGeminiKey, forgetGeminiKey, AiError, WORDS, PRICES,
+    state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc) || known.gemini)),
+    has: (who) => (who === 'gemini' ? !!(known && known.gemini) : !!(known && (known.cloud || (V.desktop && known.pc)))),
+    MODEL, API, API_VERSION, GEMINI_MODEL };
 })();

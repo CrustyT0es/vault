@@ -562,7 +562,7 @@ V.notetaker = (() => {
         closeLayer();
         openNote(id);
       }
-      V.toast(`Notes made${done.cut ? ' (cut short)' : ''}. That cost about ${V.ai.money(done.cost)}.`, { ms: 5000 });
+      V.toast(`Notes made${done.cut ? ' (cut short)' : ''}.${done.cost ? ` That cost about ${V.ai.money(done.cost)}.` : ' Free.'}`, { ms: 5000 });
       if (done.soonest && shown) setTimeout(() => offerReminder(id, done.soonest), 400);
     } finally {
       inFlight.delete(id);
