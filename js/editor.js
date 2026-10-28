@@ -2206,9 +2206,11 @@ V.editor = (() => {
 
   /* Another part of Vault adds a button to the writing tools: { name, label, icon (a util.js icon name, or a
      function making one), onClick, keepCaret (default true: the caret and the phone's keyboard stay), shown (optional:
-     (note, words) => whether it shows now) }. Notes opened from then on show it. */
+     (note, words) => whether it shows now), first (optional: before the other added tools, next to Voice memo) }.
+     Notes opened from then on show it. */
   function addTool(tool) {
-    if (tool && tool.name && !extraTools.some((t) => t.name === tool.name)) extraTools.push(tool);
+    if (!tool || !tool.name || extraTools.some((t) => t.name === tool.name)) return;
+    if (tool.first) extraTools.unshift(tool); else extraTools.push(tool);
   }
 
   /* An attachment kind another part of Vault shows among the pictures (a drawing): make(attachment, noteId) -> its
@@ -2341,5 +2343,6 @@ V.editor = (() => {
 
   return { open, close, placeholder, move, openId: () => openId, covering: () => !!layer, parse, addPictures, addFiles,
     settled, addTool, addThumb, addPictureAction, changeAttachments, addMeta, onTyped, onOpen, current: () => note, words,
-    update, setWords, ask, refreshTools, restore, revealed: () => revealed };
+    update, setWords, ask, refreshTools, restore, revealed: () => revealed,
+    root: () => el };  // the open note's element (js/dictation.js finds the box with the caret and the tools in it)
 })();

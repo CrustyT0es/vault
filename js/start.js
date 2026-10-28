@@ -122,11 +122,11 @@
     return [V.h('label.label', {}, label, input), input];
   }
 
-  function signInScreen(email = '') {
+  function signInScreen(email = '', note = '') {
     return new Promise((resolve) => {
       const [emailRow, emailBox] = field('E-mail', { type: 'email', value: email, autocomplete: 'username' });
       const [passRow, passBox] = field('Vault password', { type: 'password', autocomplete: 'current-password' });
-      const problem = V.h('p.error-text');
+      const problem = V.h('p.error-text', { text: note });
       const go = V.button('Sign in', { kind: 'primary wide-btn', onClick: async () => {
         problem.textContent = '';
         go.disabled = true;
@@ -175,7 +175,8 @@
       manual);
   }
 
-  /* The PC's first start: making the owner's own free cloud (vault/cloudsetup.py does the work). */
+  /* The PC's first start: making the owner's own free cloud (vault/cloudsetup.py does the work), or joining a
+     friend's with the invite link they sent (joinScreen, further down). */
   function setupScreen() {
     return new Promise((resolve) => {
       const open = (url) => V.pc.call('openLink', { url }).catch(V.problem);
@@ -207,6 +208,8 @@
       });
       screen(V.h('h1', { text: 'Set up Vault' }),
         V.h('p.muted', { text: 'Vault keeps your notes, files and clipboard in your own free cloud (Supabase). Setting it up takes about 3 minutes, once.' }),
+        V.pc.can('joinInvite') ? V.h('button.link-btn', { type: 'button', text: 'Got an invite from a friend? Join with it instead',
+          onclick: () => joinScreen(() => setupScreen().then(resolve), resolve) }) : null,
         V.h('div.setup-step', {}, V.h('span.step-number', { text: '1' }), V.h('div', {},
           V.h('strong', { text: 'Make a free Supabase account' }),
           V.h('p.muted', { text: '"Continue with GitHub" is quickest. If it asks for an organization, any name is fine, on the Free plan.' }),
@@ -223,6 +226,150 @@
         problem, log, go);
       hello();
     });
+  }
+
+  /* ---------------------------------------------------------------- invites (vault/invites.py, js/access.js)
+
+     A friend's account is made by the owner, with a one-time code as its first password. The invite link carries
+     the owner's cloud (like #connect=) plus the e-mail and the code, so opening it signs them in; until they choose
+     their own password (chooseScreen), the account says must_change_password and nothing else opens. The code only
+     ever lives in memory here: never saved, and taken out of the address bar at once. */
+
+  // An invite code as the account has it (K7QX9MRT2B), from however it was typed; '' when it isn't one.
+  V.inviteCode = (text) => {
+    const code = String(text || '').replace(/[\s\-_.]/g, '').toUpperCase();
+    return /^[2-9A-HJKMNP-Z]{10}$/.test(code) ? code : '';
+  };
+
+  const CLOUD = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i;
+  function readLink(raw) {
+    const plain = raw.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(decodeURIComponent(escape(atob(plain + '='.repeat((4 - plain.length % 4) % 4)))));
+  }
+
+  let invite = null;
+  function takeInviteLink() {
+    const match = /#invite=([A-Za-z0-9_-]+)/.exec(location.hash);
+    if (!match) return;
+    history.replaceState(null, '', location.pathname + location.search);  // the code never stays in the address bar
+    let found = null;
+    try { found = readLink(match[1]); } catch (error) { /* said below */ }
+    const email = found && String(found.e || '').trim();
+    if (!found || !CLOUD.test(found.u || '') || !found.k || !email || !email.includes('@') || !V.inviteCode(found.c)) {
+      console.warn('Vault: that invite link was damaged');
+      return;
+    }
+    invite = { url: found.u, key: String(found.k), email, code: V.inviteCode(found.c), name: String(found.n || '').slice(0, 60) };
+    // Someone already signed in to Vault in this browser stays signed in: an invite never swaps them out.
+    let saved = null;
+    let who = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
+      who = JSON.parse(localStorage.getItem('vault-user') || 'null');
+    } catch (error) { /* nothing usable kept */ }
+    if (saved && localStorage.getItem('vault-auth')) {
+      const same = saved.url === invite.url && who && String(who.email || '').toLowerCase() === email.toLowerCase();
+      if (!same) { invite.busy = (who && who.email) || 'someone else'; return; }
+    }
+    localStorage.setItem('vault-config', JSON.stringify({ url: invite.url, key: invite.key, email }));
+  }
+
+  /* This browser's Vault is someone else's: the invite waits until they've signed out. */
+  function busyScreen() {
+    return new Promise((resolve) => {
+      screen(V.h('h1', { text: 'Already signed in' }),
+        V.h('p.muted', { text: `This invite is for ${invite.email}, but Vault in this browser is signed in as ${invite.busy}.` }),
+        V.h('ol.steps', {},
+          V.h('li', { text: 'Open Vault here and go to Settings > Sign out.' }),
+          V.h('li', { text: 'Then open the invite link again.' })),
+        V.h('p.hint', { text: 'Or open the link in another browser (or a private window) instead.' }),
+        V.button('Open Vault', { kind: 'primary wide-btn', onClick: () => { invite = null; resolve(); } }));
+    });
+  }
+
+  /* A friend's first sign-in (or any later one before they did it): their own password, which ends the code. */
+  function chooseScreen({ name = '', code = '' } = {}) {
+    return new Promise((resolve) => {
+      const [passRow, passBox] = field('Your new password', { type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
+      const [againRow, againBox] = field('Type it again', { type: 'password', autocomplete: 'new-password' });
+      const problem = V.h('p.error-text');
+      const go = V.button('Save my password', { kind: 'primary wide-btn', onClick: async () => {
+        problem.textContent = '';
+        if (passBox.value.length < 8) { problem.textContent = 'Pick a password of at least 8 characters.'; return; }
+        if (passBox.value !== againBox.value) { problem.textContent = 'The two passwords aren\'t the same.'; return; }
+        if (V.inviteCode(passBox.value) && (!code || V.inviteCode(passBox.value) === code)) {
+          problem.textContent = 'Pick your own password, not the invite code.';
+          return;
+        }
+        go.disabled = true;
+        try {
+          await V.cloud.changePassword(passBox.value);
+          V.toast('Password saved. Your invite code doesn\'t work any more.');
+          resolve();
+        } catch (error) {
+          problem.textContent = /fetch|network|internet|offline/i.test(error.message || '')
+            ? 'Vault can\'t reach the cloud right now. Check the internet, then try again.' : (error.message || String(error));
+        } finally {
+          go.disabled = false;
+        }
+      } });
+      againBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
+      screen(V.h('h1', { text: 'Choose your own password' }),
+        V.h('p.muted', { text: `${name ? `Welcome, ${name}! ` : ''}Your invite code only works once. Pick a password only you know: it's what you'll sign in with on your other devices.` }),
+        passRow, againRow, problem, go,
+        V.h('p.hint', { text: 'Your notes are only yours: nobody else using Vault can see them. Whoever runs the cloud can see what\'s stored in it, so keep secrets in a locked note (it\'s scrambled with your own PIN).' }),
+        V.h('button.link-btn', { type: 'button', text: 'Sign out', onclick: async () => {
+          await V.cloud.signOut().catch(() => {});
+          location.reload();
+        } }));
+      hello();
+      requestAnimationFrame(() => passBox.focus());
+    });
+  }
+
+  /* The gate, whenever the signed-in account is still on its invite code. */
+  async function mustChoose() {
+    if (!(await V.cloud.mustChange())) return;
+    const user = V.data.user || {};
+    await chooseScreen({ name: (invite && invite.name) || user.name || '', code: invite && invite.code });
+  }
+
+  /* A PC whose Vault isn't set up: joining a friend's cloud with the invite link (vault/invites.py's join). A
+     phone-connect link works too, with the person's own password. Python signs in and keeps the session. */
+  function joinScreen(back, done) {
+    const [linkRow, linkBox] = field('Invite link', { type: 'url', placeholder: 'https://...#invite=...', autocomplete: 'off', spellcheck: 'false' });
+    const [passRow, passBox] = field('Your Vault password', { type: 'password', autocomplete: 'current-password' });
+    passRow.hidden = true;
+    const problem = V.h('p.error-text');
+    const go = V.button('Join', { kind: 'primary wide-btn', onClick: async () => {
+      problem.textContent = '';
+      const link = linkBox.value.trim();
+      if (!/#(invite|connect)=/.test(link)) {
+        problem.textContent = 'Paste the whole link your friend sent (it has #invite= in it). The code alone isn\'t enough: the link says which cloud to join.';
+        return;
+      }
+      go.disabled = true;
+      try {
+        const answer = await V.pc.call('joinInvite', { link, password: passRow.hidden ? '' : passBox.value });
+        if (answer.needsPassword) {
+          passRow.hidden = false;
+          problem.textContent = 'That link is for signing in: type your Vault password too.';
+          passBox.focus();
+          return;
+        }
+        done();
+      } catch (error) {
+        problem.textContent = error.message || String(error);
+      } finally {
+        go.disabled = false;
+      }
+    } });
+    for (const box of [linkBox, passBox]) box.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
+    screen(V.h('h1', { text: 'Join with an invite' }),
+      V.h('p.muted', { text: 'Paste the invite link a friend sent you. It gives you your own Vault in their cloud: other people using it can\'t see your notes.' }),
+      linkRow, passRow, problem, go,
+      V.h('button.link-btn', { type: 'button', text: 'Set up my own cloud instead', onclick: back }));
+    requestAnimationFrame(() => linkBox.focus());
   }
 
   /* ---------------------------------------------------------------- the phone's own bits */
@@ -335,21 +482,35 @@
           await signInScreen(config.email || '');
           config = await V.pc.call('config');
         }
-        V.data.user = { id: config.userId, email: config.email };
+        V.data.user = { id: config.userId, email: config.email, invited: !!config.invited, name: config.name || '' };
       } else {
         takeConnectLink();
         if (await V.update.atBoot()) return;
+        takeInviteLink();
+        if (invite && invite.busy) await busyScreen();
         const saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
         if (!saved) return connectScreen();
         V.config = { ...saved, phoneUrl: location.origin + location.pathname };
         V.cloud.client(saved);
         let user = await V.cloud.user();
+        let note = '';
+        if (!user && invite) {  // signed in by the invite's own code
+          try {
+            await V.cloud.signIn(invite.email, invite.code);
+            user = await V.cloud.user();
+          } catch (error) {
+            note = /fetch|network|load failed/i.test(error.message || '')
+              ? 'Vault couldn\'t reach the cloud. Check the internet, then open the invite link again.'
+              : 'That invite has already been used (or a newer one was made). If you chose your own password, sign in with it; otherwise ask for a new invite.';
+          }
+        }
         if (!user) {
-          await signInScreen(saved.email || '');
+          await signInScreen((invite && invite.email) || saved.email || '', note);
           user = await V.cloud.user();
         }
         V.data.user = user;
       }
+      await mustChoose();  // a friend still on their one-time invite code chooses their own password first
       await main();
       hello();
     } catch (error) {

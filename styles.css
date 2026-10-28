@@ -2269,3 +2269,43 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   .chat-head { background: var(--surface); }
   .chat-composer { background: var(--surface); padding: 6px 20px 16px; }
 }
+
+/* Send to / Dictation (1.8) */
+
+/* dictating: the words not final yet in a small pill just above the tools (under them on a wide screen), never in
+   the note itself; the Dictate tool shows pressed (.tool-btn.on) while it listens */
+.dictate-pill {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 5; width: max-content;
+  max-width: calc(100% - 24px); margin: 0 auto; display: flex; align-items: center; gap: 8px; min-height: 36px;
+  padding: 3px 4px 3px 12px; border: 1px solid var(--line); border-radius: var(--r-full); background: var(--card);
+  box-shadow: var(--shadow-2); color: var(--muted); font: 500 13px/18px var(--font);
+  animation: rise var(--d-3) var(--ease-out);
+}
+.dictate-pill.heard { color: var(--text-2); }
+.dictate-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); animation: nt-breathe 2.4s ease-in-out infinite; }
+.dictate-pill[data-state=wait] .dictate-dot { background: var(--faint); animation: none; }
+.dictate-words { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dictate-stop {
+  position: relative; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; flex: none;
+  border: none; border-radius: var(--r-full); background: none; color: var(--muted);
+}
+.dictate-stop::after { content: ""; position: absolute; inset: -8px; }
+.dictate-stop:hover { background: var(--surface-2); color: var(--text); }
+.dictate-stop .icon { width: 16px; height: 16px; }
+@media (min-width: 900px) {
+  .pane .dictate-pill { bottom: auto; top: calc(100% + 8px); }
+}
+
+/* Invites / Feedback (1.8) */
+.invite-what { margin-top: 0; }
+.invite-code-box { flex: 1; min-width: 200px; display: grid; gap: 6px; }
+.invite-code-box .label { margin: 0; }
+.invite-code-box .hint { margin: 0; }
+.invite-code {
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunken); color: var(--text);
+  font: 600 24px/32px ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace; letter-spacing: .06em;
+  text-align: center; user-select: all; overflow-wrap: anywhere;
+}
+.feedback-kinds { margin: 6px 0 10px; }
+.feedback-text { min-height: 140px; }
+.feedback-count { display: block; text-align: right; color: var(--muted); font-size: 12.5px; min-height: 18px; font-variant-numeric: tabular-nums; }

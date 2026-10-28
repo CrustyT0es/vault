@@ -351,6 +351,7 @@ V.notetaker = (() => {
   async function startListening({ id = null, title = '', folderId = null } = {}) {
     const how = engine();
     if (!how.kind) return;
+    V.emit('notetaker-listening');  // dictation (js/dictation.js) lets go of the microphone first
     let note = id ? V.data.notes.get(id) : null;
     if (!note) note = await newNote(title.trim(), folderId);
     const parts = split(note.body);
@@ -742,7 +743,7 @@ V.notetaker = (() => {
   }
 
   const hearsWith = (kind) => (kind === 'pc'
-    ? 'This PC turns the talk into words itself, with Jarvis\'s speech recognition. Nothing is sent anywhere while it listens.'
+    ? 'This PC turns the talk into words itself, with its own speech recognition. Nothing is sent anywhere while it listens.'
     : `${V.device === 'phone' ? 'Your phone\'s' : 'The browser\'s'} speech service (Google) turns the talk into words.`);
 
   function folderChoice() {
@@ -944,5 +945,7 @@ V.notetaker = (() => {
       onclick: () => makeNotes(note.id) }, icon('spark'), V.h('span', { text: 'Make notes' }));
   });
 
-  return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session };
+  // webHearing is dictation's too (js/dictation.js): the same Android handling (newPart/taken/last), kept in one place.
+  return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session,
+    webHearing };
 })();

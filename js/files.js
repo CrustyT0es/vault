@@ -1187,7 +1187,7 @@ V.files = (() => {
         V.h('ul.files-rules', {},
           V.h('li', { text: 'Look in the folders ticked above, and take copies of files (up to 50 MB each).' }),
           V.h('li', { text: 'Never change, move or delete anything on this PC.' }),
-          V.h('li', { text: 'Never see hidden files, programs\' folders (like Jarvis) or password and key files.' }),
+          V.h('li', { text: 'Never see hidden files, programs\' own folders or password and key files.' }),
           V.h('li', { text: 'Only while this PC is on with Vault by the clock. You get a notice when the phone takes a file.' })))));
   }
 

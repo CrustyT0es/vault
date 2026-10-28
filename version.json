@@ -1,13 +1,15 @@
 {
  "format": 1,
- "version": "1.7.0",
+ "version": "1.8.0",
  "min_shell": 1,
  "notes": [
-  "Free AI with Gemini: no Claude key? Add a free Google key (Settings > AI) and the note-taker and the Claude tab both still work \u2014 free.",
-  "Pick Gemini any time from the model menu in the Claude tab.",
-  "Like Claude, Gemini needs the open internet \u2014 on school wifi use mobile data, or let a note wait and send itself when you're home."
+  "Dictation: tap the new mic in a note and talk \u2014 it types for you. Say \"comma\", \"period\" or \"new line\" for punctuation.",
+  "Send to\u2026: under a Claude answer, send it to your Chromebook, PC or phone. It shows up there as a note a second later.",
+  "Invite friends: on your PC, Settings > Invite people makes a one-time code. Your friend gets their own private Vault and picks their own password.",
+  "Send feedback from Settings. If you're the one who invited people, their feedback lands in a Feedback folder.",
+  "Free AI with Gemini (new in 1.7): no Claude key? Add a free Google key in Settings > AI."
  ],
- "build": "1.7.0-a303f8194164",
+ "build": "1.8.0-271c7191135c",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -62,44 +64,56 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "fdd1e31554178116956f7a8be4f71f1e6fc7eca988858745ebfbfa9fc6161398",
-   "size": 4909
+   "sha256": "8ce0e4e3d254895feb2b5b023cf0384f7b481d25d8deca69af76416e64bef2fb",
+   "size": 5031
+  },
+  "js/access.js": {
+   "sha256": "0cf2ebaf7fc5b11ad32184eeca1ba75634f785381f94b068586e993588382c11",
+   "size": 15803
   },
   "js/ai.js": {
-   "sha256": "3db9eb27a63db4f4d3e52ab2d57a750dce3d9883e0996a030a5205c678bb6ff0",
-   "size": 28599
+   "sha256": "e722c0c10ebf71f3a6a506e9724761e15e8d58342d97723623ff1f1846fcbdb5",
+   "size": 29822
+  },
+  "js/arrivals.js": {
+   "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
+   "size": 3838
   },
   "js/attachsearch.js": {
    "sha256": "fc2d4cc2d6dda61646bd54d63995823b43916108a968da4d4104cad79d763358",
    "size": 5778
   },
   "js/chat.js": {
-   "sha256": "34e4305fda372c6f1c36741b9a974be02c7378804576b89dbc9b91e4df7846af",
-   "size": 77260
+   "sha256": "4ad59f1e02e49467d26c30cc9dc763418a267c70742c44b1809a3ccfafe5dab5",
+   "size": 78660
   },
   "js/clips.js": {
    "sha256": "88a54bc8bcb7ffab26cb2c99588d275f2da0ed4bb61543611f673ef836074318",
    "size": 13490
   },
   "js/cloud.js": {
-   "sha256": "2d879353c1e2996a502f25ad9d8fdeed7a0741415f2011a860c30e86d20bb542",
-   "size": 36629
+   "sha256": "0a974bb9fbeaaee219e359616658ca78fdfa3e1b4dd782999d98e51303e8a06d",
+   "size": 39840
   },
   "js/db.js": {
    "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
    "size": 3536
   },
+  "js/dictation.js": {
+   "sha256": "a3d8b9da3e7ae86441b83d9018d206c1a4c95e891d1af1d402d431beb401d0d8",
+   "size": 17809
+  },
   "js/editor.js": {
-   "sha256": "4b4440a369bfdd4edf80306401356420a2e4dca8577bca81572975d0bd2a922b",
-   "size": 108713
+   "sha256": "ab773e3bcf7d200c597a4d701e8d03048c21ed592d1ee59b498ecb2f90975000",
+   "size": 108961
   },
   "js/exams.js": {
    "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
    "size": 6490
   },
   "js/files.js": {
-   "sha256": "55c28cfd2f94e90ab5adec9c55f9629fdfa20a4627eb10a41a02e7b27324baa1",
-   "size": 64630
+   "sha256": "ff065d1cb02d15f41eda17d2fd5b85cf2b8522d29ea071bbf3b900b2f9115c9b",
+   "size": 64620
   },
   "js/format.js": {
    "sha256": "0a99e37956e5a2c3d2f2b9cb33899b0c65703adde4042be3537ddf40b658378b",
@@ -122,12 +136,12 @@
    "size": 7054
   },
   "js/notes.js": {
-   "sha256": "e333ca6c1746e3056c11e071a9a42005884cf76b740878f2a96b267263b24da5",
-   "size": 47795
+   "sha256": "4c1b6d22e010e54536515d6acdd6549cf0e8e8d01f4a2440a80be3fbb9280f0f",
+   "size": 47955
   },
   "js/notetaker.js": {
-   "sha256": "1028490cb3f85fb19ab8c36eac9a4da5713493c925017d638a079c81dfae632a",
-   "size": 46264
+   "sha256": "9e5960adbbdeff67d0aaf6b0f965042231a0880c9f6fdf73f6bdf01011c71744",
+   "size": 46498
   },
   "js/organise.js": {
    "sha256": "e10b0d975f55cc8cedb3d35d9b95503c35bf89550ca535bf10ddb3e20bd4fe7b",
@@ -146,12 +160,12 @@
    "size": 49534
   },
   "js/settings.js": {
-   "sha256": "9ef8e0928b38dac5e5ad0967855e0add5793709efc36d1f925e2a702929bbf20",
-   "size": 13381
+   "sha256": "3e9c188a970a1baf7951af539f2a8350d5e4c7c2d97f933c3fbde3aa322e1996",
+   "size": 13670
   },
   "js/start.js": {
-   "sha256": "296466e5491c81b8ef959bd072a0ecaa81cb2a9f68d31565b4aec017eccae963",
-   "size": 19276
+   "sha256": "2d7a8547dd1229ba2b9b4b0e9f4c0fc3c6facee74efa03dcf01d6426ac10e5ec",
+   "size": 28615
   },
   "js/study.js": {
    "sha256": "c19f8d4e1d12d50fec89d72bfd116a00552184c55e3a0fb0dc5568da6209ad1b",
@@ -162,7 +176,7 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "58901d5384b78bbdddfbb3d841712d6884dec5eb2b9479a2f355063f41887c85",
+   "sha256": "c2959231b9a498fe6b8ee5a597ee76828940b51ebd797940d170563686abfe1a",
    "size": 30309
   },
   "manifest.webmanifest": {
@@ -170,11 +184,11 @@
    "size": 1452
   },
   "styles.css": {
-   "sha256": "a14e8d71d520ee50a8b2f44bc5ef094204f4155a0d205b0fe19497cfde2c26d2",
-   "size": 143506
+   "sha256": "dcf7b2de8d64a4d0316f926237079b26c74971fa41af145e563beb724cb39301",
+   "size": 145864
   },
   "sw.js": {
-   "sha256": "56d80fc4848e89be04ed1e5e7bfd9b10689f7a929111032129a2bf91896c2feb",
+   "sha256": "d86f7c1dfceccea5bfdc46337405faf721702f75ede28b0ae04b39c9556cf7b4",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {

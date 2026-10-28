@@ -55,11 +55,21 @@ V.pc = V.desktop ? (() => {
   const BRIDGE_V1 = ['appReady', 'quietClipboard', 'config', 'token', 'health', 'signIn', 'signOut', 'changePassword',
     'setUp', 'saveFile', 'openFile', 'showFile', 'openLink', 'setClipboard', 'notify', 'setPref', 'pickFolder'];
   let calls = BRIDGE_V1;
+  // Vault on its own (config.standalone, vault/standalone): no Jarvis on this PC, so a newer PC part comes as a new
+  // Vault ZIP, and AI keys are pasted in Settings > AI as on a phone (js/ai.js).
+  let standalone = false;
   return {
     ready,
     call,
     can: (name) => calls.includes(name),
-    knows: (config) => { if (config && Array.isArray(config.can)) calls = config.can; },
+    knows: (config) => {
+      if (config && Array.isArray(config.can)) calls = config.can;
+      standalone = !!(config && config.standalone);
+    },
+    standalone: () => standalone,
+    howToUpdate: () => (standalone
+      ? 'Get the newest Vault from the person who invited you, unzip it and double-click its setup-vault.bat.'
+      : 'Open Jarvis and click Update: Vault comes with it.'),
     token: () => call('token').then((answer) => answer.token),
     setClipboard: (text) => call('setClipboard', { text }),
     notify: (title, text) => call('notify', { title, text }).catch(() => {}),
@@ -678,14 +688,23 @@ V.cloud = (() => {
 
   /* -- signing in and out */
 
+  /* Who's signed in: { id, email }, plus invited (a friend's account in the owner's cloud: js/access.js) and name. */
+  const person = (account) => {
+    const meta = (account && account.user_metadata) || {};
+    const app = (account && account.app_metadata) || {};
+    return { id: account.id, email: account.email, invited: !!(meta.invited_by || app.vault_invited_by),
+      name: String(meta.name || '').slice(0, 60) };
+  };
+
   async function user() {
     if (V.desktop) {
       const answer = await V.pc.call('config');
-      return answer.signedIn ? { id: answer.userId, email: answer.email } : null;
+      return answer.signedIn ? { id: answer.userId, email: answer.email, invited: !!answer.invited,
+        name: answer.name || '' } : null;
     }
     const { data } = await sb.auth.getSession();
     if (data.session) {
-      const who = { id: data.session.user.id, email: data.session.user.email };
+      const who = person(data.session.user);
       try { localStorage.setItem('vault-user', JSON.stringify(who)); } catch (e) { /* private mode */ }
       return who;
     }
@@ -700,7 +719,12 @@ V.cloud = (() => {
     if (V.desktop) {
       await V.pc.call('signIn', { email, password });
     } else {
-      const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+      let { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+      // An invite code typed as it's shown (k7qx-9mrt-2b): the account has it as K7QX9MRT2B (vault/invites.py).
+      const code = V.inviteCode(password);
+      if (error && /invalid login/i.test(error.message) && code && code !== password) {
+        ({ error } = await sb.auth.signInWithPassword({ email: email.trim(), password: code }));
+      }
       if (error) {
         throw new Error(/invalid login/i.test(error.message) ? 'That e-mail or password isn\'t right.' : error.message);
       }
@@ -726,14 +750,49 @@ V.cloud = (() => {
     return count;
   }
 
+  /* A new password. It also ends an invite's one-time code: a friend's account says must_change_password until
+     they choose their own (js/access.js), and the PC's changePassword clears it the same way (vault/cloud.py). */
   async function changePassword(password) {
     if (V.desktop) return V.pc.call('changePassword', { password });
-    const { error } = await sb.auth.updateUser({ password });
-    if (error) throw error;
+    const { error } = await sb.auth.updateUser({ password, data: { must_change_password: false } });
+    if (error) {
+      throw new Error(/same_password|different from the old/i.test(`${error.code} ${error.message}`)
+        ? 'That\'s the password you have now: pick a new one.' : error.message);
+    }
+  }
+
+  /* Whether the signed-in account is still on its one-time invite code (asked fresh when it seems so: it may have
+     been chosen on another device). Offline, what this device last heard. */
+  async function mustChange() {
+    if (V.desktop) {
+      const config = await V.pc.call('config');
+      if (!config.mustChange) return false;
+      if (!V.pc.can('account')) return true;
+      try { return !!(await V.pc.call('account')).mustChange; } catch (error) { return true; }
+    }
+    const { data } = await sb.auth.getSession();
+    const meta = data.session && data.session.user && data.session.user.user_metadata;
+    if (!meta || !meta.must_change_password) return false;
+    try {
+      const fresh = await sb.auth.getUser();
+      if (!fresh.error && fresh.data && fresh.data.user) return !!(fresh.data.user.user_metadata || {}).must_change_password;
+    } catch (error) { /* offline: as it was */ }
+    return true;
+  }
+
+  /* This device's copy belongs to one person. A copy left by someone else who used Vault here (they never signed
+     out, and another person signed in after) is wiped first: never shown to the next one, never sent up as theirs. */
+  async function ownCopy() {
+    const me = V.data.user && V.data.user.id;
+    if (!me) return;
+    const was = await V.db.meta('owner');
+    if (was && was !== me) await V.db.wipe();
+    if (was !== me) await V.db.meta('owner', me);
   }
 
   /* Shows this device's copy at once; the returned promise is the first sync with the cloud. */
   async function start() {
+    await ownCopy();
     await loadLocal();
     window.addEventListener('online', () => sync());
     window.addEventListener('offline', () => setStatus('offline'));
@@ -745,7 +804,7 @@ V.cloud = (() => {
 
   return {
     client, start, sync, save, keep, push, upload, link, blob, remove, purgeNote, user, signIn, signOut,
-    changePassword, accessToken, unsent, mergeExtra, notePrint,
+    changePassword, accessToken, unsent, mergeExtra, notePrint, mustChange,
     get sb() { return sb; },
     get status() { return status; },
     get held() { return heldCount(); },

@@ -76,7 +76,7 @@ V.settings = (() => {
       return;
     }
     const ok = await V.confirm('Sign out?', V.desktop
-      ? 'Vault on this PC (and Jarvis\'s notes) stops until you sign in again. Your notes stay safe in the cloud.'
+      ? `Vault on this PC${V.pc.standalone() ? '' : ' (and Jarvis\'s notes)'} stops until you sign in again. Your notes stay safe in the cloud.`
       : 'Vault on this phone stops until you sign in again. Your notes stay safe in the cloud.', { ok: 'Sign out', danger: true });
     if (!ok) return;
     await V.cloud.signOut();
@@ -190,11 +190,11 @@ V.settings = (() => {
         'It switches over by itself next time Vault is in the background, or now.',
         V.button('Update now', { kind: 'primary', icon: 'download', onClick: () => V.update.now() })) : null,
       now.needsShell ? line(`Vault ${now.needsShell} needs the PC part updated`,
-        'Open Jarvis and click Update: Vault comes with it.', null) : null,
+        V.pc.howToUpdate(), null) : null,
       V.h('div.setting-buttons', {},
         V.button('What\'s new', { onClick: () => V.update.whatsNew() }),
         now.downloaded ? V.button('Use the built-in copy', { kind: 'danger-quiet', onClick: async () => {
-          const sure = await V.confirm('Use the built-in copy?', 'Vault goes back to the version that came with Jarvis '
+          const sure = await V.confirm('Use the built-in copy?', 'Vault goes back to the version installed on this PC '
             + 'and skips this update. A newer update still comes when there is one.', { ok: 'Go back' });
           if (sure) V.update.useBuiltIn().catch(V.problem);
         } }) : null));
@@ -211,7 +211,8 @@ V.settings = (() => {
     V.clear(root, V.h('div.page.settings', {},
       V.h('div.page-head', {}, V.h('h1', { text: 'Settings' }), V.statusPill()),
       card('Your account',
-        line(user.email || 'Signed in', 'Your notes, files and clipboard are only in your own cloud.', null),
+        line(user.email || 'Signed in', user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Vault can see them.'
+          : 'Your notes, files and clipboard are only in your own cloud.', null),
         V.h('div.setting-buttons', {},
           V.button('Change password', { onClick: changePassword }),
           V.button('Sign out', { kind: 'danger-quiet', onClick: signOut }))),
@@ -228,6 +229,8 @@ V.settings = (() => {
       V.backup ? V.backup.card({ card, line, toggle, draw }) : null,  // js/history.js
       V.attachSearch ? V.attachSearch.card({ card, line, toggle, draw }) : null,  // js/attachsearch.js
       V.ai ? V.ai.card({ card, line, toggle, draw }) : null,  // js/ai.js
+      V.invites ? V.invites.card({ card, line, toggle, draw }) : null,  // js/access.js
+      V.feedback ? V.feedback.card({ card, line, toggle, draw }) : null,  // js/access.js
       aboutCard()));
   }
 

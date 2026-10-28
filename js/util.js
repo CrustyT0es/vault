@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.7.0';
+V.VERSION = '1.8.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.

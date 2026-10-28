@@ -7,7 +7,9 @@
    never passes through the page there); a phone or Chromebook can paste one instead. A phone or Chromebook fetches it
    when it makes notes and keeps it in memory only, never in this device's storage: a school Chromebook's storage
    isn't only the owner's, and fetching it again costs nothing. The key is never shown, not even partly. On the PC
-   the request goes from Python (the makeNotes bridge call), with the key never in the page.
+   the request goes from Python (the makeNotes bridge call), with the key never in the page. Vault on its own
+   (V.pc.standalone(): no Jarvis on that PC, so no Jarvis key) keeps its keys the phone's way (`ownKeys`): pasted in
+   Settings > AI, and Gemini for the note-taker when there's no Claude key; Claude still goes through Python there.
 
    Everything Vault's AI spends this month is added up in the settings row's extra.ai (shared by every device,
    written as an upsert of extra alone, never the PIN's columns), with a monthly limit (default $1.00, Settings > AI):
@@ -67,6 +69,9 @@ V.ai = (() => {
   const owner = () => (V.data.user && V.data.user.id) || '';
   const folder = () => `${owner()}/private`;
   const keyPath = () => `${folder()}/${KEY_FILE}`;
+  // Whether this device's page keeps the AI keys itself: a phone or Chromebook, or Vault on its own on a PC. The PC
+  // with Jarvis keeps Jarvis's key in Python instead (aiKeyState/aiKeyShare/aiKeyRemove).
+  const ownKeys = () => !V.desktop || !!(V.pc && V.pc.standalone && V.pc.standalone());
   const month = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthName = () => new Date().toLocaleDateString([], { month: 'long' });
 
@@ -157,7 +162,7 @@ V.ai = (() => {
 
   /* Where the key is: { cloud: in the owner's storage, pc: Jarvis has one (on the PC) }. */
   async function lookUp() {
-    if (V.desktop) {
+    if (!ownKeys()) {
       if (!V.pc.can('aiKeyState')) return { cloud: false, pc: false, old: true };
       return V.pc.call('aiKeyState');
     }
@@ -206,7 +211,7 @@ V.ai = (() => {
   }
 
   async function removeKey() {
-    if (V.desktop) known = await V.pc.call('aiKeyRemove');
+    if (!ownKeys()) known = await V.pc.call('aiKeyRemove');
     else {
       await V.cloud.remove([keyPath()]);
       known = { ...(known || {}), cloud: false };
@@ -378,11 +383,12 @@ V.ai = (() => {
   async function ask({ system, text }) {
     const over = await overLimit();
     if (over) throw over;
-    // Which brain: the PC uses Jarvis's Claude; elsewhere Claude if its key is set up, otherwise the free Gemini key.
-    if (!known && !V.desktop) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
-    const useGemini = !V.desktop && !(known && known.cloud) && !!(known && known.gemini);
-    const answer = V.desktop ? await viaPc(system, text)
-      : useGemini ? await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }] })
+    // Which brain: the PC uses Jarvis's Claude; elsewhere Claude if its key is set up, otherwise the free Gemini key
+    // (Vault on its own on a PC too, its Claude going through Python like the PC with Jarvis).
+    if (!known && ownKeys()) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
+    const useGemini = ownKeys() && !(known && known.cloud) && !!(known && known.gemini);
+    const answer = useGemini ? await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }] })
+      : V.desktop ? await viaPc(system, text)
       : await direct(system, text);
     const cost = price(answer.usage);
     await count(cost);
@@ -402,17 +408,19 @@ V.ai = (() => {
     }
     const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
     const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
-      const sure = await V.confirm('Remove the Claude key?', 'Your phone and Chromebook stop using Claude until it\'s set up again. Jarvis keeps his own.',
+      const sure = await V.confirm('Remove the Claude key?', V.desktop && ownKeys()
+        ? 'This PC, your phone and your Chromebook stop using Claude until it\'s set up again.'
+        : 'Your phone and Chromebook stop using Claude until it\'s set up again. Jarvis keeps his own.',
         { ok: 'Remove', danger: true });
       if (!sure) return;
       try { await removeKey(); V.toast('Key removed.'); } catch (error) { V.problem(error); }
       ui.draw();
     } });
     if (known.cloud) {
-      return ui.line('Claude key', V.desktop ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
+      return ui.line('Claude key', !ownKeys() ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
         : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
     }
-    if (V.desktop) {
+    if (!ownKeys()) {
       if (known.old) return ui.line('Claude key', 'Open Jarvis and click Update to set this up.', null);
       return V.h('div.ai-key', {},
         ui.line('Claude key', known.pc ? 'Claude is used on this PC with Jarvis\'s key. Your phone and Chromebook need it too.'
@@ -439,14 +447,15 @@ V.ai = (() => {
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
     const open = () => window.open(CONSOLE, '_blank', 'noopener');
     return V.h('div.ai-key.ai-key-claude', {},
-      ui.line('Claude key', 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
+      ui.line('Claude key', V.desktop ? 'Paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown, and your phone and Chromebook can use it too.'
+        : 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
 
   /* The free Gemini key row: paste a free Google key on a phone or Chromebook (the owner uses Claude on the PC). */
   function geminiKeyLine(ui) {
-    if (V.desktop) {
+    if (!ownKeys()) {
       return ui.line('Gemini key (free)', 'A free backup from Google, for when there\'s no Claude key. Add it on your phone or Chromebook (Vault > Settings > AI there).', null);
     }
     if (known && known.gemini) {
@@ -457,7 +466,9 @@ V.ai = (() => {
         try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
         ui.draw();
       } });
-      return ui.line('Gemini key (free)', 'Google\'s free model, used when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
+      return ui.line('Gemini key (free)', V.desktop
+        ? 'Google\'s free model: on this PC it makes the note-taker\'s notes when there\'s no Claude key (Gemini chats are on your phone or Chromebook).'
+        : 'Google\'s free model, used when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
     }
     const box = V.h('input.field', { type: 'password', placeholder: 'AIza...', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
     const save = V.button('Save', { kind: 'primary', onClick: async () => {
@@ -516,6 +527,7 @@ V.ai = (() => {
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, getGeminiKey, saveGeminiKey, removeGeminiKey, forgetGeminiKey, AiError, WORDS, PRICES,
     state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc) || known.gemini)),
-    has: (who) => (who === 'gemini' ? !!(known && known.gemini) : !!(known && (known.cloud || (V.desktop && known.pc)))),
+    // The Claude tab on a PC answers with Claude only (chat.js), so a PC never "has" Gemini for it.
+    has: (who) => (who === 'gemini' ? !V.desktop && !!(known && known.gemini) : !!(known && (known.cloud || (V.desktop && known.pc)))),
     MODEL, API, API_VERSION, GEMINI_MODEL };
 })();

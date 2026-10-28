@@ -1008,6 +1008,8 @@ V.chat = (() => {
     const actions = answering ? null : V.h('div.chat-actions', {},
       text && turn.state !== 'refused' ? V.button('Copy', { kind: 'quiet', icon: 'copy', onClick: async () => { await V.copy(text); V.toast('Copied'); } }) : null,
       text && turn.state !== 'refused' ? V.button('Save as note', { kind: 'quiet', icon: 'notes', onClick: (event) => saveMenu(event.currentTarget, chat, turn) }) : null,
+      text && turn.state !== 'refused' && V.send && V.send.targets().length
+        ? V.button('Send to…', { kind: 'quiet', icon: 'send', onClick: (event) => sendMenu(event.currentTarget, chat, turn) }) : null,
       last && !busy ? V.button(turn.state === 'done' || turn.state === 'cut' ? 'Retry' : 'Try again', { kind: 'quiet', icon: 'restore',
         onClick: () => retry(chat, turn) }) : null,
       V.h('span.chat-meta', { text: meta }));
@@ -1356,6 +1358,28 @@ V.chat = (() => {
     try {
       const note = await V.cloud.save('notes', V.notes.blankNote({ folder_id: folder ? folder.id : null, title: chat.title || 'From Claude', body }));
       V.toast(`Saved to ${folder ? folder.name : 'your notes'}`, { action: 'Open', onAction: () => { V.go('notes'); V.notes.open(note.id); } });
+    } catch (error) {
+      V.problem(error);
+    }
+  }
+
+  /* "Send to…": the answer saved as a note in the Inbox, like "Save to Inbox", marked for one of the owner's other
+     devices (js/send.js knows which there are), where js/arrivals.js says it came. It's an ordinary note that syncs
+     like any other: nothing is sent on another device's behalf. */
+  function sendMenu(anchor, chat, turn) {
+    const named = (to) => V.deviceName(to).charAt(0).toUpperCase() + V.deviceName(to).slice(1);  // "Your phone"
+    V.menu(anchor, V.send.targets().map((to) => ({ label: named(to), icon: V.deviceIcon(to),
+      onClick: () => sendTo(chat, turn, to) })));
+  }
+
+  async function sendTo(chat, turn, to) {
+    try {
+      const inbox = V.notes.inbox();
+      await V.cloud.save('notes', V.notes.blankNote({ folder_id: inbox ? inbox.id : null, title: chat.title || 'From Claude',
+        body: textOf(turn), extra: { sent: { to, from: V.device, at: new Date().toISOString() } } }));
+      V.toast(V.cloud.status === 'offline'
+        ? `Saved here. It goes to ${V.deviceName(to)} when you're back online.`
+        : `Sent to ${V.deviceName(to)} — it's at the top of your notes there.`);
     } catch (error) {
       V.problem(error);
     }
