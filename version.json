@@ -1,13 +1,15 @@
 {
  "format": 1,
- "version": "1.4.1",
+ "version": "1.5.0",
  "min_shell": 1,
  "notes": [
-  "Note-taker: fixed on Android phones, where every phrase came out again and again.",
-  "Clipboard: opening Vault on your phone catches what you copied more reliably, and if your phone wants a tap first, Vault asks with a Send button.",
-  "New: hold the Vault icon on your home screen and pick \"Send clipboard\" to send what you copied to your other devices."
+  "Send when you're home: a Claude message that can't get through (like on school wifi) waits and sends by itself once Claude can be reached. Send now or Cancel any time.",
+  "The note-taker does the same: press Stop anywhere, and the notes are made by themselves when Claude can be reached. Nothing gets in your way meanwhile.",
+  "Check Claude (Settings > AI) tells you if Claude works here, you're offline, or this network blocks it.",
+  "Search finds words inside your photos, PDFs, drawings and voice memos (your PC reads them while it's on; turn it on in Settings).",
+  "Fixes: the sync status no longer says Synced when a note is too big to go up, sharing a PDF to Vault as a note keeps the file, and the Ctrl+N tip only shows where it works."
  ],
- "build": "1.4.1-553e8041abec",
+ "build": "1.5.0-911a2ce84760",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -62,44 +64,48 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "bcada8efc9c1484f3f12e84a307095b42622dab0ec104265fe86d0e6865d2ccf",
-   "size": 4666
+   "sha256": "b6e643b32c28b46646c36ddb7bdc79c196a52ef98162c9dff944513b82a5ecd9",
+   "size": 4711
   },
   "js/ai.js": {
-   "sha256": "9b4c7ee6adf639578a618dfaedac294196cd621abc99f7f675cc8e7dac2f4e78",
-   "size": 17847
+   "sha256": "d2bc935116a2882fd26e8070397b1063a90e5d5f03ea7a4d9944be59c3cd667a",
+   "size": 19873
+  },
+  "js/attachsearch.js": {
+   "sha256": "fc2d4cc2d6dda61646bd54d63995823b43916108a968da4d4104cad79d763358",
+   "size": 5778
   },
   "js/chat.js": {
-   "sha256": "83a4c60eafc63cdb8fd2283047a5b93e7faa823f394bc551355d9bd69ea3ae36",
-   "size": 64641
+   "sha256": "f399d6169ccb82e63dcbe20212e6bb8e7ac3529a76cc0c7437a8656768ccd64c",
+   "size": 72011
   },
   "js/clips.js": {
-   "sha256": "f48e8ceea1b7a90469408c8ccafb90e03f68e29c1f12d2123fce4c5e302ce645",
-   "size": 13468
+   "sha256": "88a54bc8bcb7ffab26cb2c99588d275f2da0ed4bb61543611f673ef836074318",
+   "size": 13490
   },
   "js/cloud.js": {
-   "sha256": "c9e80ab9b5d36da16ee5251b193fce66f44dc19885e07817890484cb43bb090f",
-   "size": 33601
+   "sha256": "15de9c5ef1d1cadce3fd8f295d4c57f8dd8e982d1589c6aa793a1b692bdd1fc2",
+   "size": 34043
   },
   "js/db.js": {
    "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
    "size": 3536
   },
   "js/editor.js": {
-   "sha256": "2ba6b126bf4689bd6790e4989d0a4052b9300f2d6356bf917c726645df8f993b",
-   "size": 107194
+   "sha256": "65c778534daf7346dffd0c018d493a25850bcf033651e679efa532ee37b23e57",
+   "size": 107310
   },
   "js/files.js": {
-   "sha256": "e02c906f5314c2f4125c3e81da08c6fd0c1e5fa6dcadd3b0a1339d04b3d3db67",
-   "size": 64610
+   "sha256": "55c28cfd2f94e90ab5adec9c55f9629fdfa20a4627eb10a41a02e7b27324baa1",
+   "size": 64630
   },
   "js/format.js": {
    "sha256": "02f7ee5dddcd9a992da5926f38422212fa8f4fb2eae0ee03ac0ed68bccceedd5",
    "size": 22428
   },
   "js/history.js": {
-   "sha256": "8bf1e7bc282202ecda28ad79eb214753e09c5261c44a492c3cdb386ef67323ea",
-   "size": 24245
+   "sha256": "1b66a0994363a4d90dc8e00b20bea180ab05fbca2780625cddfe88c46d910e1c",
+   "size": 26889
   },
   "js/ink.js": {
    "sha256": "a42e3e1061f4bb515063da2a7ce92d2e503900aa516e6390f717abfa720bae6c",
@@ -110,32 +116,32 @@
    "size": 7054
   },
   "js/notes.js": {
-   "sha256": "d1686005430d92cf562b424695ddc6ffb9d082f1b982d6c1402391e95b855110",
-   "size": 46413
+   "sha256": "a2145e94be5d7f1e05dc477b818fe3854e5f15ef25824eba1dec3be85eb06a4f",
+   "size": 46676
   },
   "js/notetaker.js": {
-   "sha256": "f55efae2608ed6abb2fecd710eaca5af6c71b12c540d7282f6dc7e726cc1e00c",
-   "size": 39711
+   "sha256": "7590f8b560640a8a95367a482b3a5f32e282a0b6d599d463516e220bd922b120",
+   "size": 45851
   },
   "js/organise.js": {
-   "sha256": "c20228b822410df359c971d40fed89536fd0b20b62071552374feaab6cfe6235",
-   "size": 39169
+   "sha256": "a4dd2c66746d2ebd4ee38e57aade5848d005f2e1867bdc862ca012a734eb2d36",
+   "size": 39342
   },
   "js/reminders.js": {
    "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
    "size": 38059
   },
   "js/send.js": {
-   "sha256": "d292884616521b50bbffa321d620c5d7180532ff99c97471205bc4b8ca119cbc",
-   "size": 49468
+   "sha256": "7a4ec8e9e32f95fa4c04fb2d152c9bc600063d938625efac97bb3b01c58f4c13",
+   "size": 49534
   },
   "js/settings.js": {
-   "sha256": "062b754e88602f42417841156628120dd452bde016c1872d5ab57f0c5b7587b5",
-   "size": 13277
+   "sha256": "9ef8e0928b38dac5e5ad0967855e0add5793709efc36d1f925e2a702929bbf20",
+   "size": 13381
   },
   "js/start.js": {
-   "sha256": "297f1bd05c5e99fd3508d80663f54e23f74909c8d27c95629c9bb7bcb104fa38",
-   "size": 18506
+   "sha256": "296466e5491c81b8ef959bd072a0ecaa81cb2a9f68d31565b4aec017eccae963",
+   "size": 19276
   },
   "js/study.js": {
    "sha256": "82356aca15a4532c74324a347e7b609acb20c0f8e8f3eca030919afc4f6d9f73",
@@ -146,19 +152,19 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "eee88c15641d288788827fec0b2c95f9e3162ca2a7f7bbb4f86597d3c6bea9d0",
-   "size": 29524
+   "sha256": "0f5a6ba3d488fb56588688e8e0281726c6ae9d97a48f6ed8cb4e53dee6e1e498",
+   "size": 29855
   },
   "manifest.webmanifest": {
    "sha256": "2ae901fea4b29bcbb13537bc2e390cedba196d4af203293fc2a0aeb0d6cb43dc",
    "size": 1452
   },
   "styles.css": {
-   "sha256": "38e8acdefa91ba2207f345b82dfae3a2267c557bb7a75fcbe921409817a7eaff",
-   "size": 129827
+   "sha256": "bc0b5b0da6fec4f8926358066335b6e12988d42ae4bc3aa31902638065920aa9",
+   "size": 130965
   },
   "sw.js": {
-   "sha256": "8e42101c1ab10a20f6061715daa07187842d6975ef7731ed865f324fb8cdf743",
+   "sha256": "e8d97f7b6b6aa795ced77448907c7de86960e85f350712557e3d0fc18712964d",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {

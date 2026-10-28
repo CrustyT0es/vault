@@ -152,7 +152,7 @@ V.history = (() => {
     }, AFTER_CLOSING);
   });
 
-  V.on('status', (state) => { if (state === 'synced' && waiting && waiting.length) flush(); });
+  V.on('status', (state) => { if ((state === 'synced' || state === 'held') && waiting && waiting.length) flush(); });
   window.addEventListener('online', () => setTimeout(flush, 2000));
 
   const warn = (error) => console.warn('Vault history:', error);
@@ -482,17 +482,56 @@ V.backup = (() => {
     return asking;
   }
 
+  const canRestore = () => V.desktop && V.pc && V.pc.can('restoreBackup');
+
+  /* A list of this PC's backups to put one back from (PC only; a note the cloud has a newer version of comes back as
+     a "(restored copy)", never over the newer one). */
+  async function restoreSheet(ui) {
+    let answer;
+    try { answer = await V.pc.call('listBackups'); } catch (error) { return V.problem(error); }
+    const backups = (answer && answer.backups) || [];
+    const list = V.h('div.history-list');
+    const sheet = V.sheet({
+      title: 'Restore from a backup',
+      content: [V.h('p.hint', { text: 'Puts notes back into your cloud. A note that\'s missing (or older) in the cloud '
+        + 'comes back; one the cloud has a newer version of comes back as a "(restored copy)", so nothing newer is lost. '
+        + 'Pictures and files are put back too.' }), list],
+      actions: [{ label: 'Close' }],
+    });
+    if (!backups.length) {
+      V.clear(list, V.h('p.hint', { text: 'No backups on this PC yet. Use "Back up now" first.' }));
+      return;
+    }
+    V.clear(list, backups.map((b) => V.h('div.history-item.open', {},
+      V.h('div.history-head', {}, V.h('strong', { text: V.ago(b.at) }),
+        V.h('span.history-ago', { text: `${b.notes} note${b.notes === 1 ? '' : 's'} · ${V.size(b.size)}` })),
+      V.h('div.history-actions', {}, V.button('Restore', { icon: 'restore', onClick: async () => {
+        if (!await V.confirm('Restore this backup?', 'Older or missing notes come back; anything newer in your cloud '
+          + 'is kept, with the backup\'s version added as a "(restored copy)".', { ok: 'Restore' })) return;
+        try {
+          const done = await V.pc.call('restoreBackup', { name: b.name });
+          sheet.close();
+          const bits = [`${done.restored} note${done.restored === 1 ? '' : 's'} put back`];
+          if (done.copies) bits.push(`${done.copies} restored cop${done.copies === 1 ? 'y' : 'ies'}`);
+          V.toast(bits.join(', ') + '.', { ms: 6000 });
+          V.cloud.sync();
+        } catch (error) { V.problem(error); }
+      } })))));
+  }
+
   /* Settings' "Backups" card. `ui` is Settings' own { card, line, toggle, draw }. */
   function card(ui) {
-    const rows = [ui.line('Download everything', 'Every note as a Markdown file, in its folder, plus all of Vault in vault.json, '
-      + 'and your Claude chats, in one ZIP. Locked notes stay locked.', V.button('Download', { icon: 'download', onClick: async () => {
+    const rows = [ui.line('Download everything', 'Every note as a Markdown file, in its folder, plus all of Vault in '
+      + 'vault.json, and your Claude chats, in one ZIP. Your pictures and files stay in Vault (the PC\'s weekly backup '
+      + 'copies them too). Locked notes stay locked.', V.button('Download', { icon: 'download', onClick: async () => {
       if (V.chat) await V.chat.refresh();  // the chats from the other devices too
       try { download(); } catch (error) { V.problem(error); }
     } }))];
     if (canBackUp()) {
       if (!info) refresh().then((got) => { if (got) ui.draw(); });
       const where = info && info.folder ? info.folder : 'Documents\\Vault backups';
-      rows.push(ui.line('Back up every week', `Into ${where}, by itself. The newest 4 are kept.`, ui.toggle('backup')),
+      rows.push(ui.line('Back up every week', `Into ${where}, by itself, with your pictures and files. The newest 4 are kept.`,
+        ui.toggle('backup')),
         ui.line(working ? 'Backing up...' : info && info.last ? `Last backup ${V.ago(info.last)}` : 'No backup on this PC yet',
           info && info.count ? `${info.count} kept` : 'Never your password or keys: just your notes.',
           V.h('div.setting-buttons', {},
@@ -502,6 +541,12 @@ V.backup = (() => {
               await refresh();
               ui.draw();
             } }))));
+    }
+    if (canRestore()) {
+      rows.push(ui.line('Restore from a backup', 'Put notes back from a backup on this PC, without losing anything newer.',
+        V.button('Restore', { icon: 'restore', onClick: () => restoreSheet(ui).catch(V.problem) })));
+    } else if (!V.desktop) {
+      rows.push(ui.line('Restore from a backup', 'Restore is on your PC, where your backups are kept.', null));
     }
     return ui.card('Backups', ...rows);
   }

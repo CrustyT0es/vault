@@ -104,6 +104,10 @@ V.cloud = (() => {
   const links = new Map();
 
   const setStatus = (value) => { if (value !== status) { status = value; V.emit('status', value); } };
+  // Rows the cloud set aside (a note too big to go up): the status is honest about them ('held') instead of a plain
+  // 'synced', and clears as soon as they're changed, removed or finally accepted.
+  const heldCount = () => SYNCED.reduce((n, table) => n + [...V.data[table].values()]
+    .filter((row) => row._refused && row._refused === row._dirty && !row._purge).length, 0);
   const offlineError = (error) => !navigator.onLine || /fetch|network|load failed|timed? ?out/i.test(String(error && (error.message || error)));
   const authError = (error) => error && (error.kind === 'signed-out' || error.status === 401 ||
     /JWT|refresh token|not authenticated|signed out/i.test(error.message || ''));
@@ -492,7 +496,7 @@ V.cloud = (() => {
         }
         await push();
         await emptyTrash();
-        setStatus('synced');
+        setStatus(heldCount() ? 'held' : 'synced');
       } catch (error) {
         if (authError(error)) { setStatus('signed-out'); V.emit('signed-out'); return; }
         setStatus(await whyNot(error));
@@ -706,6 +710,7 @@ V.cloud = (() => {
     changePassword, accessToken, unsent,
     get sb() { return sb; },
     get status() { return status; },
+    get held() { return heldCount(); },
     get live() { return live; },
     async saveSettings(values) {
       V.data.settings = { ...V.data.settings, ...values, _dirty: Date.now() };

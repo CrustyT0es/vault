@@ -74,7 +74,7 @@ V.send = (() => {
   /* A Chromebook (or other browser) says so in the settings row's extra, so the PC and the phone can offer it in "Send
      to" before it has sent anything. Only extra is written (never the PIN's columns), straight to the cloud. */
   async function announce() {
-    if (V.device !== 'web' || !V.cloud.sb || V.cloud.status !== 'synced' || !V.data.user) return;
+    if (V.device !== 'web' || !V.cloud.sb || (V.cloud.status !== 'synced' && V.cloud.status !== 'held') || !V.data.user) return;
     const extra = (V.data.settings && V.data.settings.extra) || {};
     const label = V.deviceLabel('web');
     if (extra.devices && extra.devices.web && extra.devices.web.label === label) return;
@@ -530,7 +530,7 @@ V.send = (() => {
           await V.notes.create(V.TEMPLATES[0], {
             title: (shared[0].title || '').slice(0, 200), body: [shared[0].text, shared[0].url].filter(Boolean).join('\n'),
           });
-          if (all.some((f) => isPicture(f.type))) await V.editor.addPictures(all);
+          if (all.length) await V.editor.addFiles(all);  // pictures and other files alike (a shared PDF is kept too)
         } },
         ...(words && !all.length ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
         { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => {

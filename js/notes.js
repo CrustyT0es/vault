@@ -609,6 +609,7 @@ V.notes = (() => {
       prog ? V.h('span.progress', {}, V.h('span.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
         V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
       pictures ? V.h('span.tag', {}, V.icon('image'), String(pictures)) : null,
+      look.terms.length && V.attachSearch ? V.attachSearch.chip(note, look.terms) : null,  // "in a photo" / "in a PDF"
       tags.length ? V.h('span.note-tags', {}, tags.slice(0, 3).map((t) => V.h('span.note-tag', {}, O.marked('#' + t.name, look.terms))),
         tags.length > 3 ? V.h('span.note-tag.more', { text: `+${tags.length - 3}` }) : null) : null,
       V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) })));
@@ -857,7 +858,7 @@ V.notes = (() => {
     const listColumn = V.h('section.list-column', {},
       V.h('div.list-head', {},
         V.h('div.search-box', {}, V.icon('search'), search, V.h('kbd.search-hint', { text: 'Ctrl F' })),
-        V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: 'New note (Ctrl+N)' })),
+        V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: V.appShortcuts ? 'New note (Ctrl+N)' : 'New note' })),
       parts.help,
       parts.chips,
       parts.crumbs,
@@ -890,6 +891,7 @@ V.notes = (() => {
     if (showing() && !V.editor.covering()) draw();
   }, 60);
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
+  V.on('attach-index', redraw);  // the attachment search index arrived (js/attachsearch.js): matches may change
   const typing = (target) => !!target && (target.matches('input, textarea, select') || target.isContentEditable);
   document.addEventListener('keydown', (event) => {
     if (!showing()) return;

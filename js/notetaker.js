@@ -237,6 +237,7 @@ V.notetaker = (() => {
   let session = null;   // { id, title, base, paragraphs, interim, state, ... }
   let ui = null;        // the layer and its parts
   let wake = null;      // the screen kept on
+  const inFlight = new Set();  // notes whose notes Claude is writing right now: never two requests for one note
 
   async function keepAwake(on) {
     try {
@@ -503,35 +504,140 @@ V.notetaker = (() => {
     }
     const body = join(above + (above ? '\n\n' : '') + notes, parts.transcript);
     const title = !(now.title || '').trim() || now.title === before.auto_title ? made.title || now.title : now.title;
-    const extra = { ...(now.extra || {}), notetaker: { ...before, made: new Date().toISOString(), notes_hash: hash(notes),
-      notes_length: notes.length, cards: !!cards, auto_title: title === made.title ? '' : before.auto_title || '' } };
+    const nt = { ...before, made: new Date().toISOString(), notes_hash: hash(notes), notes_length: notes.length,
+      cards: !!cards, auto_title: title === made.title ? '' : before.auto_title || '' };
+    delete nt.wants_notes; delete nt.wants_device; delete nt.wants_cards;  // the notes are made: any auto-make flag clears
+    const extra = { ...(now.extra || {}), notetaker: nt };
     await V.cloud.save('notes', { ...now, title, body, extra });
     return { cost: answer.cost, cut, soonest: deadline(notes) };
   }
 
   async function makeNotes(id) {
-    const cards = wantsCards();
-    if (V.editor.openId() === id) {  // the note is open: closed while its words change, opened again after
-      await V.editor.settled();
-      V.editor.close();
-    }
-    openLayer();
-    ui.making = { id, words: wordCount(split((V.data.notes.get(id) || {}).body).transcript) };
-    ui.problem = null;
-    draw();
-    let done;
-    try {
-      done = await write(id, cards);
-    } catch (error) {
-      showProblem(error.message || String(error), id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old'].includes(error.kind),
-        settings: ['nokey', 'key', 'limit'].includes(error.kind) });
+    if (inFlight.has(id)) {  // already being written (the screen was closed meanwhile, or it's made by itself): never twice
+      if (ui && !session) { closeLayer(); openNote(id); }
+      V.toast('Claude is already writing these notes. They\'ll show in the note when they\'re ready.', { ms: 5000 });
       return;
     }
-    ui.making = null;
-    closeLayer();
-    openNote(id);
-    V.toast(`Notes made${done.cut ? ' (cut short)' : ''}. That cost about ${V.ai.money(done.cost)}.`, { ms: 5000 });
-    if (done.soonest) setTimeout(() => offerReminder(id, done.soonest), 400);
+    inFlight.add(id);  // claimed at once, before anything waits, so nothing else can ask for this note meanwhile
+    try {
+      const cards = wantsCards();
+      if (V.editor.openId() === id) {  // the note is open: closed while its words change, opened again after
+        await V.editor.settled();
+        V.editor.close();
+      }
+      openLayer();
+      ui.making = { id, words: wordCount(split((V.data.notes.get(id) || {}).body).transcript) };
+      ui.problem = null;
+      draw();
+      // The owner can close this screen while Claude writes (Vault is never held up by it): then nothing pops back up.
+      const showing = () => !!(ui && ui.making && ui.making.id === id);
+      let done;
+      try {
+        done = await write(id, cards);
+      } catch (error) {
+        const words = error.message || String(error);
+        if (['offline', 'busy'].includes(error.kind)) {
+          flagWants(id, cards).catch(() => {});  // Vault makes them when home
+          // Nothing in the way: straight back to the note (its words are there), with a line saying what happens.
+          if (showing()) {
+            ui.making = null;
+            closeLayer();
+            openNote(id);
+          }
+          V.toast(words, { ms: 9000 });
+          return;
+        }
+        if (showing()) {
+          showProblem(words, id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old'].includes(error.kind),
+            settings: ['nokey', 'key', 'limit'].includes(error.kind) });
+        } else {
+          V.toast(words, { kind: 'err', ms: 8000 });
+        }
+        return;
+      }
+      const shown = showing();
+      if (shown) {
+        ui.making = null;
+        closeLayer();
+        openNote(id);
+      }
+      V.toast(`Notes made${done.cut ? ' (cut short)' : ''}. That cost about ${V.ai.money(done.cost)}.`, { ms: 5000 });
+      if (done.soonest && shown) setTimeout(() => offerReminder(id, done.soonest), 400);
+    } finally {
+      inFlight.delete(id);
+    }
+  }
+
+  /* -- making the notes by itself once Claude can be reached (a blocked school network at the time of Stop)
+
+     When Stop can't reach Claude, the note is flagged (extra.notetaker.wants_notes) and Vault makes the notes by
+     itself later, when the network might be back — the same triggers as the chat. The flag also names the device that
+     recorded it (wants_device): only that device auto-makes, so two devices never make the same note's notes at once
+     and it's never charged twice. The manual "Make notes" chip stays on every device. */
+
+  function wantsOf(note) {
+    const nt = note && note.extra && note.extra.notetaker;
+    return nt && nt.wants_notes && nt.wants_device === V.device && !note.deleted && !note._purge && !note.locked ? nt : null;
+  }
+  const anyWants = () => [...V.data.notes.values()].some(wantsOf);
+
+  /* Flag a note for auto-making (kept in its extra, so it survives a restart), and start the retry timer. */
+  async function flagWants(id, cards) {
+    const row = V.data.notes.get(id);
+    if (!row || row._purge) return;
+    const nt = { ...((row.extra || {}).notetaker || {}), wants_notes: true, wants_device: V.device, wants_cards: !!cards };
+    await V.cloud.save('notes', { ...row, extra: { ...(row.extra || {}), notetaker: nt } });
+    startAutoTimer();
+  }
+
+  /* Clear the flag without making notes (a problem trying again won't fix, so it mustn't loop). */
+  async function clearWants(id) {
+    const row = V.data.notes.get(id);
+    if (!row || row._purge) return;
+    const nt = { ...((row.extra || {}).notetaker || {}) };
+    delete nt.wants_notes; delete nt.wants_device; delete nt.wants_cards;
+    await V.cloud.save('notes', { ...row, extra: { ...(row.extra || {}), notetaker: nt } });
+  }
+
+  let autoTimer = null;
+  function startAutoTimer() { if (!autoTimer && anyWants()) autoTimer = setInterval(() => autoMake().catch(() => {}), 60000); }
+  function stopAutoTimer() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+
+  function firstWanted() {
+    for (const note of V.data.notes.values()) {
+      // (not one being written right now, and nothing to make from an empty transcript)
+      if (wantsOf(note) && !inFlight.has(note.id) && split(note.body).transcript.trim()) return note;
+    }
+    return null;
+  }
+
+  let remaking = false;
+  async function autoMake() {
+    if (remaking || session) return;  // not while listening, and one at a time
+    const note = firstWanted();
+    if (!note) { if (!anyWants()) stopAutoTimer(); return; }  // (one still being written keeps the timer going)
+    startAutoTimer();
+    if (await V.ai.overLimit()) return;  // out of this month's budget: leave it flagged, try later
+    if (remaking || session || inFlight.has(note.id)) return;  // something started meanwhile (a manual "Make notes")
+    remaking = true;
+    let made = false;
+    inFlight.add(note.id);
+    try {
+      if (V.editor.openId() === note.id) await V.editor.settled();  // flush any unsaved typing before writing notes in
+      await write(note.id, !!(note.extra.notetaker && note.extra.notetaker.wants_cards));  // clears the flag on success
+      made = true;
+    } catch (error) {
+      if (!['offline', 'busy'].includes(error.kind)) await clearWants(note.id).catch(() => {});  // a non-network miss: stop looping
+    } finally {
+      inFlight.delete(note.id);
+      remaking = false;
+    }
+    if (made) {
+      if (ui && ui.problem && ui.problem.id === note.id) { closeLayer(); openNote(note.id); }  // was on the "not made yet" screen
+      V.toast('Made the notes from your saved transcript.', { ms: 5000 });
+    }
+    if (!anyWants()) { stopAutoTimer(); return; }
+    if (made) setTimeout(() => autoMake().catch(() => {}), 0);  // more to do, and this one's done
   }
 
   /* "Lab report · Oct 31 · Set a reminder?" above the tools, as js/reminders.js asks about a typed date. */
@@ -604,7 +710,11 @@ V.notetaker = (() => {
       if (sure) stopListening({ make: false }).catch(V.problem);
       return;
     }
-    if (ui && ui.making && !ui.problem) return;  // Claude is writing: it lands in a moment
+    if (ui && ui.making && !ui.problem) {  // Claude is writing: the screen can go (never held up), the notes still land
+      closeLayer();
+      V.toast('The notes are still being made. They\'ll show in the note when they\'re ready.', { ms: 5000 });
+      return;
+    }
     const id = ui && ((ui.problem && ui.problem.id) || (ui.ready && ui.ready.id));  // (its note was closed for it)
     closeLayer();
     if (id) openNote(id);
@@ -786,6 +896,14 @@ V.notetaker = (() => {
   });
   // Signing out, or another update: what's been heard is saved first.
   window.addEventListener('pagehide', () => { if (session && session.dirty) save().catch(() => {}); });
+
+  // A note flagged for auto-making is tried whenever the network might be back (online, the page shown or focused,
+  // the app coming to the front) and on the gentle timer.
+  window.addEventListener('online', () => autoMake().catch(() => {}));
+  window.addEventListener('focus', () => autoMake().catch(() => {}));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoMake().catch(() => {}); });
+  V.on('back', () => autoMake().catch(() => {}));
+  V.on('data', (table) => { if (table === 'notes' && anyWants()) startAutoTimer(); });
 
   /* The note-taker's first screen: for a new note (from the new-note sheet), or into note `id`. */
   function open(id = null) {

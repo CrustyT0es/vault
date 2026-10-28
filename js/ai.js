@@ -201,9 +201,9 @@ V.ai = (() => {
 
   const WORDS = {
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
-    busy: 'Claude is busy right now. Your words are saved: try again in a minute.',
-    offline: 'Couldn\'t reach Claude from this network. Your words are saved — tap Make notes when you\'re on another network.',
-    away: 'You\'re offline. Your words are saved — tap Make notes when you\'re back online.',
+    busy: 'Claude is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
+    offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
+    away: 'You\'re offline. Your words are saved, and the notes will be made by themselves when you\'re back online.',
     old: 'This PC\'s Vault needs an update to make notes (open Jarvis and click Update). Or make them on your phone.',
   };
 
@@ -263,6 +263,22 @@ V.ai = (() => {
 
   /* The key was refused: this device forgets its copy, so it's fetched again next time (it may have been replaced). */
   const forgetKey = () => { key = null; };
+
+  /* A quick, cheap check that this network reaches Claude at all (Settings' "Check Claude" button, and the same idea
+     the waiting messages lean on). One tiny request straight to api.anthropic.com with a throwaway key and an empty
+     body: the server turns it away (401/400) before writing anything, so it costs nothing and isn't tallied. Any HTTP
+     answer — even an error status — proves the network got through; only a fetch that throws means the network blocks
+     Claude. Returns 'offline' | 'blocked' | 'reachable'. Nothing ever goes anywhere but api.anthropic.com (on the PC
+     too: no key enters the page, and the empty request writes nothing). */
+  async function reachable() {
+    if (!navigator.onLine) return 'offline';
+    try {
+      await fetch(API, { method: 'POST', headers: headers('x'), body: JSON.stringify({ model: MODEL, max_tokens: 1, messages: [] }) });
+      return 'reachable';
+    } catch (error) {
+      return 'blocked';
+    }
+  }
 
   /* One request: { text, stopReason, usage, cost }, or an AiError whose message is ready to show. */
   async function ask({ system, text }) {
@@ -342,8 +358,25 @@ V.ai = (() => {
     } });
     const spent = `${money(now.spent)} of ${now.limit ? money(now.limit) : 'no limit'}`
       + (now.calls ? ` · ${now.calls} request${now.calls === 1 ? '' : 's'}` : '');
+    // "Check Claude": one plain line saying whether this network lets Claude through. The result replaces the hint.
+    const check = V.h('span.ai-check', { role: 'status', text: 'See if this network lets Claude through.' });
+    const checkBtn = V.button('Check Claude', { onClick: async () => {
+      checkBtn.disabled = true;
+      check.dataset.state = '';
+      check.textContent = 'Checking…';
+      try {
+        const how = await reachable();
+        check.dataset.state = how;
+        check.textContent = how === 'reachable' ? 'Claude works ✓'
+          : how === 'offline' ? 'You’re offline.'
+          : 'This network is blocking Claude — try your phone’s mobile data, or it’ll send automatically when you’re home.';
+      } finally {
+        checkBtn.disabled = false;
+      }
+    } });
     return ui.card('AI',
       keyLine(ui),
+      V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn),
       ui.line(`This month (${monthName()})`, spent, limit),
       V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic) only reads what you send it: a transcript when you make notes, '
         + 'and your messages in the Claude tab. It never hears the sound itself.' }));
@@ -351,7 +384,7 @@ V.ai = (() => {
 
   V.on('signed-out', () => { key = null; known = null; });
 
-  return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, card, getKey, saveKey, removeKey,
-    AiError, WORDS, PRICES, state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc))), MODEL,
-    API, API_VERSION };
+  return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
+    removeKey, AiError, WORDS, PRICES, state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc))),
+    MODEL, API, API_VERSION };
 })();

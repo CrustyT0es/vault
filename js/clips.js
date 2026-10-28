@@ -270,7 +270,7 @@ V.clips = (() => {
     } catch (error) { /* tried again when the cloud's back */ }
   }
   V.on('pc:clipboard', ({ text }) => { if (V.prefs && V.prefs.clipboardShare && V.data.user) sendCopied(text); });
-  V.on('status', (state) => { if (state === 'synced' && unsent) sendCopied(unsent); });
+  V.on('status', (state) => { if ((state === 'synced' || state === 'held') && unsent) sendCopied(unsent); });
 
   return { render, share, mayShare, step, sendNow };
 })();

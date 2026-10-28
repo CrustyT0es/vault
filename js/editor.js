@@ -1940,9 +1940,10 @@ V.editor = (() => {
   }
 
   function emptyPane(pane) {
+    const hint = V.desktop ? 'Ctrl+N for a new note. Ctrl+Alt+N anywhere on the PC for a quick one.'
+      : V.appShortcuts ? 'Ctrl+N for a new note.' : '';  // a browser tab never gets Ctrl+N: don't pretend it does
     V.clear(pane, V.h('div.pane-empty', {}, V.mark(44), V.h('p', { text: 'Pick a note, or make a new one.' }),
-      V.h('p.hint', { text: V.desktop ? 'Ctrl+N for a new note. Ctrl+Alt+N anywhere on the PC for a quick one.'
-        : 'Ctrl+N for a new note.' })));
+      hint ? V.h('p.hint', { text: hint }) : null));
   }
 
   /* The open note goes to `pane` (null: the full-screen layer) as it is: the Notes tab drawn again, its own card

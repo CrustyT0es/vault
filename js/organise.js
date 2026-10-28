@@ -194,7 +194,9 @@ V.organise = (() => {
     return (note) => {
       const title = (note.title || '').toLowerCase();
       const body = note.locked ? '' : (note.body || '').toLowerCase();
-      if (!q.words.every((w) => title.includes(w) || body.includes(w))) return false;
+      // A word can also be inside an attachment the PC has read (js/attachsearch.js); never a locked note.
+      if (!q.words.every((w) => title.includes(w) || body.includes(w)
+          || (V.attachSearch && V.attachSearch.hasWord(note, w)))) return false;
       if (q.tags.length) {
         const mine = tagsOf(note).map((t) => t.key);
         if (!q.tags.every((t) => mine.some((key) => key.startsWith(t)))) return false;

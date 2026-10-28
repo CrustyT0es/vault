@@ -35,16 +35,24 @@
     const dot = shell.nav.querySelector('[data-tab=send] .badge');
     dot.textContent = count ? String(count) : '';
     dot.hidden = !count;
+    const waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0;  // messages held until Claude can be reached
+    const cdot = shell.nav.querySelector('[data-tab=claude] .badge');
+    if (cdot) { cdot.textContent = waiting ? String(waiting) : ''; cdot.hidden = !waiting; }
   }
 
   /* The sync pill: on each page's title row on a phone, at the foot of the rail when the window is wide. Every pill
      shows the same state (one listener sets them all). */
   const STATE_WORDS = { synced: 'Synced', syncing: 'Syncing', offline: 'Offline', error: 'Can\'t sync', asleep: 'Cloud asleep',
     'signed-out': 'Signed out', idle: '' };
+  // "held": everything synced but for a note or two the cloud wouldn't take (too big). The pill says so instead of
+  // pretending all is well, and the tooltip says what to do.
+  const heldLine = (n) => `${n === 1 ? '1 note' : `${n} notes`} can\'t go up to the cloud: too big. Make ${n === 1 ? 'it' : 'them'} shorter.`;
   function showState(pill, state) {
     pill.dataset.state = state;
-    pill.querySelector('.status-word').textContent = STATE_WORDS[state] || '';
-    pill.title = state === 'offline' ? 'Offline: everything is saved on this device and goes up when you\'re back online'
+    const held = state === 'held' ? (V.cloud.held || 1) : 0;
+    pill.querySelector('.status-word').textContent = held ? `${held} not synced` : (STATE_WORDS[state] || '');
+    pill.title = held ? heldLine(held)
+      : state === 'offline' ? 'Offline: everything is saved on this device and goes up when you\'re back online'
       : state === 'error' || state === 'asleep' ? 'Vault can\'t reach your cloud: click for what to do' : 'Sync now';
   }
   V.statusPill = (cls = '') => {
@@ -84,7 +92,7 @@
     const nav = V.h('nav.tabs', { 'aria-label': 'Vault' }, V.mark(30, 'rail-mark'),
       TABS.map(([id, icon, label]) => V.h('button.tab', {
         type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
-      }, V.h('span.pill', {}, V.icon(icon), id === 'send' ? V.h('span.badge', { hidden: true }) : null),
+      }, V.h('span.pill', {}, V.icon(icon), id === 'send' || id === 'claude' ? V.h('span.badge', { hidden: true }) : null),
       V.h('span.tab-label', { text: label }))),
       V.h('span.rail-spacer'), V.statusPill('rail-status'));
     const view = V.h('main.view');
@@ -276,7 +284,7 @@
     if (asked === '#new' || asked === '#send' || asked === '#clip') history.replaceState(null, '', location.pathname + location.search);
     dropAnywhere();
     firstSync.then(async () => {
-      if (V.cloud.status === 'synced') await V.notes.ensureStarterFolders();
+      if (V.cloud.status === 'synced' || V.cloud.status === 'held') await V.notes.ensureStarterFolders();
       V.send.checkIncoming();
       V.send.runQueue();
       if (!V.desktop) V.send.takeShared();

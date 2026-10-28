@@ -1201,7 +1201,7 @@ V.files = (() => {
     restoreHere().catch((error) => console.warn('Vault files:', error));
   }
 
-  V.on('status', (state) => { if (state === 'synced') start(); });
+  V.on('status', (state) => { if (state === 'synced' || state === 'held') start(); });
   V.on('data', (table) => { if (table === 'transfers' && source === 'drive') drawDriveList(); });
   V.on('away', hereAway);
   V.on('back', async () => {

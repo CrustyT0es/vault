@@ -4,8 +4,11 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.4.1';
+V.VERSION = '1.5.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
+// Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
+// new window, so the hints mention it only where it actually works.
+V.appShortcuts = V.desktop || (() => { try { return window.matchMedia('(display-mode: standalone)').matches; } catch (e) { return false; } })();
 
 /* Which device this is: 'pc' (the PC app), 'phone' (the owner's Android phone: Vault installed there, or a tab of its
    Chrome) or 'web' (any other browser: a school Chromebook, a laptop). Each device only takes in what was sent to it,

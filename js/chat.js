@@ -44,6 +44,9 @@ V.chat = (() => {
   const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
   const BINDING_BETA = 'thinking-binding-controls-2026-08-01';
   const SENT = new Set(['done', 'cut']);  // turns sent again as the history
+  const WAIT_KINDS = new Set(['offline', 'away', 'busy']);  // a blocked or flaky network: the turn waits and goes later
+  const CLAIM_MS = 120000;   // a turn another device marked 'answering' is left to it this long, then taken as abandoned
+  const PUMP_EVERY = 60000;  // while a message is waiting to send, try it again at least this often
   // Files: pictures scaled down to Claude's own size (1568 px on the long side: more only costs more), PDFs up to
   // what one request takes (32 MB, 600 pages), text read as text.
   const IMAGE_EDGE = 1568;
@@ -70,6 +73,8 @@ V.chat = (() => {
   let showingChat = false;   // a phone shows the list or one chat
   let auto = false;          // the chat open is a new one opened because there were none
   let busy = null;           // the answer coming now: { chatId, turn, controller, pcId, stopped }
+  let pumpTimer = null;      // the gentle retry while a message is waiting to send
+  let pumping = false;
   let trouble = null;        // { chatId, kind, message }: the line above the box
   let root = null;
   let parts = null;
@@ -209,6 +214,7 @@ V.chat = (() => {
         }
         await keepIndex();
         if (changed) draw();
+        reflect();  // a waiting turn may have arrived from (or gone on) another device
       })().finally(() => { refreshing = null; });
     }
     return refreshing;
@@ -601,15 +607,18 @@ V.chat = (() => {
     return V.ai.price(usage, served);
   }
 
-  /* One turn answered (a new message, or Retry of the last). */
-  async function answer(chat, turn, { first = false } = {}) {
+  /* One turn answered (a new message, Retry of the last, or a waiting turn going out once Claude can be reached).
+     `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us. */
+  async function answer(chat, turn, { first = false, claim = false } = {}) {
     const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false };
     busy = job;
     trouble = null;
     turn.state = 'answering';
+    turn.answeringAt = now();
     turn.replies = [];
     turn.problem = '';
     draw();
+    if (claim) { chat.updated = now(); await persist(chat).catch(() => {}); }  // tell other devices before we ask
     let failed = null;
     try {
       for (let n = 0; n < MOST_REPLIES; n++) {
@@ -639,10 +648,17 @@ V.chat = (() => {
     } finally {
       busy = null;
     }
+    delete turn.answeringAt;
     if (failed) {
       const heard = turn.replies.some((r) => r.content.length);
-      if (first && !heard && failed.kind !== 'dropped') {
-        // Nothing came back: the message goes back in the box, as if it was never sent.
+      if (!heard && WAIT_KINDS.has(failed.kind)) {
+        // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
+        // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send".
+        turn.state = 'waiting';
+        turn.problem = '';
+        turn.replies = [];
+      } else if (first && !heard && failed.kind !== 'dropped') {
+        // The owner's to fix (no key, a bad key, no credit, an old PC app): the message goes back in the box.
         chat.turns = chat.turns.filter((t) => t !== turn);
         const draft = draftOf(chat.id);
         draft.text = turn.text;
@@ -653,6 +669,7 @@ V.chat = (() => {
           chats.delete(chat.id);
           unsent.set(chat.id, chat);
           await keepIndex();
+          reflect();
           draw();
           return;
         }
@@ -663,6 +680,102 @@ V.chat = (() => {
     }
     chat.updated = now();
     await persist(chat);
+    reflect();
+    draw();
+  }
+
+  /* ---------------------------------------------------------------- a message held until Claude can be reached
+
+     A send that fails on the network (a school that blocks Claude, or no internet) leaves the turn in the chat as
+     'waiting'. It goes out by itself when the network might be back (an online/visible/focus event, the app opening,
+     or a gentle timer). The chat JSON syncs, so a waiting turn shows on every device; to stop two of them answering
+     it at once, the one sending marks it 'answering' and pushes that before the request, and the others leave a turn
+     marked 'answering' less than two minutes ago to whoever claimed it. */
+
+  const isStale = (t) => t.state === 'answering' && (!t.answeringAt || Date.now() - Date.parse(t.answeringAt) > CLAIM_MS);
+  const needsSend = (t) => t.state === 'waiting' || isStale(t);  // waiting here, or claimed by a device that went away
+  const anyPending = () => [...(chats || new Map()).values()]
+    .some((c) => (c.turns || []).some((t) => t.state === 'waiting' || t.state === 'answering'));
+  const waitingCount = () => [...(chats || new Map()).values()]
+    .reduce((n, c) => n + (c.turns || []).filter((t) => t.state === 'waiting').length, 0);
+
+  /* The Claude-tab badge and the retry timer kept in step with what's waiting. */
+  function reflect() {
+    if (anyPending()) startPump(); else stopPump();
+    V.emit('badge');
+  }
+
+  function startPump() { if (!pumpTimer) pumpTimer = setInterval(() => pump().catch(() => {}), PUMP_EVERY); }
+  function stopPump() { if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; } }
+
+  /* The oldest message waiting to send, across every chat. */
+  function oldestPending() {
+    let best = null;
+    for (const chat of (chats || new Map()).values()) {
+      for (const turn of chat.turns || []) {
+        if (needsSend(turn) && (!best || (turn.at || '') < (best.turn.at || ''))) best = { chat, turn, id: chat.id, turnId: turn.id };
+      }
+    }
+    return best;
+  }
+
+  /* Try to send one waiting message. One at a time; if it still can't go it stays waiting, quietly. */
+  async function pump() {
+    if (pumping || busy || !chats) return;
+    const next = oldestPending();
+    if (!next) { if (!anyPending()) stopPump(); return; }  // keep the timer while a fresh claim may yet go stale
+    pumping = true;
+    try { await sendWaiting(next.chat, next.turn); } finally { pumping = false; }
+    if (!anyPending()) { stopPump(); return; }
+    startPump();
+    const chat = chatOf(next.id);
+    const turn = chat && (chat.turns || []).find((t) => t.id === next.turnId);
+    if (!turn || !needsSend(turn)) setTimeout(() => pump().catch(() => {}), 0);  // it moved on: try the next now
+  }
+
+  /* Send a waiting turn. First a quick look at the cloud: skip if another device already answered it, or has it in
+     hand (marked 'answering' under two minutes ago). "Send now" (manual) goes ahead whatever another device is doing. */
+  async function sendWaiting(chat, turn, { manual = false } = {}) {
+    if (busy) return;
+    const id = chat.id;
+    if (chats.has(id)) await quickRefresh();
+    const current = chatOf(id);
+    if (!current) return;
+    const now2 = current.turns.find((t) => t.id === turn.id);
+    if (!now2 || !(now2.state === 'waiting' || now2.state === 'answering') || repliesOf(now2).length) { reflect(); draw(); return; }
+    if (!manual && now2.state === 'answering' && !isStale(now2)) return;  // another device is on it
+    const over = await V.ai.overLimit();
+    if (over) {
+      now2.state = 'failed';
+      now2.problem = over.message;
+      current.updated = now();
+      await persist(current);
+      reflect();
+      draw();
+      return;
+    }
+    await answer(current, now2, { claim: true });
+  }
+
+  /* "Cancel" on a waiting message: drop the turn and put its words, notes and files back in the box. */
+  async function cancelWaiting(chat, turn) {
+    chat.turns = chat.turns.filter((t) => t !== turn);
+    const draft = draftOf(chat.id);
+    draft.text = turn.text || '';
+    draft.notes = sentNotes.get(turn) || (turn.notes || []).map((n) => {
+      const live = V.data.notes.get(n.id);
+      return { id: n.id, title: n.title, text: live ? (live.body || '') : '' };
+    });
+    draft.files = (turn.files || []).map((f) => ({ ...f, state: 'ready', url: pictures.get(f.path) }));
+    if (!chat.turns.length) {
+      chats.delete(chat.id);
+      unsent.set(chat.id, chat);
+      await keepIndex();
+    } else {
+      chat.updated = now();
+      await persist(chat);
+    }
+    reflect();
     draw();
   }
 
@@ -792,7 +905,16 @@ V.chat = (() => {
         (turn.files || []).filter((f) => f.kind !== 'image').map((f) => fileChip(f)),
         (turn.notes || []).map((n) => noteChip(n))) : null,
       turn.text ? V.h('div.chat-you-text', { text: turn.text }) : null);
-    const answering = busy && busy.turn === turn;
+    if (turn.state === 'waiting') {
+      return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
+        V.h('div.chat-claude', {}, V.h('div.chat-waiting', {},
+          V.h('span.chat-waiting-text', {}, V.icon('clock'),
+            V.h('span', { text: 'Waiting to send — it\'ll go when Claude can be reached' })),
+          V.h('div.chat-waiting-actions', {},
+            V.button('Send now', { kind: 'quiet', icon: 'send', onClick: () => sendWaiting(chat, turn, { manual: true }) }),
+            V.button('Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) })))));
+    }
+    const answering = turn.state === 'answering';  // ours now, or another device's (a claimed turn shows "Thinking...")
     const text = textOf(turn);
     const body = V.h('div.chat-reply-body');
     if (turn.state === 'refused') {
@@ -854,10 +976,12 @@ V.chat = (() => {
 
   function chatRow(chat) {
     const last = chat.turns[chat.turns.length - 1];
+    const waiting = (chat.turns || []).some((t) => t.state === 'waiting');
     return V.h('div.chat-row' + (chat.id === openId ? '.on' : ''), { dataset: { id: chat.id } },
       V.h('button.chat-row-main', { type: 'button', onclick: () => open(chat.id) },
         V.h('span.chat-row-title', { text: chat.title || 'New chat' }),
-        V.h('span.chat-row-meta', { text: [V.ago(chat.updated), nameOf(last ? last.model : chat.model)].join(' · ') })),
+        waiting ? V.h('span.chat-row-waiting', {}, V.icon('clock'), V.h('span', { text: 'Waiting to send' }))
+          : V.h('span.chat-row-meta', { text: [V.ago(chat.updated), nameOf(last ? last.model : chat.model)].join(' · ') })),
       V.iconButton('more', 'More', (event) => rowMenu(event.currentTarget, chat), 'tiny'));
   }
 
@@ -1000,7 +1124,7 @@ V.chat = (() => {
       choose();
       draw();
       return refresh();
-    }).then(() => { choose(); draw(); }).catch(() => {});
+    }).then(() => { choose(); draw(); reflect(); pump().catch(() => {}); }).catch(() => {});
     if (!V.desktop) V.ai.check().catch(() => {});
   }
 
@@ -1241,8 +1365,19 @@ V.chat = (() => {
 
   const filesSize = () => listOf().reduce((sum, chat) => sum + chat.turns.reduce((s, t) => s + (t.files || []).reduce((x, f) => x + (f.size || 0), 0), 0), 0);
 
-  V.on('signed-out', () => { chats = null; index = null; unsent.clear(); drafts.clear(); openId = null; });
-  window.addEventListener('online', () => { if (chats) refresh().catch(() => {}); });
+  V.on('signed-out', () => { chats = null; index = null; unsent.clear(); drafts.clear(); openId = null; stopPump(); });
+  // A waiting message is tried again whenever the network might be back: online, the page shown or focused, the app
+  // coming to the front, and the gentle timer. The cloud is pulled first, so a turn another device answered or
+  // claimed is seen before this one acts on it.
+  async function wake() {
+    if (!chats) return;
+    await refresh().catch(() => {});
+    await pump().catch(() => {});
+  }
+  window.addEventListener('online', () => wake());
+  window.addEventListener('focus', () => wake());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+  V.on('back', () => wake());
 
   return {
     render,
@@ -1260,5 +1395,6 @@ V.chat = (() => {
     },
     dropText: () => (V.tab() === 'claude' ? 'Drop to attach to your message to Claude' : ''),
     busy: () => !!busy,
+    waiting: waitingCount,
   };
 })();

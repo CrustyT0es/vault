@@ -191,7 +191,7 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
 .status[data-state=idle] .status-word:empty { display: none; }
 .status[data-state=synced] .dot { background: var(--ok); }
 .status[data-state=syncing] .dot { background: none; border: 1.75px solid var(--line-strong); border-top-color: var(--accent); width: 10px; height: 10px; animation: spin .8s linear infinite; }
-.status[data-state=offline] .dot { background: var(--warn); }
+.status[data-state=offline] .dot, .status[data-state=held] .dot { background: var(--warn); }
 .status[data-state=error] .dot, .status[data-state=signed-out] .dot, .status[data-state=asleep] .dot { background: var(--danger); }
 .rail-status {
   justify-items: center; gap: 6px; height: auto; width: 62px; padding: 9px 2px 8px; margin-top: 6px; border-radius: 12px;
@@ -1877,6 +1877,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .ai-key-row .btn { min-height: 48px; }
 .ai-key > .setting-buttons { padding-top: 0; }
 .ai-console { justify-self: start; padding: 6px 0 12px; }
+.ai-check[data-state=reachable] { color: var(--ok); }
+.ai-check[data-state=blocked] { color: var(--warn); }
 .settings-card > .ai-privacy { margin: 0; padding: 10px 0 14px; border-top: 1px solid var(--line-soft); }
 
 /* -- Claude ---------------------------------------------------------- the Claude tab (js/chat.js): the chats on the
@@ -1934,6 +1936,19 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .chat-md + .chat-thinking { margin-top: 8px; }
 .chat-note { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 20px; }
 .chat-turn[data-state=failed] .chat-claude > .chat-note { color: var(--danger); }
+.chat-waiting {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); color: var(--muted);
+  font: 400 13.5px/19px var(--font);
+}
+.chat-waiting-text { display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 180px; }
+.chat-waiting-text > .icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.chat-waiting-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.chat-waiting-actions .btn { min-height: 32px; padding: 0 10px; gap: 6px; color: var(--text-2); font: 500 13px/18px var(--font); }
+.chat-waiting-actions .btn:hover { color: var(--text); }
+.chat-waiting-actions .btn .icon { width: 15px; height: 15px; }
+.chat-row-waiting { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-ink); font: 500 12.5px/16px var(--font); }
+.chat-row-waiting > .icon { flex: none; width: 13px; height: 13px; }
 .chat-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .chat-sources-label { margin-right: 2px; color: var(--muted); font: 500 12.5px/1 var(--font); }
 .chat-source {
