@@ -1,8 +1,9 @@
 /* Vault: the light formatting a note's words can carry. It's all kept as plain text (Markdown-ish), so Jarvis reads
-   a note as it is: "# " headings, "- " and "1. " lists, **bold**, _italic_, `code`, and links, written out
-   (https://...) or bare (www.example.com, docs.google.com/...). This finds the links (the editor shows them as chips
-   under their line), carries lists on with Enter, counts the words, and builds the Read view: page elements made one
-   by one with the words as text, never HTML made from the words. */
+   a note as it is: "# " headings, "- " and "1. " lists, **bold**, _italic_, `code`, links, written out
+   (https://...) or bare (www.example.com, docs.google.com/...), and {{blanks}} (fill-in-the-blank flash cards, see
+   js/study.js). This finds the links (the editor shows them as chips under their line) and the blanks, carries lists
+   on with Enter, counts the words, and builds the Read view: page elements made one by one with the words as text,
+   never HTML made from the words. */
 'use strict';
 
 V.format = (() => {
@@ -108,6 +109,32 @@ V.format = (() => {
     if (url.search && (!tail || PLAIN_PAGES.test(tail))) tail += decode(url.search);
     if (/[a-z]/i.test(tail) && !/[?=]/.test(tail)) tail = tail.replace(/_/g, ' ');
     return { name: known ? known[1] : host, tail };
+  }
+
+  /* -- blanks: "The {{mitochondria}} makes ATP" */
+
+  // Something that isn't only spaces between double braces, all on one line.
+  const BLANK_SOURCE = '\\{\\{([^{}\\n]*[^{}\\s][^{}\\n]*)\\}\\}';
+  const BLANK = new RegExp(BLANK_SOURCE, 'g');
+
+  /* Every blank in `text`: [{start, end, word}] (the word without the spaces round it). Lines inside ``` code blocks
+     and `code` are left alone: a template's {{ name }} isn't a card. */
+  function blanks(text) {
+    const found = [];
+    let fenced = false;
+    let at = 0;
+    for (const line of String(text || '').split('\n')) {
+      if (/^\s*```/.test(line)) fenced = !fenced;
+      else if (!fenced && line.includes('{{')) {
+        const code = [...line.matchAll(/`[^`\n]+`/g)].map((m) => [m.index, m.index + m[0].length]);
+        for (const m of line.matchAll(BLANK)) {
+          const end = m.index + m[0].length;
+          if (!code.some(([a, b]) => m.index < b && end > a)) found.push({ start: at + m.index, end: at + end, word: m[1].trim() });
+        }
+      }
+      at += line.length + 1;
+    }
+    return found;
   }
 
   /* -- lists */
@@ -216,7 +243,7 @@ V.format = (() => {
 
   /* -- the Read view */
 
-  const INLINE = new RegExp([
+  const INLINE_PARTS = [
     '`([^`\\n]+)`',                                                            // 1 code
     `\\[([^\\]\\n]{1,300})\\]\\((${URL_SOURCE})\\)`,                           // 2 words, 3 link
     `(${URL_SOURCE})`,                                                         // 4 a bare link
@@ -225,13 +252,16 @@ V.format = (() => {
     '~~(?=\\S)(.+?)(?<=\\S)~~',                                                // 7 struck out
     '(?<![\\p{L}\\p{N}*\\\\])\\*(?=[^\\s*])(.+?)(?<=[^\\s*])\\*(?![\\p{L}\\p{N}*])',   // 8 italic
     '(?<![\\p{L}\\p{N}_\\\\])_(?=[^\\s_])(.+?)(?<=[^\\s_])_(?![\\p{L}\\p{N}_])',     // 9 italic (snake_case isn't)
-  ].join('|'), 'giu');
+  ];
+  const INLINE = new RegExp(INLINE_PARTS.join('|'), 'giu');
+  const WITH_BLANKS = new RegExp([...INLINE_PARTS, BLANK_SOURCE].join('|'), 'giu');  // 10 a blank (a note's Read view)
 
   /* The words of one line as page elements, every piece of text remembered with where it is in the note (`map`:
-     text node -> {line, col}), so a tap in the Read view can put the caret on the same spot to write. */
-  function inline(str, line, col, map) {
+     text node -> {line, col}), so a tap in the Read view can put the caret on the same spot to write. With `withBlanks`
+     a {{blank}} shows as its word, softly underlined. */
+  function inline(str, line, col, map, withBlanks = false) {
     const out = [];
-    const re = new RegExp(INLINE.source, INLINE.flags);  // its own: the bold and italic inside call this again
+    const re = new RegExp((withBlanks ? WITH_BLANKS : INLINE).source, 'giu');  // its own: the bold and italic inside call this again
     const words = (from, to, at = from) => {
       if (to <= from) return;
       const node = document.createTextNode(str.slice(from, to));
@@ -249,7 +279,11 @@ V.format = (() => {
         made = V.h('code.read-code-span', {}, inline.text(m[1], line, col + start + 1, map));
       } else if (m[2] !== undefined) {
         const href = toHref(m[3]);
-        if (href) made = link(href, inline(m[2], line, col + start + 1, map));
+        if (href) made = link(href, inline(m[2], line, col + start + 1, map, withBlanks));
+      } else if (m[10] !== undefined) {
+        const lead = m[10].length - m[10].trimStart().length;
+        made = V.h('span.read-blank', { title: 'A fill-in-the-blank card' },
+          inline(m[10].trim(), line, col + start + 2 + lead, map, withBlanks));
       } else if (m[4] !== undefined) {
         const url = trimEnd(m[4]);
         const href = url && toHref(url);
@@ -261,7 +295,7 @@ V.format = (() => {
         const inner = m[5] ?? m[6] ?? m[7] ?? m[8] ?? m[9];
         const mark = m[5] !== undefined || m[6] !== undefined || m[7] !== undefined ? 2 : 1;
         const tag = m[5] !== undefined || m[6] !== undefined ? 'strong' : m[7] !== undefined ? 's' : 'em';
-        made = V.h(tag, {}, inline(inner, line, col + start + mark, map));
+        made = V.h(tag, {}, inline(inner, line, col + start + mark, map, withBlanks));
       }
       if (!made) { re.lastIndex = start + 1; continue; }
       words(at, start);
@@ -279,8 +313,8 @@ V.format = (() => {
   };
 
   /* The whole note (its plain text) as formatted text. `tick(line)` ticks the item on that line of the note and says
-     whether it's done now. Returns { el, map }. */
-  function render(text, { tick } = {}) {
+     whether it's done now; `blanks` shows {{blanks}} as cards (a note's own Read view). Returns { el, map }. */
+  function render(text, { tick, blanks: withBlanks = false } = {}) {
     const map = new WeakMap();
     const el = V.h('div.read-body');
     let para = null;
@@ -311,7 +345,7 @@ V.format = (() => {
       const head = HEADING.exec(raw);
       if (head) {
         done();
-        el.append(V.h(`h${head[1].length + 1}.read-heading`, { dataset: { line: i } }, inline(head[2], i, head[1].length + 1, map)));
+        el.append(V.h(`h${head[1].length + 1}.read-heading`, { dataset: { line: i } }, inline(head[2], i, head[1].length + 1, map, withBlanks)));
         return;
       }
       if (!raw.trim()) {
@@ -334,7 +368,7 @@ V.format = (() => {
           list = { ordered, el: V.h(ordered ? 'ol.read-list' : 'ul.read-list') };
           el.append(list.el);
         }
-        const li = V.h('li', { dataset: { line: i, level: String(level) } }, inline(raw.slice(item[0].length), i, item[0].length, map));
+        const li = V.h('li', { dataset: { line: i, level: String(level) } }, inline(raw.slice(item[0].length), i, item[0].length, map, withBlanks));
         if (ordered) li.value = Number(item[3]);  // the number as written
         list.el.append(li);
         return;
@@ -344,13 +378,13 @@ V.format = (() => {
         para = null;
         list = null;
         if (!quote) { quote = V.h('blockquote.read-quote'); el.append(quote); } else quote.append(V.h('br'));
-        quote.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw.slice(said[0].length), i, said[0].length, map)));
+        quote.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw.slice(said[0].length), i, said[0].length, map, withBlanks)));
         return;
       }
       list = null;
       quote = null;
       if (!para) { para = V.h('p.read-para'); el.append(para); } else para.append(V.h('br'));
-      para.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw, i, 0, map)));
+      para.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw, i, 0, map, withBlanks)));
     });
     if (!lines.some((line) => line.trim())) {
       V.clear(el, V.h('p.read-empty', { dataset: { line: String(lines.length - 1) }, text: 'Nothing written yet. Tap here to start.' }));
@@ -370,7 +404,7 @@ V.format = (() => {
           button.setAttribute('aria-label', now ? 'Not done' : 'Done');
         },
       }, V.icon('check'));
-      row.append(button, V.h('span.read-text', {}, inline(box[3], i, raw.length - box[3].length, map)));
+      row.append(button, V.h('span.read-text', {}, inline(box[3], i, raw.length - box[3].length, map, withBlanks)));
       return row;
     }
   }
@@ -453,5 +487,5 @@ V.format = (() => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
 
-  return { HEADING, LIST, links, site, continueList, cycleList, stats, render, fileKind, typeOf, icon, clock };
+  return { HEADING, LIST, links, blanks, site, continueList, cycleList, stats, render, fileKind, typeOf, icon, clock };
 })();

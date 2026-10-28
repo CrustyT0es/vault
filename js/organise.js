@@ -74,7 +74,7 @@ V.organise = (() => {
     return { ...row, extra };
   }
   const plainSave = V.cloud.save;
-  V.cloud.save = (table, row) => plainSave(table, table === 'notes' && row && row.id ? keepOrganised(row) : row);
+  V.cloud.save = (table, row, options) => plainSave(table, table === 'notes' && row && row.id ? keepOrganised(row) : row, options);
 
   /* -- #tags */
 
@@ -260,7 +260,7 @@ V.organise = (() => {
   const sort = () => memory['vault-sort'] || pref('vault-sort', SORTS.map((s) => s[0]), 'edited');
   const view = () => memory['vault-view'] || pref('vault-view', ['list', 'grid'], 'list');
 
-  const edited = (n) => n._edited || n.updated_at || n.created_at || '';
+  const edited = (n) => V.editedAt(n);  // (a flash card's progress isn't an edit: js/cloud.js)
   const created = (n) => n.created_at || '~';  // made here and not sent yet: the newest
   const dueRank = (n) => (n.due ? (n.done ? 1 : 0) : 2);
   function comparator(by) {

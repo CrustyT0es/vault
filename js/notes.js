@@ -1,7 +1,7 @@
 /* Vault: the Notes tab. Folders (starter ones for school, work, personal and gaming, and your own), smart lists
-   (Pinned, Upcoming: the week by day from js/reminders.js, Archive, Trash), #tags, search with filters, and the list of
-   notes as a list or a grid. Opening one hands it to V.editor: beside the list on a wide screen, over everything on a
-   phone.
+   (Pinned, Upcoming: the week by day from js/reminders.js, Review: the flash cards due today from js/review.js,
+   Archive, Trash), #tags, search with filters, and the list of notes as a list or a grid. Opening one hands it to
+   V.editor: beside the list on a wide screen, over everything on a phone.
 
    Picking several notes (a long press with a finger or the S Pen, or Ctrl/Shift+click on the PC) shows a bar to move,
    pin, archive or delete them together; on the PC a card can also be dragged onto a folder. What those do, and what
@@ -37,7 +37,7 @@ V.notes = (() => {
   const LONG_PRESS = 450;     // ms a finger or the S Pen stays on a card to start picking
   const DRAG = 'application/x-vault-notes';
   const FOLDER_DRAG = 'application/x-vault-folder';
-  let filter = 'all';         // all, pinned, due, archive, trash, tag:<key> or a folder's id
+  let filter = 'all';         // all, pinned, due, review, archive, trash, tag:<key> or a folder's id
   let query = '';
   let root = null;
   let parts = null;
@@ -51,7 +51,7 @@ V.notes = (() => {
   // The notes the lists are made of (templates are kept apart, for the new-note sheet).
   const live = () => [...V.data.notes.values()].filter((n) => !n.deleted && !n._purge && !O.isTemplate(n));
   const listed = () => live().filter((n) => !O.isArchived(n));
-  const edited = (n) => n._edited || n.updated_at || n.created_at || '';
+  const edited = (n) => V.editedAt(n);  // (a flash card's progress isn't an edit: js/cloud.js)
   const folderOf = (n) => V.data.folders.get(n.folder_id);
   const inbox = () => folders().find((f) => f.name.toLowerCase() === 'inbox');
   const isTag = (value) => typeof value === 'string' && value.startsWith('tag:');
@@ -88,6 +88,8 @@ V.notes = (() => {
       list = live().filter((n) => O.isArchived(n) === archived).filter(O.matcher(q));
     } else if (filter === 'archive') {
       list = live().filter(O.isArchived);
+    } else if (filter === 'review') {
+      list = [];  // (the Review page is drawn by js/review.js)
     } else {
       list = listed();
       if (filter === 'pinned') list = list.filter((n) => n.pinned);
@@ -469,6 +471,7 @@ V.notes = (() => {
     if (filter === 'all') return 'All notes';
     if (filter === 'pinned') return 'Pinned';
     if (filter === 'due') return 'Upcoming';
+    if (filter === 'review') return 'Review';
     if (filter === 'archive') return 'Archive';
     if (filter === 'trash') return 'Trash';
     if (isTag(filter)) return tagLabel(tagKey(filter));
@@ -484,7 +487,8 @@ V.notes = (() => {
     const by = {};
     for (const f of folders()) by[f.id] = [f.id, ...O.inside(f.id)].reduce((sum, id) => sum + (own[id] || 0), 0);
     const due = (n) => (V.reminders ? V.reminders.pending(n) : n.due && !n.done);
-    return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter(due).length, by };
+    return { all: all.length, pinned: all.filter((n) => n.pinned).length, due: all.filter(due).length, by,
+      review: V.review ? V.review.dueCount() : 0 };
   }
 
   /* A folder shows its emoji; one without gets a colour dot (by its place in the list), unless its name starts with
@@ -521,6 +525,7 @@ V.notes = (() => {
       navItem('all', 'stack', 'All notes', c.all),
       navItem('pinned', 'pin', 'Pinned', c.pinned),
       navItem('due', 'clock', 'Upcoming', c.due),
+      navItem('review', 'cards', 'Review', c.review),
       dropTarget(V.h('div.nav-heading', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')), 'top'),
       tree.filter((r) => !O.ancestors(r.folder).some((up) => shutSet().has(up.id))).map(({ folder: f, depth, kids }) => {
         const unfolded = !shutSet().has(f.id);
@@ -552,6 +557,7 @@ V.notes = (() => {
       chip('all', 'All', null, c.all),
       chip('pinned', 'Pinned', V.icon('pin')),
       chip('due', 'Upcoming', V.icon('clock'), c.due),
+      chip('review', 'Review', V.icon('cards'), c.review),
       tree.filter((r) => !r.depth).map(({ folder: f }) => chip(f.id, f.name, folderBadge(f))),
       V.h('button.chip.add', { type: 'button', onclick: newFolder, title: 'New folder' }, V.icon('plus'), 'New folder'),
       tags.map((t) => chip('tag:' + t.key, '#' + t.name, null)),
@@ -606,6 +612,7 @@ V.notes = (() => {
       O.isTemplate(note) ? V.h('span.tag', {}, V.icon('notes'), V.h('span', { text: 'Template' })) : null,
       due ? V.h('span.due.' + (due.cls || 'later'), {}, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
       V.reminders ? V.reminders.cardChip(note) : null,
+      V.exams ? V.exams.cardChip(note) : null,  // a test's countdown
       prog ? V.h('span.progress', {}, V.h('span.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
         V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
       pictures ? V.h('span.tag', {}, V.icon('image'), String(pictures)) : null,
@@ -705,6 +712,18 @@ V.notes = (() => {
       above.map((f, i) => [i ? V.h('span.crumb-gap', { text: '›', 'aria-hidden': 'true' }) : null,
         V.h('button.crumb', { type: 'button', onclick: () => setFilter(f.id) }, folderBadge(f), V.h('span', { text: f.name }))]));
     parts.crumbs.hidden = !above.length;
+    // Review: the flash cards due today, by folder and tag (js/review.js), in place of a list of notes.
+    const review = filter === 'review' && q.empty && !!V.review;
+    parts.list.classList.toggle('review', review);
+    if (review) {
+      const due = V.review.dueCount();
+      parts.headCount.textContent = due ? String(due) : '';
+      parts.list.classList.remove('upcoming', 'grid');
+      V.clear(parts.titleTools);
+      V.clear(parts.list, V.review.page());
+      if (picking) stopPicking();
+      return;
+    }
     V.clear(parts.titleTools,
       folder && !query ? V.iconButton('more', `${folder.name} options`, (event) => folderMenu(folder, event.currentTarget), 'folder-options') : null,
       V.iconButton('sort', 'Sort notes', (event) => sortMenu(event.currentTarget)),
@@ -757,7 +776,8 @@ V.notes = (() => {
     ] : null;
     const none = list.length ? null : empty();
     if (none && subRows) none.classList.add('small');  // under its folders, a quieter "nothing here"
-    V.clear(parts.list, trashBar, subRows, list.length ? byDay || sections(list, make) || folded(list, make) : none);
+    const tests = folder && !query && V.exams ? V.exams.banners(folder) : null;  // tests that cover this folder
+    V.clear(parts.list, trashBar, tests, subRows, list.length ? byDay || sections(list, make) || folded(list, make) : none);
     // Picked notes that have gone (deleted on the other device, or no longer in this list) aren't picked any more.
     const here = new Set(list.map((n) => n.id));
     for (const id of picked) if (!here.has(id)) picked.delete(id);
@@ -813,7 +833,7 @@ V.notes = (() => {
     else V.clear(parts.help);
   }
 
-  const SMART = ['all', 'pinned', 'due', 'archive', 'trash'];
+  const SMART = ['all', 'pinned', 'due', 'review', 'archive', 'trash'];
   function draw() {
     if (!parts) return;
     const folder = V.data.folders.get(filter);

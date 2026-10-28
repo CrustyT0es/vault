@@ -1,9 +1,11 @@
 /* Vault: school tools, from a note's tools.
 
-   Flash cards: any line written "term :: definition" (or "Question? :: Answer") makes a Study button show. Studying
-   flips through them: "I knew it" moves a card up a Leitner box (it comes back in 1, 3, 7, then 14 days), "Not yet"
-   puts it back in the first (today, and again this time round). The boxes are kept in the note's extra.cards, by a
-   short code made from each term, so changing a definition keeps its box.
+   Flash cards: any line written "term :: definition" (or "Question? :: Answer") is a card, and so is each {{blank}}
+   in a line ("The {{mitochondria}} makes ATP": "The ____ makes ATP", answer "mitochondria"; with two blanks in a line,
+   two cards, each showing the other one filled in). They make the Study and Learn buttons show. Studying flips through
+   the ones due (js/review.js schedules them with FSRS, the way Anki does); Learn quizzes them (js/learn.js). Each
+   card's progress is kept in the note's extra.cards by a short code: a "term :: definition" card's made from its term
+   and a blank's from its hidden word, so changing a definition, or the words round a blank, keeps its progress.
 
    Focus timer: 25 minutes of work, then a 5 minute break (both can be changed; kept on this device). The screen stays
    on while it runs (where the browser can), and the end buzzes and chimes. The minutes go into the note's
@@ -23,10 +25,13 @@ V.study = (() => {
   /* -- flash cards */
 
   const CARD = /^\s*(?:[-*]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+|#{1,3}\s+)?(.+?)\s*::\s*(.+?)\s*$/;
-  const INTERVALS = [0, 0, 1, 3, 7, 14];  // days until a card in box 1 to 5 comes back
-  const BOXES = 5;
+  const LEAD = /^\s*(?:[-*]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+|#{1,3}\s+)?/;  // a list mark, tick box or heading mark
+  const FENCE = /^\s*```/;
+  const GAP = '____';
+  // #tags at the end of a card's line ("leer :: to read #vocab") file it away; they aren't part of the answer.
+  const TAGS_AT_END = /(?:\s+#(?=\p{N}*\p{L})[\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*)+$/u;
 
-  /* A short code for a term (FNV-1a), so a card keeps its box when its definition changes. */
+  /* A short code for a term (FNV-1a), so a card keeps its progress when its definition changes. */
   function code(text) {
     let h = 0x811c9dc5;
     for (const ch of String(text)) {
@@ -36,181 +41,64 @@ V.study = (() => {
     return h.toString(36);
   }
 
-  /* The flash cards in a note's words: [{ key, term, answer, line }]. */
+  /* The flash cards in a note's words: [{ key, term, answer, line, kind }]. A "term :: definition" card is kind 'qa';
+     a blank's ('blank') term is its line with a gap where the blank is (the other blanks filled in), and it also has
+     `before` and `after`, the words either side of the gap. Lines in ``` code blocks have no blanks. */
   function cards(text) {
     const out = [];
     const keys = new Set();
+    const named = (first, again) => {
+      let key = code(first);
+      for (let n = 2; keys.has(key); n++) key = code(again + '#' + n);
+      keys.add(key);
+      return key;
+    };
+    let fenced = false;
     String(text || '').split('\n').forEach((line, index) => {
       const found = CARD.exec(line);
-      if (!found || /^[a-z][\w+.-]*:\/\/?$/i.test(found[1].trim())) return;
-      const term = found[1].trim();
-      const answer = found[2].trim();
-      if (!term || !answer) return;
-      let key = code(term.toLowerCase().replace(/\s+/g, ' '));
-      for (let n = 2; keys.has(key); n++) key = code(term.toLowerCase() + '#' + n);
-      keys.add(key);
-      out.push({ key, term, answer, line: index });
+      if (found && !/^[a-z][\w+.-]*:\/\/?$/i.test(found[1].trim())) {
+        const term = found[1].trim();
+        const answer = found[2].trim().replace(TAGS_AT_END, '');
+        if (!term || !answer) return;
+        out.push({ key: named(term.toLowerCase().replace(/\s+/g, ' '), term.toLowerCase()), term, answer, line: index, kind: 'qa' });
+        return;
+      }
+      if (FENCE.test(line)) { fenced = !fenced; return; }
+      if (fenced || !line.includes('{{')) return;
+      const holes = V.format.blanks(line);
+      const lead = LEAD.exec(line)[0].length;
+      // The words from `from` to `to`, the blanks in `list` filled in with their words.
+      const fill = (from, to, list) => {
+        let words = '';
+        let at = from;
+        for (const h of list) { words += line.slice(at, h.start) + h.word; at = h.end; }
+        return words + line.slice(at, to);
+      };
+      holes.forEach((hole, i) => {
+        const before = fill(lead, hole.start, holes.slice(0, i)).replace(/^\s+/, '');
+        const after = fill(hole.end, line.length, holes.slice(i + 1)).replace(/\s+$/, '');
+        const word = hole.word.toLowerCase();
+        out.push({ key: named(`{{${word.replace(/\s+/g, ' ')}}}`, `{{${word}}}`), term: before + GAP + after, answer: hole.word,
+          before, after, line: index, kind: 'blank' });
+      });
     });
     return out;
   }
 
-  const boxOf = (state, key) => (Array.isArray(state[key]) ? Number(state[key][0]) || 0 : 0);
-  const dueOn = (state, key) => (Array.isArray(state[key]) ? String(state[key][1] || '') : '');
-
-  /* A card answered: up a box (most 5) when known, back to box 1 when not; when it comes back. */
-  function answer(state, key, knew, today = V.today()) {
-    const box = knew ? Math.min(BOXES, Math.max(1, boxOf(state, key)) + 1) : 1;
-    return { ...state, [key]: [box, V.addDays(today, INTERVALS[box])] };
-  }
-
-  /* The cards to study today: new ones, and ones whose day has come; fewest-known first. */
-  function dueCards(list, state, today = V.today()) {
-    return list.filter((c) => !state[c.key] || dueOn(state, c.key) <= today)
-      .sort((a, b) => boxOf(state, a.key) - boxOf(state, b.key) || a.line - b.line);
-  }
-
-  /* Only the cards still in the note keep a box. */
+  /* Only the cards still in the note keep their progress. */
   function prune(state, list) {
     const out = {};
     for (const c of list) if (state[c.key]) out[c.key] = state[c.key];
     return out;
   }
 
-  function shuffle(list) {
-    const out = [...list];
-    for (let i = out.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [out[i], out[j]] = [out[j], out[i]];
-    }
-    return out;
-  }
-
+  /* The note's own flash cards, studied (js/review.js): the ones due, else a practice round of them all. */
   function studySheet() {
     const id = V.editor.openId();
-    const note = V.editor.current();
-    const list = cards(V.editor.words());
-    if (!id || !note || !list.length) return V.toast('Write cards as "term :: definition", one a line, then press Study.');
-    let state = prune({ ...((note.extra && note.extra.cards) || {}) }, list);
-    let queue = dueCards(list, state);
-    let all = !queue.length;  // everything known for today: a practice round of the lot
-    if (all) queue = [...list];
-    let shuffled = false;
-    let flipped = false;
-    let knew = 0;
-    let missed = 0;
-    let total = queue.length;
-    const missedKeys = new Set();
-
-    const ui = {
-      progress: V.h('p.study-progress', { 'aria-live': 'polite' }),
-      fill: V.h('i'),
-      card: V.h('button.flash-card', { type: 'button', onclick: () => flip() }),
-      actions: V.h('div.study-actions'),
-      shuffle: V.h('button.chip.study-shuffle', { type: 'button', 'aria-pressed': 'false', onclick: () => toggleShuffle() },
-        icon('shuffle'), 'Shuffle'),
-    };
-    const known = () => list.filter((c) => boxOf(state, c.key) >= 2).length;
-
-    function save() {
-      const kept = prune(state, list);
-      R.change(id, (row) => { row.extra.cards = kept; }).catch(V.problem);
+    if (!id || !cards(V.editor.words()).length) {
+      return V.toast('Write cards as "term :: definition" (or "The {{word}} in a sentence"), one a line, then press Study.');
     }
-
-    function draw() {
-      const card = queue[0];
-      const done = total - queue.length;
-      ui.fill.style.width = total ? `${(100 * done) / total}%` : '0%';
-      if (!card) {
-        ui.progress.textContent = `${known()} of ${list.length} cards known`;
-        V.clear(ui.card, V.h('span.flash-side', { text: 'All done' }),
-          V.h('span.flash-words.end', { text: missed ? `You knew ${knew} of ${knew + missed}. The ones to practise come back first next time.`
-            : `You knew all ${knew}. Nice work!` }));
-        ui.card.disabled = true;
-        V.clear(ui.actions,
-          V.button('Study them all again', { onClick: again }),
-          V.button('Close', { kind: 'primary', onClick: () => sheet.close() }));
-        return;
-      }
-      ui.card.disabled = false;
-      ui.progress.textContent = `Card ${Math.min(done + 1, total)} of ${total} · ${known()} of ${list.length} known`
-        + (all ? ' · practice round' : '');
-      ui.card.classList.toggle('flipped', flipped);
-      ui.card.setAttribute('aria-label', flipped ? `Answer: ${card.answer}. Tap to see the term again` : `${card.term}. Tap to see the answer`);
-      V.clear(ui.card,
-        V.h('span.flash-side', { text: flipped ? 'Answer' : `Box ${Math.max(1, boxOf(state, card.key))} of ${BOXES}` }),
-        V.h('span.flash-words', { text: flipped ? card.answer : card.term }),
-        V.h('span.flash-hint', {}, icon('flip'), flipped ? 'Tap to see the term' : 'Tap to see the answer'));
-      V.clear(ui.actions, flipped
-        ? [V.button('Not yet', { kind: 'not-yet', onClick: () => mark(false) }),
-          V.button('I knew it', { kind: 'primary', icon: 'check', onClick: () => mark(true) })]
-        : [V.button('Show answer', { kind: 'primary wide-btn', onClick: () => flip() })]);
-    }
-
-    function flip() {
-      if (!queue.length) return;
-      flipped = !flipped;
-      draw();
-    }
-
-    function mark(itKnew) {
-      const card = queue.shift();
-      if (!card) return;
-      state = answer(state, card.key, itKnew);
-      if (itKnew) knew++;
-      else if (!missedKeys.has(card.key)) {
-        missed++;
-        missedKeys.add(card.key);
-        queue.push(card);  // once more before the end
-        total++;
-      }
-      flipped = false;
-      save();
-      draw();
-    }
-
-    function toggleShuffle() {
-      shuffled = !shuffled;
-      ui.shuffle.setAttribute('aria-pressed', String(shuffled));
-      ui.shuffle.classList.toggle('on', shuffled);
-      queue = shuffled ? shuffle(queue) : [...queue].sort((a, b) => boxOf(state, a.key) - boxOf(state, b.key) || a.line - b.line);
-      flipped = false;
-      draw();
-    }
-
-    function again() {
-      queue = shuffled ? shuffle(list) : [...list];
-      all = true;
-      total = queue.length;
-      knew = 0;
-      missed = 0;
-      missedKeys.clear();
-      flipped = false;
-      draw();
-    }
-
-    const keys = (event) => {
-      if (!ui.card.isConnected || event.target.closest('input, textarea, select')) return;
-      if (event.key === ' ' && event.target === ui.card) return;  // the card's own click flips it
-      if ((event.key === ' ' || event.key === 'Enter') && !event.target.closest('button')) { event.preventDefault(); flip(); }
-      else if (flipped && (event.key === 'ArrowRight' || event.key === 'k')) { event.preventDefault(); mark(true); }
-      else if (flipped && (event.key === 'ArrowLeft' || event.key === 'n')) { event.preventDefault(); mark(false); }
-    };
-    document.addEventListener('keydown', keys);
-    const sheet = V.sheet({
-      title: V.noteTitle({ ...note, body: V.editor.words() || '' }) + ': study',
-      wide: true,
-      content: [
-        V.h('div.study-top', {}, ui.progress, ui.shuffle),
-        V.h('span.bar.study-bar', {}, ui.fill),
-        ui.card,
-        ui.actions,
-        V.h('p.hint.study-hint', { text: 'Cards come from lines like "photosynthesis :: how plants make food". Known cards come back after 1, 3, 7 and 14 days.' }),
-      ],
-      onClose: () => document.removeEventListener('keydown', keys),
-    });
-    draw();
-    requestAnimationFrame(() => ui.card.focus({ preventScroll: true }));
-    return sheet;
+    return V.review.study(id);
   }
 
   /* -- focus timer */
@@ -546,8 +434,12 @@ V.study = (() => {
 
   /* -- hooked into the note */
 
+  // Not in a locked note: a card's progress is kept by a code made from its words, which would give them away.
+  const hasCards = (note, text) => !note.locked && cards(text).length > 0;
   V.editor.addTool({ name: 'study', label: 'Study', icon: () => icon('cards'), keepCaret: false, onClick: studySheet,
-    shown: (note, text) => cards(text).length > 0 });
+    shown: hasCards });
+  V.editor.addTool({ name: 'learn', label: 'Learn', icon: () => V.icon('learn'), keepCaret: false, shown: hasCards,
+    onClick: () => { const id = V.editor.openId(); if (id) V.learn.forNote(id); } });
   V.editor.addTool({ name: 'focus', label: 'Focus timer', icon: () => icon('timer'), keepCaret: false, onClick: focusSheet });
   V.editor.addTool({ name: 'repeat', label: 'Repeat', icon: () => icon('repeat'), keepCaret: false, onClick: repeatSheet,
     shown: (note, text) => HAS_ITEMS.test(text || '') || !!(note.extra && note.extra.reset) });
@@ -573,6 +465,6 @@ V.study = (() => {
   V.on('back', () => resetOpen());
   setInterval(() => { if (!V.away()) resetOpen(); }, 5 * 60000);
 
-  return { cards, answer, dueCards, prune, code, makeTimer, weekMinutes, addMinutes, period, untick, resetFor, resetDue,
+  return { cards, prune, code, GAP, makeTimer, weekMinutes, addMinutes, period, untick, resetFor, resetDue,
     resetOpen, studySheet, focusSheet, repeatSheet, minutesText, running: () => focus };
 })();

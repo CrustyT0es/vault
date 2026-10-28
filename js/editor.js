@@ -82,8 +82,9 @@ V.editor = (() => {
   let queued = '';  // the last state handed to the chain: the same one isn't saved twice
 
   /* Saving takes a snapshot of the note now (it may be closed a moment later) and saves the snapshots one after
-     another, so an older one can never land after a newer one. */
-  function save() {
+     another, so an older one can never land after a newer one. `quiet`: only the note's flash cards moved on (js/review.js),
+     so it doesn't count as an edit (js/cloud.js checks that nothing else changed). */
+  function save({ quiet = false } = {}) {
     // A change from elsewhere still waiting goes in first: saving over it would lose it.
     if (pending && !saving) takeRemote();
     const current = note;
@@ -97,7 +98,7 @@ V.editor = (() => {
     if (fingerprint === queued) return chain;
     queued = fingerprint;
     saving++;
-    chain = chain.then(() => store(current, body, words, showing)).catch((error) => {
+    chain = chain.then(() => store(current, body, words, showing, quiet)).catch((error) => {
       queued = '';  // not saved: the next change tries again
       V.problem(error);
     }).finally(() => {
@@ -107,12 +108,12 @@ V.editor = (() => {
     return chain;
   }
 
-  async function store(current, body, words, showing) {
+  async function store(current, body, words, showing, quiet = false) {
     const row = { ...current, body };
     // A locked note's words are sealed again only while they're showing; otherwise (its pin, folder or title
     // changed from the locked face) its sealed words stay exactly as they were.
     if (current.locked && showing) row.secret = await V.lock.encrypt(JSON.stringify({ body: words }));
-    const saved = await V.cloud.save('notes', row);
+    const saved = await V.cloud.save('notes', row, { quiet });
     if (note && note.id === saved.id) {
       base = saved;
       if (!current.locked || showing) savedWords = words;
@@ -158,12 +159,37 @@ V.editor = (() => {
      committing a word on space threw a long note back to its top. */
   const SIZES_ITSELF = !!(window.CSS && CSS.supports && CSS.supports('field-sizing', 'content'));
   function grow(area) {
+    shade(area);  // (whenever a box's words change, so do its blanks)
     if (SIZES_ITSELF) return;
     const scroller = area.closest('.editor-scroll');
     const top = scroller ? scroller.scrollTop : 0;
     area.style.height = 'auto';
     area.style.height = area.scrollHeight + 'px';
     if (scroller && scroller.scrollTop !== top) scroller.scrollTop = top;
+  }
+
+  /* {{blanks}} in a text box (fill-in-the-blank flash cards) get a soft wash and a dotted line under them. A text box
+     can't style part of its words, so a copy of them sits under it, see-through but for those marks, wrapping just
+     as the box does (styles.css: .blank-shade). The words themselves stay plain text. */
+  const shades = new WeakMap();      // a text box -> the layer under it
+  const shadeWords = new WeakMap();  // ...and the words it was last drawn for
+  function shade(area) {
+    const under = shades.get(area);
+    if (!under) return;
+    const value = area.value.includes('{{') ? area.value : '';
+    if (shadeWords.get(area) === value) return;
+    shadeWords.set(area, value);
+    const found = value ? V.format.blanks(value) : [];
+    under.hidden = !found.length;
+    if (!found.length) { V.clear(under); return; }
+    const pieces = [];
+    let at = 0;
+    for (const blank of found) {
+      pieces.push(value.slice(at, blank.start), V.h('span.blank-mark', { text: value.slice(blank.start, blank.end) }));
+      at = blank.end;
+    }
+    pieces.push(value.slice(at));
+    V.clear(under, pieces);
   }
 
   function focusBlock(index, where = 'end') {
@@ -279,11 +305,13 @@ V.editor = (() => {
       onbeforeinput: (event) => beforeInput(event, index, area),
     });
     owner.set(area, block);
+    const under = block.type === 'text' ? V.h('div.blank-shade', { 'aria-hidden': 'true', hidden: true }) : null;
+    if (under) { shades.set(area, under); shade(area); }
     requestAnimationFrame(() => grow(area));
     const chips = V.h('div.link-chips', { hidden: true });
     chipRows.set(area, chips);
     drawChips(area, block);
-    if (block.type === 'text') return V.h('div.block.text-block', {}, area, chips);
+    if (block.type === 'text') return V.h('div.block.text-block', {}, under, area, chips);
     if (block.type === 'heading') return V.h(`div.block.heading-block.h${block.level}`, {}, area, chips);
     const row = V.h('div.block.check-row' + (block.done ? '.done' : ''));
     const tick = V.h('button.tick', {
@@ -1298,7 +1326,7 @@ V.editor = (() => {
   }
 
   function drawRead() {
-    const shown = V.format.render(serialize(), { tick: tickLine });
+    const shown = V.format.render(serialize(), { tick: tickLine, blanks: true });
     readMap = shown.map;
     parts.read = V.h('div.read-view', { onclick: readTap }, shown.el);
     V.clear(parts.body, parts.read, parts.pictures, parts.files);
@@ -2061,18 +2089,8 @@ V.editor = (() => {
   const sameAs = (a, b) => a.title === b.title && a.folder_id === b.folder_id && a.pinned === b.pinned && a.due === b.due
     && a.done === b.done && a.locked === b.locked && paths(a) === paths(b) && stable(a.extra || {}) === stable(b.extra || {});
 
-  /* Each setting kept in `extra` (a word goal...) as this device changed it, else as theirs. */
-  function mergeExtra(start, mine, theirs) {
-    const was = start || {};
-    const now = mine || {};
-    const out = { ...(theirs || {}) };
-    for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
-      if (stable(was[key]) === stable(now[key])) continue;  // not changed here
-      if (key in now) out[key] = now[key];
-      else delete out[key];
-    }
-    return out;
-  }
+  /* Each setting kept in `extra` (a word goal, flash cards...) as this device changed it, else as theirs. */
+  const mergeExtra = (start, mine, theirs) => V.cloud.mergeExtra(start, mine, theirs);
 
   /* The open note changed in the cloud (from the other device, or Jarvis). */
   function takeRemote() {
@@ -2251,11 +2269,12 @@ V.editor = (() => {
   const words = () => (note && (!note.locked || revealed) ? serialize() : null);
 
   /* A change to the open note's own values (its due date, its extra), saved like any edit; nothing is rebuilt but
-     the bar (`draw`), so the caret and the phone's keyboard stay where they are. */
-  function update(change, { draw = true } = {}) {
+     the bar (`draw`), so the caret and the phone's keyboard stay where they are. `quiet`: only its flash cards moved
+     on, which isn't an edit (see save). */
+  function update(change, { draw = true, quiet = false } = {}) {
     if (!note) return Promise.resolve();
     change(note);
-    const done = save();
+    const done = save({ quiet });
     if (draw && el) drawBar();
     return done;
   }

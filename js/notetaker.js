@@ -155,7 +155,8 @@ V.notetaker = (() => {
         } else if (what === 'language-not-supported') {
           wanted = false;
           on.fail('The speech service doesn\'t know this phone\'s language.');
-        }  // 'no-speech' and 'aborted' just end it: it starts again
+        }  // 'no-speech' (a quiet stretch, common in a hushed classroom) and 'aborted' aren't shown as errors and
+           // never set wanted=false: onend starts a fresh session, so it keeps listening right through the quiet.
       };
       rec.onend = () => {
         rec = null;
@@ -779,6 +780,8 @@ V.notetaker = (() => {
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
         how.kind === 'web' ? V.h('li', { text: 'Keep Vault open while it listens: the screen stays on by itself.' }) : null,
+        how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
+          + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
         V.h('li', { text: 'Ask people before you record them.' }))));
     V.clear(foot,
       hasTranscript ? V.button('Make notes now', { icon: 'check', onClick: () => makeNotes(note.id) }) : null,

@@ -170,14 +170,49 @@ V.cloud = (() => {
     return changed;
   }
 
-  /* A change made on this device: shown and saved at once, sent soon after. */
-  async function save(table, row) {
+  /* A change made on this device: shown and saved at once, sent soon after. `quiet` (a note whose flash cards moved
+     on, js/review.js): when nothing else in it changed, it isn't an edit, so it keeps its place in the lists. */
+  async function save(table, row, { quiet = false } = {}) {
     let stamped = { ...row, _dirty: stamp(), _edited: new Date().toISOString() };
-    if (table === 'notes') stamped = carryBase(stamped, V.data.notes.get(row.id), row);
+    if (table === 'notes') {
+      const here = V.data.notes.get(row.id);
+      if (quiet && here && !here._purge && notePrint(stamped) === notePrint(here)) {
+        const was = V.editedAt(here) || stamped._edited;
+        stamped._edited = was;
+        stamped.extra = { ...(stamped.extra || {}), edited_at: was, edited_print: notePrint(stamped) };
+      }
+      stamped = carryBase(stamped, here, row);
+    }
     await put(table, stamped);
     pushSoon();
     return stamped;
   }
+
+  /* -- when a note was last edited
+
+     The lists sort by it and say it ("2 min ago"): this device's own last change (_edited), else the cloud's
+     updated_at. The cloud's moves on with any change, a flash card's progress too, so a quiet save also writes the
+     time the note had into extra.edited_at, with a print of everything in the note but its flash cards
+     (extra.edited_print): the other devices go by that time for as long as the print still matches, and by the
+     cloud's again as soon as the note really changes, wherever that was. History (js/history.js) only ever looks at
+     the title and the words, so cards moving on never make a copy either. */
+  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print']);
+  const prints = new WeakMap();
+  function notePrint(row) {
+    if (prints.has(row)) return prints.get(row);
+    const extra = Object.fromEntries(Object.entries(row.extra || {}).filter(([key]) => !QUIET_KEYS.has(key)));
+    const text = stable([row.title || '', row.locked ? row.secret || '' : row.body || '', row.folder_id || null,
+      !!row.pinned, row.due || null, !!row.done, !!row.locked, !!row.deleted, row.template || '',
+      (row.attachments || []).map((a) => (a && (a.path || a.id)) || ''), extra]);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+    const print = h.toString(36) + '.' + text.length.toString(36);
+    prints.set(row, print);
+    return print;
+  }
+  V.editedAt = (row) => (!row ? '' : row._edited
+    || (row.extra && row.extra.edited_at && row.extra.edited_print === notePrint(row) ? row.extra.edited_at : '')
+    || row.updated_at || row.created_at || '');
 
   async function put(table, row) {
     V.data[table].set(row.id, row);
@@ -218,18 +253,21 @@ V.cloud = (() => {
     return { ...next, ...row, _mine: fieldsOf(next) };
   }
 
-  /* Each setting kept in `extra` as this device changed it, else as theirs. */
-  function mergeExtra(start, mine, theirs) {
+  /* Each setting kept in `extra` as this device changed it, else as theirs. Flash cards (extra.cards) one card at a
+     time, so cards studied on both devices at once all keep their progress. */
+  function mergeExtra(start, mine, theirs, top = true) {
     const was = start || {};
     const now = mine || {};
     const out = { ...(theirs || {}) };
     for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
       if (stable(was[key]) === stable(now[key])) continue;
-      if (key in now) out[key] = now[key];
+      if (top && key === 'cards' && isObject(now.cards) && isObject(out.cards)) out.cards = mergeExtra(was.cards, now.cards, out.cards, false);
+      else if (key in now) out[key] = now[key];
       else delete out[key];
     }
     return out;
   }
+  const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
   /* A note's pictures, files, memos and drawings, each kept unless one side removed it, and each side's new ones added
      (this device's first). */
@@ -707,7 +745,7 @@ V.cloud = (() => {
 
   return {
     client, start, sync, save, keep, push, upload, link, blob, remove, purgeNote, user, signIn, signOut,
-    changePassword, accessToken, unsent,
+    changePassword, accessToken, unsent, mergeExtra, notePrint,
     get sb() { return sb; },
     get status() { return status; },
     get held() { return heldCount(); },

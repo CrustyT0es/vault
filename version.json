@@ -1,15 +1,15 @@
 {
  "format": 1,
- "version": "1.5.0",
+ "version": "1.6.0",
  "min_shell": 1,
  "notes": [
-  "Send when you're home: a Claude message that can't get through (like on school wifi) waits and sends by itself once Claude can be reached. Send now or Cancel any time.",
-  "The note-taker does the same: press Stop anywhere, and the notes are made by themselves when Claude can be reached. Nothing gets in your way meanwhile.",
-  "Check Claude (Settings > AI) tells you if Claude works here, you're offline, or this network blocks it.",
-  "Search finds words inside your photos, PDFs, drawings and voice memos (your PC reads them while it's on; turn it on in Settings).",
-  "Fixes: the sync status no longer says Synced when a note is too big to go up, sharing a PDF to Vault as a note keeps the file, and the Ctrl+N tip only shows where it works."
+  "New Review page: every flash card due today from all your notes in one place, with a smarter schedule that brings each card back right before you'd forget it.",
+  "Learn mode: practise your cards like Quizlet \u2014 multiple choice, true/false, then typing (it forgives small typos). Missed cards come back.",
+  "Fill-in-the-blank cards: write \"The {{mitochondria}} makes ATP\" and the hidden word becomes a card.",
+  "Exam countdown: a test note shows \"Bio test in 3 days \u00b7 42 cards left \u00b7 ~14 a day\", and pulls those cards forward so you're ready.",
+  "The note-taker hears quiet voices better on your PC (and there's a high-sensitivity setting for very quiet rooms)."
  ],
- "build": "1.5.0-911a2ce84760",
+ "build": "1.6.0-652c284420ec",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -64,8 +64,8 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "b6e643b32c28b46646c36ddb7bdc79c196a52ef98162c9dff944513b82a5ecd9",
-   "size": 4711
+   "sha256": "3d96be882f12de0eb97193c52bf6d48f33e2833348a3cd0244647b684d7d749b",
+   "size": 4867
   },
   "js/ai.js": {
    "sha256": "d2bc935116a2882fd26e8070397b1063a90e5d5f03ea7a4d9944be59c3cd667a",
@@ -84,24 +84,28 @@
    "size": 13490
   },
   "js/cloud.js": {
-   "sha256": "15de9c5ef1d1cadce3fd8f295d4c57f8dd8e982d1589c6aa793a1b692bdd1fc2",
-   "size": 34043
+   "sha256": "2d879353c1e2996a502f25ad9d8fdeed7a0741415f2011a860c30e86d20bb542",
+   "size": 36629
   },
   "js/db.js": {
    "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
    "size": 3536
   },
   "js/editor.js": {
-   "sha256": "65c778534daf7346dffd0c018d493a25850bcf033651e679efa532ee37b23e57",
-   "size": 107310
+   "sha256": "4b4440a369bfdd4edf80306401356420a2e4dca8577bca81572975d0bd2a922b",
+   "size": 108713
+  },
+  "js/exams.js": {
+   "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
+   "size": 6490
   },
   "js/files.js": {
    "sha256": "55c28cfd2f94e90ab5adec9c55f9629fdfa20a4627eb10a41a02e7b27324baa1",
    "size": 64630
   },
   "js/format.js": {
-   "sha256": "02f7ee5dddcd9a992da5926f38422212fa8f4fb2eae0ee03ac0ed68bccceedd5",
-   "size": 22428
+   "sha256": "0a99e37956e5a2c3d2f2b9cb33899b0c65703adde4042be3537ddf40b658378b",
+   "size": 24302
   },
   "js/history.js": {
    "sha256": "1b66a0994363a4d90dc8e00b20bea180ab05fbca2780625cddfe88c46d910e1c",
@@ -111,25 +115,33 @@
    "sha256": "a42e3e1061f4bb515063da2a7ce92d2e503900aa516e6390f717abfa720bae6c",
    "size": 46552
   },
+  "js/learn.js": {
+   "sha256": "1c57fc8814c57d3db8b6ae117f14772d7744789574ec29823b8c239da871476c",
+   "size": 15387
+  },
   "js/lock.js": {
    "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
    "size": 7054
   },
   "js/notes.js": {
-   "sha256": "a2145e94be5d7f1e05dc477b818fe3854e5f15ef25824eba1dec3be85eb06a4f",
-   "size": 46676
+   "sha256": "e333ca6c1746e3056c11e071a9a42005884cf76b740878f2a96b267263b24da5",
+   "size": 47795
   },
   "js/notetaker.js": {
-   "sha256": "7590f8b560640a8a95367a482b3a5f32e282a0b6d599d463516e220bd922b120",
-   "size": 45851
+   "sha256": "fdc082e723c762c990b57c8927e0a803324fc1981bb4297d878d29ab7fe94a32",
+   "size": 46236
   },
   "js/organise.js": {
-   "sha256": "a4dd2c66746d2ebd4ee38e57aade5848d005f2e1867bdc862ca012a734eb2d36",
-   "size": 39342
+   "sha256": "e10b0d975f55cc8cedb3d35d9b95503c35bf89550ca535bf10ddb3e20bd4fe7b",
+   "size": 39383
   },
   "js/reminders.js": {
    "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
    "size": 38059
+  },
+  "js/review.js": {
+   "sha256": "9d10d4ee5cbb67a891b8f578316c8cf1394ddf6a246caa159f740be43dba96c4",
+   "size": 31629
   },
   "js/send.js": {
    "sha256": "7a4ec8e9e32f95fa4c04fb2d152c9bc600063d938625efac97bb3b01c58f4c13",
@@ -144,36 +156,44 @@
    "size": 19276
   },
   "js/study.js": {
-   "sha256": "82356aca15a4532c74324a347e7b609acb20c0f8e8f3eca030919afc4f6d9f73",
-   "size": 25659
+   "sha256": "c19f8d4e1d12d50fec89d72bfd116a00552184c55e3a0fb0dc5568da6209ad1b",
+   "size": 21884
   },
   "js/update.js": {
    "sha256": "1db0c7fe7968aefc17b23f15e69b75139b69b51b753da47e3956e3f04fc0527a",
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "0f5a6ba3d488fb56588688e8e0281726c6ae9d97a48f6ed8cb4e53dee6e1e498",
-   "size": 29855
+   "sha256": "0308ac0badd97437839cc0d7219b84612359a5920468854d799a9a3fdffd513c",
+   "size": 30309
   },
   "manifest.webmanifest": {
    "sha256": "2ae901fea4b29bcbb13537bc2e390cedba196d4af203293fc2a0aeb0d6cb43dc",
    "size": 1452
   },
   "styles.css": {
-   "sha256": "bc0b5b0da6fec4f8926358066335b6e12988d42ae4bc3aa31902638065920aa9",
-   "size": 130965
+   "sha256": "a14e8d71d520ee50a8b2f44bc5ef094204f4155a0d205b0fe19497cfde2c26d2",
+   "size": 143506
   },
   "sw.js": {
-   "sha256": "e8d97f7b6b6aa795ced77448907c7de86960e85f350712557e3d0fc18712964d",
+   "sha256": "7faa70c14332702d741e99a7c03537ca35609964dedf392db49729d1bef93985",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {
    "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",
    "size": 1065
   },
+  "vendor/LICENSE-ts-fsrs.txt": {
+   "sha256": "8b83a73dd2894ff553d6de6113064b3ad9dfad3f839837b61f3b183881131d01",
+   "size": 1079
+  },
   "vendor/README.txt": {
-   "sha256": "a1cc2cd5250c2ac6949b265eeac79b0203227a8c3f7afdaad399627c917996a9",
-   "size": 309
+   "sha256": "7f7f360e16b5c6d13ba5ddbf0b5589e0d5966f35027138a16c0df264f90cd57a",
+   "size": 541
+  },
+  "vendor/fsrs.js": {
+   "sha256": "2e99c20eec90e5ac0a925ef32d990cad14954e5a1173aaa07f29226f6a4a3955",
+   "size": 71971
   },
   "vendor/qrcode.js": {
    "sha256": "79ec86f82856005b1c887905cfccfcfbec3821ca61c7fd5a952faa5f778f791c",
