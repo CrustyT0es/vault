@@ -1,5 +1,6 @@
-/* Vault: Claude, for the note-taker (js/notetaker.js). One request turns a transcript into notes: Claude Haiku at low
-   effort, the cheapest there is (about a third of a cent for an hour of class).
+/* Vault: Claude, for the note-taker (js/notetaker.js) and the Claude tab (js/chat.js). For the note-taker, one request
+   turns a transcript into notes: Claude Haiku at low effort, the cheapest there is (about a third of a cent for an hour
+   of class). The chat streams its own requests, and shares the key, the prices and the monthly tally kept here.
 
    The key: the owner's own Claude key, kept in their private file storage at <owner>/private/claude.json, which only
    they can read. The PC puts Jarvis's key there itself (vault/notetaker.py: Python reads .env and uploads it, so it
@@ -18,9 +19,20 @@ V.ai = (() => {
   const API_VERSION = '2026-10-21';
   const MODEL = 'claude-haiku-5-5';
   const MAX_TOKENS = 16000;
-  // Dollars a million tokens (jarvis/costs.py PRICES); a prompt over 100K tokens costs more.
-  const PRICE = { input: 0.10, output: 0.50 };
-  const LONG = { over: 100000, input: 0.50, output: 2.50 };
+  // Dollars a million tokens, as jarvis/costs.py PRICES has them: input, output, cache write (5 minutes), cache read.
+  // Claude Haiku 5.5 costs more once a prompt is over 100K tokens. The last three are the models the API may answer
+  // with instead when one declines (a server-side fallback), priced as themselves.
+  const PRICES = {
+    'claude-haiku-5-5': { input: 0.10, output: 0.50, write: 0.125, read: 0.01,
+      long: { over: 100000, input: 0.50, output: 2.50, write: 0.625, read: 0.05 } },
+    'claude-sonnet-5-5': { input: 2.00, output: 10.00, write: 2.50, read: 0.20 },
+    'claude-opus-5-5': { input: 4.00, output: 20.00, write: 5.00, read: 0.20 },
+    'claude-fable-5-1': { input: 10.00, output: 50.00, write: 12.50, read: 0.25 },
+    'claude-sonnet-5': { input: 2.00, output: 10.00, write: 2.50, read: 0.20 },
+    'claude-opus-5': { input: 5.00, output: 25.00, write: 6.25, read: 0.50 },
+    'claude-opus-4-8': { input: 5.00, output: 25.00, write: 6.25, read: 0.50 },
+  };
+  const SEARCH = 0.01;  // dollars a web search
   const LIMIT = 1.00;
   const KEY_FILE = 'claude.json';
   const KEY_SHAPE = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
@@ -46,11 +58,27 @@ V.ai = (() => {
 
   /* -- what it costs */
 
-  function price(usage) {
+  /* The rates of `model` for a prompt of `prompt` tokens (an unknown model is priced as Fable, the dearest). */
+  function rates(model, prompt = 0) {
+    const p = PRICES[model] || PRICES['claude-fable-5-1'];
+    return p.long && prompt > p.long.over ? p.long : p;
+  }
+
+  /* What one response cost, from its `usage`. With a server-side fallback, usage.iterations has each model's own try
+     (each priced as that model); web searches are a cent each. */
+  function price(usage, model = MODEL) {
     const u = usage || {};
-    const input = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-    const rate = input > LONG.over ? LONG : PRICE;
-    return (input * rate.input + (u.output_tokens || 0) * rate.output) / 1e6;
+    const one = (part, who) => {
+      const fresh = Number(part.input_tokens) || 0;
+      const write = Number(part.cache_creation_input_tokens) || 0;
+      const read = Number(part.cache_read_input_tokens) || 0;
+      const r = rates(PRICES[who] ? who : model, fresh + write + read);
+      return (fresh * r.input + write * r.write + read * r.read + (Number(part.output_tokens) || 0) * r.output) / 1e6;
+    };
+    const tries = (Array.isArray(u.iterations) ? u.iterations : []).filter((it) => it && typeof it.input_tokens === 'number');
+    const tokens = tries.length ? tries.reduce((sum, it) => sum + one(it, it.model || model), 0) : one(u, model);
+    const searches = Number((u.server_tool_use || {}).web_search_requests) || 0;
+    return tokens + searches * SEARCH;
   }
 
   /* "0.3¢" for less than a cent, else "$0.12". */
@@ -90,6 +118,7 @@ V.ai = (() => {
     V.emit('data', 'settings');
   }
 
+  /* `cost` added to this month's tally (every device's), as one more request. */
   async function count(cost) {
     const now = month();
     const add = cost + owed;
@@ -184,8 +213,7 @@ V.ai = (() => {
     try {
       response = await fetch(API, {
         method: 'POST',
-        headers: { 'x-api-key': sending, 'anthropic-version': API_VERSION, 'content-type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true' },
+        headers: headers(sending),
         body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: 'low' }, system,
           messages: [{ role: 'user', content: text }] }),
       });
@@ -215,13 +243,31 @@ V.ai = (() => {
     return { text: answer.text || '', stopReason: answer.stop_reason || '', usage: answer.usage || {} };
   }
 
-  /* One request: { text, stopReason, usage, cost }, or an AiError whose message is ready to show. */
-  async function ask({ system, text }) {
+  /* An AiError when this month's limit is reached (null while there's money left). */
+  async function overLimit() {
     await readOwed();
     const now = tally();
     if (now.limit > 0 && now.spent >= now.limit) {
-      throw new AiError('limit', `Vault's AI has used this month's ${money(now.limit)} (${monthName()}). Change the limit in Settings > AI, or wait for next month.`);
+      return new AiError('limit', `Vault's AI has used this month's ${money(now.limit)} (${monthName()}). Raise the limit in Settings > AI, or wait for next month.`);
     }
+    return null;
+  }
+
+  /* The headers every request straight to Claude carries (`betas`: the beta features it uses). */
+  function headers(sending, betas = []) {
+    const out = { 'x-api-key': sending, 'anthropic-version': API_VERSION, 'content-type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true' };
+    if (betas.length) out['anthropic-beta'] = betas.join(',');
+    return out;
+  }
+
+  /* The key was refused: this device forgets its copy, so it's fetched again next time (it may have been replaced). */
+  const forgetKey = () => { key = null; };
+
+  /* One request: { text, stopReason, usage, cost }, or an AiError whose message is ready to show. */
+  async function ask({ system, text }) {
+    const over = await overLimit();
+    if (over) throw over;
     const answer = V.desktop ? await viaPc(system, text) : await direct(system, text);
     const cost = price(answer.usage);
     await count(cost);
@@ -241,26 +287,26 @@ V.ai = (() => {
     }
     const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
     const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
-      const sure = await V.confirm('Remove the Claude key?', 'Your phone and Chromebook stop making notes until it\'s set up again. Jarvis keeps his own.',
+      const sure = await V.confirm('Remove the Claude key?', 'Your phone and Chromebook stop using Claude until it\'s set up again. Jarvis keeps his own.',
         { ok: 'Remove', danger: true });
       if (!sure) return;
       try { await removeKey(); V.toast('Key removed.'); } catch (error) { V.problem(error); }
       ui.draw();
     } });
     if (known.cloud) {
-      return ui.line('Claude key', V.desktop ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can make notes.'
-        : 'In your own cloud, never shown. Notes can be made here.', V.h('div.setting-buttons', {}, ready, remove));
+      return ui.line('Claude key', V.desktop ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
+        : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
     }
     if (V.desktop) {
       if (known.old) return ui.line('Claude key', 'Open Jarvis and click Update to set this up.', null);
       return V.h('div.ai-key', {},
-        ui.line('Claude key', known.pc ? 'Notes are made on this PC with Jarvis\'s key. Your phone and Chromebook need it too.'
+        ui.line('Claude key', known.pc ? 'Claude is used on this PC with Jarvis\'s key. Your phone and Chromebook need it too.'
           : 'Jarvis has no Claude key yet. Add it in Jarvis\'s Settings first.', null),
         known.pc ? V.h('div.setting-buttons', {}, V.button('Use Jarvis\'s Claude key on my phone and Chromebook', {
           kind: 'primary', icon: 'phone', disabled: saving, onClick: async () => {
             saving = true;
             ui.draw();
-            try { await shareFromPc(); V.toast('Done. Your phone and Chromebook can make notes now.'); } catch (error) { V.problem(error); }
+            try { await shareFromPc(); V.toast('Done. Your phone and Chromebook can use Claude now.'); } catch (error) { V.problem(error); }
             saving = false;
             ui.draw();
           } })) : null);
@@ -271,7 +317,7 @@ V.ai = (() => {
       try {
         await saveKey(box.value);
         box.value = '';
-        V.toast('Key saved. Notes can be made now.');
+        V.toast('Key saved. Claude can be used here now.');
         ui.draw();
       } catch (error) { V.problem(error); }
     } });
@@ -295,15 +341,17 @@ V.ai = (() => {
       try { await setLimit(dollars); V.toast(dollars ? `The limit is ${money(dollars)} a month.` : 'No limit.'); } catch (error) { V.problem(error); }
     } });
     const spent = `${money(now.spent)} of ${now.limit ? money(now.limit) : 'no limit'}`
-      + (now.calls ? ` · ${now.calls} note${now.calls === 1 ? '' : 's'} made` : '');
-    return ui.card('AI note-taker',
+      + (now.calls ? ` · ${now.calls} request${now.calls === 1 ? '' : 's'}` : '');
+    return ui.card('AI',
       keyLine(ui),
       ui.line(`This month (${monthName()})`, spent, limit),
-      V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic) reads the transcript only when you make notes, and never hears the sound itself.' }));
+      V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic) only reads what you send it: a transcript when you make notes, '
+        + 'and your messages in the Claude tab. It never hears the sound itself.' }));
   }
 
   V.on('signed-out', () => { key = null; known = null; });
 
-  return { ask, price, money, tally, check, card, getKey, saveKey, removeKey, AiError, state: () => known,
-    ready: () => !!(known && (known.cloud || (V.desktop && known.pc))), MODEL, API_VERSION };
+  return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, card, getKey, saveKey, removeKey,
+    AiError, WORDS, PRICES, state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc))), MODEL,
+    API, API_VERSION };
 })();

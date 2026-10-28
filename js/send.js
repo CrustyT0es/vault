@@ -908,7 +908,8 @@ V.send = (() => {
     });
     const files = live();
     const used = files.reduce((sum, t) => sum + (t.size || 0) + (thumbOf(t) ? Number(t.extra.thumb_size) || THUMB_GUESS : 0), 0) +
-      [...V.data.notes.values()].reduce((sum, n) => sum + (n.attachments || []).reduce((s, a) => s + (a.size || 0), 0), 0);
+      [...V.data.notes.values()].reduce((sum, n) => sum + (n.attachments || []).reduce((s, a) => s + (a.size || 0), 0), 0) +
+      (V.chat ? V.chat.filesSize() : 0);
     V.clear(parts.space, V.h('div.bar.space', {}, V.h('i', { style: { width: Math.min(100, 100 * used / FREE_SPACE) + '%' } })),
       V.h('span', { text: `${V.size(used)} of 1 GB of free space used` }),
       files.some((t) => sendable(t) && t.kind === 'file') ? V.button('Clean up', { kind: 'quiet', onClick: cleanUp }) : null);

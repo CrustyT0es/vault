@@ -11,7 +11,7 @@
       canCheck: false, downloaded: false }) };
   const app = document.getElementById('app');
   const TABS = [['notes', 'notes', 'Notes'], ['send', 'send', 'Send'], ['files', 'folder', 'Files'], ['clips', 'clip', 'Clipboard'],
-    ['settings', 'settings', 'Settings']];
+    ['claude', 'spark', 'Claude'], ['settings', 'settings', 'Settings']];
   let current = 'notes';
   let shell = null;
 
@@ -23,7 +23,7 @@
     if (!shell) return;
     for (const button of shell.nav.querySelectorAll('.tab')) button.classList.toggle('on', button.dataset.tab === tab);
     shell.view.dataset.tab = tab;
-    const show = { notes: V.notes, send: V.send, files: V.files, clips: V.clips, settings: V.settings }[tab];
+    const show = { notes: V.notes, send: V.send, files: V.files, clips: V.clips, claude: V.chat, settings: V.settings }[tab];
     show.render(shell.view);
     shell.view.scrollTop = 0;
     badge();
@@ -244,7 +244,7 @@
       if (!hasFiles(event) || !V.data.user) return;
       depth++;
       hint.hidden = false;
-      hint.querySelector('p').textContent = V.files.dropText() || `Drop to send to ${V.otherName}`;
+      hint.querySelector('p').textContent = V.files.dropText() || (V.chat && V.chat.dropText()) || `Drop to send to ${V.otherName}`;
     });
     window.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) hint.hidden = true; });
     window.addEventListener('dragover', (event) => { if (hasFiles(event)) event.preventDefault(); });
@@ -254,6 +254,7 @@
       if (!hasFiles(event) || !V.data.user) return;
       event.preventDefault();
       if (V.files.takeDrop(event.dataTransfer.files)) return;  // onto Vault Drive in the Files tab
+      if (V.chat && V.chat.takeDrop(event.dataTransfer.files)) return;  // into the message to Claude
       V.go('send');
       V.send.files(event.dataTransfer.files);
     });

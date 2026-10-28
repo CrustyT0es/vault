@@ -1535,6 +1535,7 @@ V.editor = (() => {
         await V.copy([note.title, serialize()].filter(Boolean).join('\n\n'));
         V.toast('Copied');
       } } : null,
+      (!note.locked || revealed) && V.chat ? { label: 'Ask Claude about it', icon: 'spark', onClick: () => V.chat.askAbout() } : null,
       !note.locked && !template ? { label: 'Save as template', icon: 'notes', onClick: () => V.organise.saveTemplate({
         title: note.title, body: serialize(), folder_id: note.folder_id }).catch(V.problem) } : null,
       template ? { label: 'Make it a normal note', icon: 'notes', onClick: async () => {

@@ -446,7 +446,8 @@ V.files = (() => {
   function used() {
     const sent = [...V.data.transfers.values()].filter((t) => !t.deleted && t.path).reduce((sum, t) => sum + (t.size || 0), 0);
     const pictures = [...V.data.notes.values()].reduce((sum, n) => sum + (n.attachments || []).reduce((s, a) => s + (a.size || 0), 0), 0);
-    return sent + pictures + [...uploads.values()].reduce((sum, u) => sum + u.size, 0);
+    const chats = V.chat ? V.chat.filesSize() : 0;  // files sent to Claude in chats
+    return sent + pictures + chats + [...uploads.values()].reduce((sum, u) => sum + u.size, 0);
   }
 
   function cleanName(text, folder, ignore) {

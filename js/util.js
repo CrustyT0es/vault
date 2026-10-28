@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.3.0';
+V.VERSION = '1.4.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 
 /* Which device this is: 'pc' (the PC app), 'phone' (the owner's Android phone: Vault installed there, or a tab of its
@@ -200,6 +200,10 @@ const ICONS = {
   laptop: '<rect x="4.5" y="5" width="15" height="10.5" rx="2"/><path d="M2.5 19h19"/>',
   play: '<path d="M8.5 6.2v11.6a.9.9 0 0 0 1.38.76l9-5.8a.9.9 0 0 0 0-1.52l-9-5.8a.9.9 0 0 0-1.38.76z" fill="currentColor" stroke="none"/>',
   next: '<path d="m9.5 6 6 6-6 6"/>',
+  spark: '<path d="M12 3.5 13.8 9a2 2 0 0 0 1.2 1.2l5.5 1.8-5.5 1.8a2 2 0 0 0-1.2 1.2L12 20.5 10.2 15a2 2 0 0 0-1.2-1.2L3.5 12 9 10.2A2 2 0 0 0 10.2 9z"/>',
+  paperclip: '<path d="m19.5 11.2-7.8 7.8a4.9 4.9 0 0 1-6.9-6.9l8.2-8.2a3.25 3.25 0 0 1 4.6 4.6l-8.2 8.2a1.6 1.6 0 0 1-2.3-2.3l7.5-7.5"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.3 3.4 5.2 3.4 8.5s-1.1 6.2-3.4 8.5c-2.3-2.3-3.4-5.2-3.4-8.5s1.1-6.2 3.4-8.5z"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
 };
 
 V.icon = function icon(name, cls) {
