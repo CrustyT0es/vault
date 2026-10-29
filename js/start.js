@@ -11,7 +11,7 @@
       canCheck: false, downloaded: false }) };
   const app = document.getElementById('app');
   const TABS = [['notes', 'notes', 'Notes'], ['send', 'send', 'Send'], ['files', 'folder', 'Files'], ['clips', 'clip', 'Clipboard'],
-    ['claude', 'spark', 'Claude'], ['settings', 'settings', 'Settings']];
+    ['claude', 'spark', 'Chat'], ['settings', 'settings', 'Settings']];  // (the Chat tab's id stays 'claude': older links)
   let current = 'notes';
   let shell = null;
 
@@ -19,6 +19,7 @@
 
   V.tab = () => current;
   V.go = (tab) => {
+    if (tab === 'chat') tab = 'claude';  // the Chat tab, by its name since 1.8.3
     current = tab;
     if (!shell) return;
     for (const button of shell.nav.querySelectorAll('.tab')) button.classList.toggle('on', button.dataset.tab === tab);
@@ -35,7 +36,7 @@
     const dot = shell.nav.querySelector('[data-tab=send] .badge');
     dot.textContent = count ? String(count) : '';
     dot.hidden = !count;
-    const waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0;  // messages held until Claude can be reached
+    const waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0;  // chat messages held until they can be sent
     const cdot = shell.nav.querySelector('[data-tab=claude] .badge');
     if (cdot) { cdot.textContent = waiting ? String(waiting) : ''; cdot.hidden = !waiting; }
   }
@@ -409,7 +410,7 @@
       if (!hasFiles(event) || !V.data.user) return;
       event.preventDefault();
       if (V.files.takeDrop(event.dataTransfer.files)) return;  // onto Vault Drive in the Files tab
-      if (V.chat && V.chat.takeDrop(event.dataTransfer.files)) return;  // into the message to Claude
+      if (V.chat && V.chat.takeDrop(event.dataTransfer.files)) return;  // into the message in the Chat tab
       V.go('send');
       V.send.files(event.dataTransfer.files);
     });
@@ -425,10 +426,13 @@
     if (kept && TABS.some(([id]) => id === kept.tab)) current = kept.tab;
     if (asked === '#send') current = 'send';
     if (asked === '#clip') current = 'clips';
+    if (asked === '#chat' || asked === '#claude') current = 'claude';  // the Chat tab (#claude: its id, kept working)
+    // The Chat tab's script (and the others after this one) may still be loading: a page opened on it waits for them.
+    if (document.readyState === 'loading') await new Promise((done) => document.addEventListener('DOMContentLoaded', done, { once: true }));
     V.go(current);
     if (kept && kept.note && current === 'notes' && V.data.notes.has(kept.note)) V.notes.open(kept.note);
     if (asked === '#new') V.notes.chooseTemplate();
-    if (asked === '#new' || asked === '#send' || asked === '#clip') history.replaceState(null, '', location.pathname + location.search);
+    if (['#new', '#send', '#clip', '#chat', '#claude'].includes(asked)) history.replaceState(null, '', location.pathname + location.search);
     dropAnywhere();
     firstSync.then(async () => {
       if (V.cloud.status === 'synced' || V.cloud.status === 'held') await V.notes.ensureStarterFolders();

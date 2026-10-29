@@ -24,6 +24,11 @@ V.notetaker = (() => {
   const SAVE_EVERY = 5000;          // ...and at least this often while they keep coming
   const PARAGRAPH_GAP = 4000;       // a pause this long (ms) starts a new paragraph
   const PARAGRAPH_MOST = 700;       // and so does a paragraph this long
+  // The writing screen: after `time` ms it shows how long it's taking; after `slow`, that it can be closed (and
+  // "Use Gemini instead" when Claude is slow and Gemini is set up). A note whose notes Claude stalled on (a paid try,
+  // given up on as too slow) `rest`s that long before Vault tries it again by itself (Make notes still asks at once):
+  // a stall is often Claude's own trouble, and each try can cost. (Tests shorten them.)
+  const slowness = { time: 10000, slow: 30000, rest: 10 * 60 * 1000 };
   const CARDS = 'vault-notetaker-cards';
   const FOLDER = 'vault-notetaker-folder';
   const DRAWN = {
@@ -69,9 +74,19 @@ V.notetaker = (() => {
   // Chrome on Android, kept listening, hands each finished phrase over again with every phrase before it glued on (a
   // known Chrome bug), so there it hears one phrase at a time and starts again after each.
   const ANDROID = /Android/i.test(navigator.userAgent);
+  // Everywhere else (a Chromebook, Chrome on a computer) it's kept listening, but one long session hears worse and
+  // worse (the owner: "after about 50 words it picks up terribly"), so a session is swapped for a fresh one in a real
+  // pause, once it's `age` ms old or has heard `words` words: `quiet` ms after a finished phrase with nothing more
+  // heard since (Google sends words every few hundred ms while someone talks). Every word is in by then, so it's let
+  // go at once (abort: no wait for Google's last answer), and the next one starts straight away. Only a session that
+  // never had such a pause is ended at its next finished phrase once it's `most` ms old (a stop, which still hands
+  // over what it heard; words said while the next one starts can be missed there). (Tests shorten them.)
+  const rotate = { age: 20000, words: 35, quiet: 1000, most: 60000 };
   const plainWords = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-  /* What `text` adds after the words already kept, when it starts with them all again (else all of it). */
+  /* What `text` adds after the words already kept, when it starts with them all again (else all of it). Android's
+     glued-on phrases only: a phrase that really starts like the one before ("Okay." then "Okay, so...") is left whole
+     everywhere else. */
   function newPart(kept, text) {
     const before = plainWords(kept);
     if (!before || !plainWords(text).startsWith(before)) return text;
@@ -105,11 +120,19 @@ V.notetaker = (() => {
     let kept = '';         // and their words, to spot them handed over again
     let last = '';         // the last phrase kept
     let heard = false;     // this session heard something
+    let began = 0;         // when this session started
+    let count = 0;         // words this session has kept
+    let rotating = false;  // this session is being ended for a fresh one (never a stop: it starts again at once)
+    let quiet = null;      // the pause being waited out before a fresh session (not on Android)
     let restart = null;
     let finished = null;   // resolves when it has really stopped
+    const unquiet = () => { clearTimeout(quiet); quiet = null; };
 
+    /* A session started (each one from nothing: a new one only hears what's said after it starts, so it can't hand
+       the last one's words over again). */
     function begin() {
       restart = null;
+      unquiet();
       if (!wanted || rec) return;
       if (document.hidden) { on.waiting(true); return; }
       const R = Recognition();
@@ -121,25 +144,55 @@ V.notetaker = (() => {
       kept = '';
       last = '';
       heard = false;
+      began = Date.now();
+      count = 0;
+      rotating = false;
+      const mine = rec;
+      /* The pause has lasted: everything said is in, so this session goes at once for a fresh one. */
+      const swap = () => {
+        quiet = null;
+        if (rec !== mine || !wanted || rotating || pending.trim() || document.hidden) return;
+        rotating = true;
+        try { mine.abort(); } catch (error) { /* it ended already: onend starts the next */ }
+      };
       rec.onresult = (event) => {
         let interim = '';
+        let finals = 0;
         for (let i = Math.min(event.resultIndex, taken); i < event.results.length; i++) {
           const result = event.results[i];
           let words = (result[0] && result[0].transcript) || '';
           if (!result.isFinal) { interim += words; continue; }
           if (i < taken) continue;  // already kept
           taken = i + 1;
-          // The words so far again, with the new ones after them: only the new ones.
-          words = newPart(kept, words);
-          if (!plainWords(words) || plainWords(words) === plainWords(last)) continue;
+          if (ANDROID) {
+            // The words so far again, with the new ones after them: only the new ones (and never the same twice).
+            words = newPart(kept, words);
+            if (plainWords(words) === plainWords(last)) continue;
+          }
+          if (!plainWords(words)) continue;
           last = words.trim();
           kept = kept ? `${kept} ${last}` : last;
           heard = true;
+          count += plainWords(words).split(' ').length;
+          finals += 1;
           on.final(words);
         }
         pending = interim;
         on.interim(interim);
         on.trouble(null);
+        // A long session (not on Android, which hears a phrase at a time anyway): a fresh one in a pause.
+        if (ANDROID || rotating || rec !== mine || !wanted) return;
+        const age = Date.now() - began;
+        if (finals && age >= rotate.most) {  // never a pause in all this time: at this finished phrase, then
+          unquiet();
+          rotating = true;
+          try { mine.stop(); } catch (error) { /* it ended already: onend starts the next */ }
+        } else if (interim.trim()) {
+          unquiet();  // still talking: wait for the end of it
+        } else if (finals && (age >= rotate.age || count >= rotate.words)) {
+          unquiet();
+          quiet = setTimeout(swap, rotate.quiet);  // the pause starts now: anything more heard puts it off
+        }
       };
       rec.onaudiostart = () => on.trouble(null);
       rec.onerror = (event) => {
@@ -160,12 +213,20 @@ V.notetaker = (() => {
       };
       rec.onend = () => {
         rec = null;
-        // Android sometimes ends before the last words are final (but never twice over what was kept).
-        if (pending.trim() && !plainWords(kept).endsWith(plainWords(pending))) { heard = true; on.final(pending); }
+        unquiet();
+        // Android sometimes ends before the last words are final (but never twice over what was kept); elsewhere a
+        // session that was stopped hands its unfinished words over here.
+        if (pending.trim() && !(ANDROID && plainWords(kept).endsWith(plainWords(pending)))) {
+          heard = true;
+          last = pending.trim();
+          kept = kept ? `${kept} ${last}` : last;
+          on.final(pending);
+        }
         pending = '';
         on.interim('');
         if (!wanted) { if (finished) finished(); finished = null; return; }
         if (document.hidden) { on.waiting(true); return; }
+        if (rotating) { rotating = false; begin(); return; }  // ended for a fresh session: straight on
         const now = Date.now();
         ends = ends.filter((t) => now - t < 10000).concat(heard ? [] : [now]);
         restart = setTimeout(begin, ends.length > 4 ? 2000 : 150);  // stopping over and over, hearing nothing: a breath first
@@ -185,6 +246,7 @@ V.notetaker = (() => {
         wanted = false;
         clearTimeout(restart);
         restart = null;
+        unquiet();
         if (!rec) return Promise.resolve();
         return new Promise((resolve) => {
           finished = resolve;
@@ -238,7 +300,11 @@ V.notetaker = (() => {
   let session = null;   // { id, title, base, paragraphs, interim, state, ... }
   let ui = null;        // the layer and its parts
   let wake = null;      // the screen kept on
-  const inFlight = new Set();  // notes whose notes Claude is writing right now: never two requests for one note
+  // Notes whose notes are being written right now (-> { who: 'claude' | 'gemini' }): never two requests for one note.
+  const inFlight = new Map();
+  const resting = new Map();  // note id -> until when it isn't tried by itself (slowness.rest after a slow try)
+  // A try that was paid for and given up on as too slow: Claude itself stalled (not the cloud, not the free Gemini).
+  const stalled = (error) => !!(error && error.slow && !error.cloud && error.brain === 'claude');
 
   async function keepAwake(on) {
     try {
@@ -419,6 +485,9 @@ V.notetaker = (() => {
 
   /* -- Claude: the transcript made into notes */
 
+  /* Who writes the notes here, by name: Gemini when only the free Google key is set up (V.ai.brain), else Claude. */
+  const writer = () => (V.ai.brain() === 'gemini' ? 'Gemini' : 'Claude');
+
   function instructions(cards) {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     return [
@@ -481,21 +550,24 @@ V.notetaker = (() => {
     return best;
   }
 
-  /* The notes written into note `id` (above its transcript). Returns { cost, cut, soonest }. */
-  async function write(id, cards) {
+  /* The notes written into note `id` (above its transcript). Returns { cost, cut, soonest }. `how` goes to V.ai.ask
+     (signal, use, onBrain, onProgress): once its signal says stop, nothing is written, whatever answer comes. */
+  async function write(id, cards, how = {}) {
     const row = V.data.notes.get(id);
     if (!row || row._purge) throw new Error('That note isn\'t there any more.');
     if (row.locked) throw new Error('Unlock the note first.');
     const { transcript } = split(row.body);
     if (!transcript.trim()) throw new V.ai.AiError('empty', 'There\'s no transcript in this note to make notes from.');
-    const answer = await V.ai.ask({ system: instructions(cards), text: transcript });
+    const answer = await V.ai.ask({ ...how, system: instructions(cards), text: transcript });
+    if (how.signal && how.signal.aborted) throw new V.ai.AiError('stopped', 'Stopped.');  // (one set of notes only)
+    const who = answer.usage && answer.usage.gemini ? 'Gemini' : 'Claude';
     if (answer.stopReason === 'refusal') {
-      throw new V.ai.AiError('refusal', 'Claude didn\'t make notes from this one. Your transcript is saved in the note.');
+      throw new V.ai.AiError('refusal', `${who} didn't make notes from this one. Your transcript is saved in the note.`);
     }
     const made = tidy(answer.text);
-    if (!made.notes) throw new V.ai.AiError('bad', 'Claude\'s answer came back empty. Your words are saved: try again.');
+    if (!made.notes) throw new V.ai.AiError('bad', `${who}'s answer came back empty. Your words are saved: try again.`);
     const cut = answer.stopReason === 'max_tokens';
-    const notes = made.notes + (cut ? '\n\n(Cut short: Claude ran out of room. The transcript below has everything.)' : '');
+    const notes = made.notes + (cut ? `\n\n(Cut short: ${who} ran out of room. The transcript below has everything.)` : '');
     const now = V.data.notes.get(id) || row;  // (it may have changed while Claude wrote)
     const parts = split(now.body);
     const before = (now.extra && now.extra.notetaker) || {};
@@ -517,46 +589,45 @@ V.notetaker = (() => {
   async function makeNotes(id) {
     if (inFlight.has(id)) {  // already being written (the screen was closed meanwhile, or it's made by itself): never twice
       if (ui && !session) { closeLayer(); openNote(id); }
-      V.toast('Claude is already writing these notes. They\'ll show in the note when they\'re ready.', { ms: 5000 });
+      V.toast(`${brainName(inFlight.get(id).who)} is already writing these notes. They'll show in the note when they're ready.`,
+        { ms: 5000 });
       return;
     }
-    inFlight.add(id);  // claimed at once, before anything waits, so nothing else can ask for this note meanwhile
+    const claim = { who: V.ai.brain() };
+    inFlight.set(id, claim);  // claimed at once, before anything waits, so nothing else can ask for this note meanwhile
+    const cards = wantsCards();
+    // The owner can close this screen while Claude writes (Vault is never held up by it): then nothing pops back up.
+    const showing = () => !!(ui && ui.making && ui.making.id === id);
+    const ticking = setInterval(() => { if (showing()) tick(); }, 1000);  // the time it's taking, and what can be done
     try {
-      const cards = wantsCards();
       if (V.editor.openId() === id) {  // the note is open: closed while its words change, opened again after
         await V.editor.settled();
         V.editor.close();
       }
       openLayer();
-      ui.making = { id, words: wordCount(split((V.data.notes.get(id) || {}).body).transcript) };
       ui.problem = null;
-      draw();
-      // The owner can close this screen while Claude writes (Vault is never held up by it): then nothing pops back up.
-      const showing = () => !!(ui && ui.making && ui.making.id === id);
-      let done;
-      try {
-        done = await write(id, cards);
-      } catch (error) {
-        const words = error.message || String(error);
-        if (['offline', 'busy'].includes(error.kind)) {
-          flagWants(id, cards).catch(() => {});  // Vault makes them when home
-          // Nothing in the way: straight back to the note (its words are there), with a line saying what happens.
-          if (showing()) {
-            ui.making = null;
-            closeLayer();
-            openNote(id);
-          }
-          V.toast(words, { ms: 9000 });
+      const words = wordCount(split((V.data.notes.get(id) || {}).body).transcript);
+      let use = '';  // the brain V.ai.ask picks; 'gemini' after "Use Gemini instead"
+      let done = null;
+      for (let first = true; !done; first = false) {
+        // One try; a second only after "Use Gemini instead", which stops the first (whatever it answers is never written).
+        const making = { id, words, who: use || claim.who, started: Date.now(), wrote: 0, ctl: new AbortController(),
+          switched: !!use, switchTo: '' };
+        if (first || showing()) { ui.making = making; draw(); }
+        try {
+          done = await write(id, cards, { signal: making.ctl.signal, use,
+            onBrain: (who) => {
+              claim.who = who;
+              if (making.who !== who) { making.who = who; if (ui && ui.making === making) draw(); }
+            },
+            onProgress: (n) => { making.wrote = n; if (ui && ui.making === making) tick(); } });
+        } catch (error) {
+          if (error.kind === 'stopped' && making.switchTo) { use = making.switchTo; continue; }
+          notMade(id, cards, error, showing);
           return;
         }
-        if (showing()) {
-          showProblem(words, id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old'].includes(error.kind),
-            settings: ['nokey', 'key', 'limit'].includes(error.kind) });
-        } else {
-          V.toast(words, { kind: 'err', ms: 8000 });
-        }
-        return;
       }
+      resting.delete(id);
       const shown = showing();
       if (shown) {
         ui.making = null;
@@ -566,8 +637,44 @@ V.notetaker = (() => {
       V.toast(`Notes made${done.cut ? ' (cut short)' : ''}.${done.cost ? ` That cost about ${V.ai.money(done.cost)}.` : ' Free.'}`, { ms: 5000 });
       if (done.soonest && shown) setTimeout(() => offerReminder(id, done.soonest), 400);
     } finally {
+      clearInterval(ticking);
       inFlight.delete(id);
     }
+  }
+
+  /* Making note `id`'s notes didn't work: a network or a busy (or too slow) brain means Vault makes them by itself
+     later, with a line saying so (never a screen in the way); anything else is shown, or said if the screen's closed. */
+  function notMade(id, cards, error, showing) {
+    const words = error.message || String(error);
+    if (stalled(error)) resting.set(id, Date.now() + slowness.rest);
+    const away = () => {
+      if (!showing()) return;
+      ui.making = null;
+      closeLayer();
+      openNote(id);
+    };
+    if (error.kind === 'stopped') { away(); return; }
+    if (['offline', 'busy'].includes(error.kind)) {
+      flagWants(id, cards).catch(() => {});  // Vault makes them when home
+      away();  // straight back to the note (its words are there), with a line saying what happens
+      V.toast(words, { ms: 9000 });
+      return;
+    }
+    if (showing()) {
+      showProblem(words, id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old'].includes(error.kind),
+        settings: ['nokey', 'key', 'limit'].includes(error.kind) });
+    } else {
+      V.toast(words, { kind: 'err', ms: 8000 });
+    }
+  }
+
+  /* "Use Gemini instead" on the writing screen: the wait for Claude ends now (V.ai.ask stops it, and tells a PC's
+     Python to stop too), and makeNotes asks Gemini. Whatever Claude answers after this is never written. */
+  function useInstead(who) {
+    const m = ui && ui.making;
+    if (!m || m.switchTo || m.who === who) return;
+    m.switchTo = who;
+    m.ctl.abort();
   }
 
   /* -- making the notes by itself once Claude can be reached (a blocked school network at the time of Stop)
@@ -608,7 +715,8 @@ V.notetaker = (() => {
   function firstWanted() {
     for (const note of V.data.notes.values()) {
       // (not one being written right now, and nothing to make from an empty transcript)
-      if (wantsOf(note) && !inFlight.has(note.id) && split(note.body).transcript.trim()) return note;
+      if (wantsOf(note) && !inFlight.has(note.id) && !((resting.get(note.id) || 0) > Date.now())
+        && split(note.body).transcript.trim()) return note;
     }
     return null;
   }
@@ -619,16 +727,25 @@ V.notetaker = (() => {
     const note = firstWanted();
     if (!note) { if (!anyWants()) stopAutoTimer(); return; }  // (one still being written keeps the timer going)
     startAutoTimer();
-    if (await V.ai.overLimit()) return;  // out of this month's budget: leave it flagged, try later
+    // Where the keys are not known (the cloud didn't say in time): leave it flagged, try later, never a guess at the
+    // brain (a "no key" from guessing wrong would clear the flag for good).
+    if (!V.ai.state() || V.ai.state().failed) await V.ai.check().catch(() => {});
+    if (!V.ai.state() || V.ai.state().failed) return;
+    // Out of this month's budget: leave it flagged, try later. (Only Claude's: the free Gemini is never held back by it.)
+    if (V.ai.brain() === 'claude' && await V.ai.overLimit()) return;
     if (remaking || session || inFlight.has(note.id)) return;  // something started meanwhile (a manual "Make notes")
     remaking = true;
     let made = false;
-    inFlight.add(note.id);
+    const claim = { who: V.ai.brain() };
+    inFlight.set(note.id, claim);
     try {
       if (V.editor.openId() === note.id) await V.editor.settled();  // flush any unsaved typing before writing notes in
-      await write(note.id, !!(note.extra.notetaker && note.extra.notetaker.wants_cards));  // clears the flag on success
+      await write(note.id, !!(note.extra.notetaker && note.extra.notetaker.wants_cards),  // clears the flag on success
+        { onBrain: (who) => { claim.who = who; } });
       made = true;
+      resting.delete(note.id);
     } catch (error) {
+      if (stalled(error)) resting.set(note.id, Date.now() + slowness.rest);  // (a stall: not again for a while)
       if (!['offline', 'busy'].includes(error.kind)) await clearWants(note.id).catch(() => {});  // a non-network miss: stop looping
     } finally {
       inFlight.delete(note.id);
@@ -770,7 +887,7 @@ V.notetaker = (() => {
     V.clear(body, V.h('div.nt-ready', {},
       V.h('div.nt-hero', {}, icon('listen', 'nt-hero-icon')),
       V.h('h3', { text: note ? `Listen into "${V.noteTitle(note)}"` : 'Notes, written for you' }),
-      V.h('p.nt-lead', { text: 'Vault writes down what\'s said in a class or meeting as it happens. When you stop, Claude turns it into tidy notes: a summary, key points, terms, homework and questions.' }),
+      V.h('p.nt-lead', { text: `Vault writes down what's said in a class or meeting as it happens. When you stop, ${writer()} turns it into tidy notes: a summary, key points, terms, homework and questions.` }),
       name ? V.h('label.label', {}, 'What is it? (optional)', name) : null,
       folder ? V.h('label.label', {}, 'Folder', folder) : null,
       V.h('label.switch-row.nt-cards', {}, V.h('span.switch-text', {}, V.h('strong', { text: 'Also make flash cards' }),
@@ -858,13 +975,47 @@ V.notetaker = (() => {
     drawWords();
   }
 
+  const brainName = (who) => (who === 'gemini' ? 'Gemini' : 'Claude');
+
+  /* The writing screen, naming the brain that's asked (Claude, or the free Gemini). */
   function drawMaking() {
     const { body, foot } = ui.parts;
-    const n = ui.making.words;
+    const m = ui.making;
+    const n = m.words;
+    ui.makingParts = {
+      time: V.h('p.nt-making-time.num', { hidden: true, 'aria-hidden': 'true' }),
+      slow: V.h('p.nt-making-slow', { hidden: true, text: 'Taking longer than usual. You can close this — your words are '
+        + 'saved, and the notes will appear in the note when they\'re ready.' }),
+    };
     V.clear(body, V.h('div.nt-making', { role: 'status' }, V.h('div.spinner.big'),
       V.h('h3', { text: 'Writing your notes...' }),
-      V.h('p.muted', { text: `Claude is reading ${n} word${n === 1 ? '' : 's'}. This takes a few seconds.` })));
+      V.h('p.muted.nt-making-lead', { text: `${brainName(m.who)} is reading ${n} word${n === 1 ? '' : 's'}. This takes a few seconds.` }),
+      ui.makingParts.time, ui.makingParts.slow));
     V.clear(foot);
+    tick();
+  }
+
+  /* The writing screen as the wait goes on (every second, and as words come): after `slowness.time`, how long it has
+     taken (and the words written so far); after `slowness.slow`, a line saying the screen can be closed, and "Use
+     Gemini instead" when it's Claude that's slow and the free Gemini is set up. */
+  function tick() {
+    if (!ui || !ui.making || ui.problem || !ui.makingParts) return;
+    const m = ui.making;
+    const ms = Date.now() - m.started;
+    const { time, slow } = ui.makingParts;
+    time.hidden = ms < slowness.time;
+    time.textContent = `${clock(ms)} so far${m.wrote ? ` · ${m.wrote} word${m.wrote === 1 ? '' : 's'} written` : ''}`;
+    const late = ms >= slowness.slow;
+    slow.hidden = !late;
+    const offer = late && m.who === 'claude' && !m.switched && !m.switchTo && V.ai.has('gemini');
+    const button = ui.parts.foot.querySelector('.nt-use-gemini');
+    if (offer && !button) {
+      const add = V.button('Use Gemini instead', { icon: 'spark', onClick: () => useInstead('gemini') });
+      add.classList.add('nt-use-gemini');
+      ui.parts.foot.append(add);
+    } else if (!offer && button) {
+      button.remove();
+    }
   }
 
   function drawProblem() {
@@ -941,11 +1092,11 @@ V.notetaker = (() => {
   V.editor.addMeta((note) => {
     const nt = note && note.extra && note.extra.notetaker;
     if (!nt || nt.made || note.locked || (session && session.id === note.id) || !split(note.body).transcript.trim()) return null;
-    return V.h('button.chip.nt-chip', { type: 'button', title: 'Make notes from the transcript with Claude',
+    return V.h('button.chip.nt-chip', { type: 'button', title: `Make notes from the transcript with ${writer()}`,
       onclick: () => makeNotes(note.id) }, icon('spark'), V.h('span', { text: 'Make notes' }));
   });
 
   // webHearing is dictation's too (js/dictation.js): the same Android handling (newPart/taken/last), kept in one place.
   return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session,
-    webHearing };
+    webHearing, rotate, slowness };  // (rotate, slowness: tests shorten them)
 })();

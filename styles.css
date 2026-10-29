@@ -2041,6 +2041,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .nt-making { display: grid; justify-items: center; gap: 10px; max-width: 400px; margin: auto; padding: 24px 0; text-align: center; }
 .nt-making h3 { margin: 6px 0 0; font: 600 19px/26px var(--font); }
 .nt-making p { margin: 0; }
+.nt-making-time { color: var(--muted); font: 500 13px/18px var(--font); }
+.nt-making-slow { color: var(--text-2); font: 400 14px/20px var(--font); }
 .nt-problem p { color: var(--text-2); }
 .spinner.big { width: 32px; height: 32px; border-width: 3px; }
 .nt-problem-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--danger-soft); color: var(--danger); }
@@ -2066,9 +2068,11 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .ai-console { justify-self: start; padding: 6px 0 12px; }
 .ai-check[data-state=reachable] { color: var(--ok); }
 .ai-check[data-state=blocked] { color: var(--warn); }
+.ai-gemini-times { margin: -4px 0 0; padding: 0 0 12px 18px; color: var(--text-2); font: 400 13px/19px var(--font); overflow-wrap: anywhere; }
+.ai-gemini-times > li[data-ok=no] { color: var(--warn); }
 .settings-card > .ai-privacy { margin: 0; padding: 10px 0 14px; border-top: 1px solid var(--line-soft); }
 
-/* -- Claude ---------------------------------------------------------- the Claude tab (js/chat.js): the chats on the
+/* -- Chat ------------------------------------------------------------ the Chat tab (js/chat.js): the chats on the
    left (or alone on a phone), the open chat with its box at the bottom; answers on the page, your words in a bubble */
 .view[data-tab=claude] { overflow: hidden; }
 .chat-app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }

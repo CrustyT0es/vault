@@ -1,4 +1,5 @@
-/* Vault: the Claude tab. Chats with Claude: a list of them (newest first) and one open chat, with the model picked per
+/* Vault: the Chat tab (called the Claude tab until 1.8.3; its id stays 'claude', so old links and kept places still
+   work). Chats with Claude (or the free Gemini): a list of them (newest first) and one open chat, with the model picked per
    chat (Haiku unless the owner picks another), "Think harder" and "Search the web" switches, notes and files to ask
    about, and answers that can be saved as notes.
 
@@ -61,6 +62,11 @@ V.chat = (() => {
   const WAIT_KINDS = new Set(['offline', 'away', 'busy']);  // a blocked or flaky network: the turn waits and goes later
   const CLAIM_MS = 120000;   // a turn another device marked 'answering' is left to it this long, then taken as abandoned
   const PUMP_EVERY = 60000;  // while a message is waiting to send, try it again at least this often
+  // A Gemini message held because Gemini was busy, slow or over its free per-minute limit (Google answered: the
+  // network works) goes again sooner than the minute: after `busy` ms (`quota` for the limit, `big` for a chat whose
+  // earlier pictures were slow to go up: it sends them all again), doubling each time it still can't, up to `most`.
+  // Gemini is free, so trying again costs nothing. (Tests shorten them.)
+  const retryWaits = { busy: 8000, quota: 30000, big: 30000, most: 60000 };
   // Files: pictures scaled down to Claude's own size (1568 px on the long side: more only costs more), PDFs up to
   // what one request takes (32 MB, 600 pages), text read as text.
   const IMAGE_EDGE = 1568;
@@ -74,19 +80,23 @@ V.chat = (() => {
     'css', 'xml', 'yaml', 'yml', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'sh', 'bat', 'ps1', 'sql',
     'ini', 'toml', 'log', 'tex', 'r', 'swift', 'kt', 'lua', 'srt'];
   const ACCEPT = [...IMAGE_TYPES, 'application/pdf', '.pdf', 'text/*', ...TEXT_ENDINGS.map((e) => '.' + e)].join(',');
-  const NOT_READABLE = 'Claude can\'t read this kind of file here. Save it as a PDF first, then attach it.';
+  const NOT_READABLE = 'This kind of file can\'t be read here. Save it as a PDF first, then attach it.';
   const enterSends = V.device !== 'phone';  // a keyboard: Enter sends, Shift+Enter is a new line
+  const ASK_LABEL = 'Ask Chat about it';     // a note's menu item that brings it here (js/editor.js shows it)
 
   let chats = null;      // id -> chat, this device's copy (V.db meta 'chat:<id>')
   let index = null;      // { prints: id -> the cloud file's fingerprint, waiting: ids not up yet }
   let loading = null;
   let refreshing = null;
   const unsent = new Map();  // id -> a chat started here that has no messages yet
+  const picked = new Set();  // chats whose model was picked by hand (never moved to Gemini by retarget)
   const drafts = new Map();  // chat id -> { text, notes, files }: what's in the box
   let openId = null;
   let showingChat = false;   // a phone shows the list or one chat
   let auto = false;          // the chat open is a new one opened because there were none
   let busy = null;           // the answer coming now: { chatId, turn, controller, pcId, stopped }
+  let sendingId = null;      // the chat whose message send() is getting ready to go (before its answer starts)
+  const sendingTurns = new Set();  // waiting turns being sent now (sendWaiting): each goes once, however it was asked
   let pumpTimer = null;      // the gentle retry while a message is waiting to send
   let pumping = false;
   let trouble = null;        // { chatId, kind, message }: the line above the box
@@ -115,9 +125,10 @@ V.chat = (() => {
   const valid = (chat) => !!chat && typeof chat === 'object' && typeof chat.id === 'string' && Array.isArray(chat.turns);
 
   class ChatError extends Error {
-    constructor(kind, message) {
+    constructor(kind, message, why = '') {
       super(message);
       this.kind = kind;
+      this.why = why || kind;  // what held it up, for the waiting line: offline, away, busy, slow or quota
     }
   }
 
@@ -129,7 +140,7 @@ V.chat = (() => {
     credit: 'Your Claude account is out of credit. Add some at console.anthropic.com, then try again.',
     busy: 'Claude is busy right now. Your message is kept: try again in a minute.',
     dropped: 'The connection dropped before the answer finished.',
-    cutOff: 'The answer stopped coming part-way. Tap Retry to ask again.',
+    cutOff: 'The answer stopped coming part-way. Tap Try again to ask again.',
     old: 'Update Jarvis to chat on this PC (open Jarvis and click Update). Your chats are on your phone and Chromebook too.',
   };
 
@@ -529,7 +540,8 @@ V.chat = (() => {
       if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
       const kind = (error && error.kind) || 'bad';
       const known = { offline: 'offline', away: 'away', busy: 'busy', key: 'key', nokey: 'nokey', bad: 'bad' };
-      throw new ChatError(known[kind] || 'bad', (error && error.message) || WORDS.dropped);
+      const why = kind === 'offline' && !navigator.onLine ? 'away' : error && error.why;  // (no internet at all)
+      throw new ChatError(known[kind] || 'bad', (error && error.message) || WORDS.dropped, why);
     }
   }
 
@@ -737,6 +749,7 @@ V.chat = (() => {
         // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
         // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send".
         turn.state = 'waiting';
+        turn.waitWhy = failed.why;  // (the waiting line says why, naming the model the chat uses)
         turn.problem = '';
         turn.replies = [];
       } else if (first && !heard && failed.kind !== 'dropped') {
@@ -760,13 +773,19 @@ V.chat = (() => {
         turn.problem = failed.message;
       }
     }
+    if (turn.state === 'waiting') {
+      if (isGemini(turn.model) && GEMINI_SOON.has(turn.waitWhy)) retrySoon(chat, turn);
+    } else {
+      forgetSoon(turn.id);
+      delete turn.waitWhy;
+    }
     chat.updated = now();
     await persist(chat);
     reflect();
     draw();
   }
 
-  /* ---------------------------------------------------------------- a message held until Claude can be reached
+  /* ---------------------------------------------------------------- a message held until it can be sent
 
      A send that fails on the network (a school that blocks Claude, or no internet) leaves the turn in the chat as
      'waiting'. It goes out by itself when the network might be back (an online/visible/focus event, the app opening,
@@ -781,7 +800,7 @@ V.chat = (() => {
   const waitingCount = () => [...(chats || new Map()).values()]
     .reduce((n, c) => n + (c.turns || []).filter((t) => t.state === 'waiting').length, 0);
 
-  /* The Claude-tab badge and the retry timer kept in step with what's waiting. */
+  /* The Chat-tab badge and the retry timer kept in step with what's waiting. */
   function reflect() {
     if (anyPending()) startPump(); else stopPump();
     V.emit('badge');
@@ -816,31 +835,85 @@ V.chat = (() => {
   }
 
   /* Send a waiting turn. First a quick look at the cloud: skip if another device already answered it, or has it in
-     hand (marked 'answering' under two minutes ago). "Send now" (manual) goes ahead whatever another device is doing. */
+     hand (marked 'answering' under two minutes ago). "Send now" (manual) goes ahead whatever another device is doing.
+     One at a time: a turn already on its way here (the automatic retry, say) isn't sent again by "Send now", and
+     nothing starts while another answer is coming (checked again after the waits, right before it goes). */
   async function sendWaiting(chat, turn, { manual = false } = {}) {
-    if (busy) return;
-    const id = chat.id;
-    if (chats.has(id)) await quickRefresh();
-    const current = chatOf(id);
-    if (!current) return;
-    const now2 = current.turns.find((t) => t.id === turn.id);
-    if (!now2 || !(now2.state === 'waiting' || now2.state === 'answering') || repliesOf(now2).length) { reflect(); draw(); return; }
-    if (!manual && now2.state === 'answering' && !isStale(now2)) return;  // another device is on it
-    const over = await V.ai.overLimit();
-    if (over) {
-      now2.state = 'failed';
-      now2.problem = over.message;
-      current.updated = now();
-      await persist(current);
-      reflect();
-      draw();
-      return;
+    if (busy || sendingTurns.has(turn.id)) return;
+    sendingTurns.add(turn.id);
+    try {
+      const id = chat.id;
+      if (chats.has(id)) await quickRefresh();
+      const current = chatOf(id);
+      if (!current) return;
+      const now2 = current.turns.find((t) => t.id === turn.id);
+      if (!now2 || !(now2.state === 'waiting' || now2.state === 'answering') || repliesOf(now2).length) { reflect(); draw(); return; }
+      if (!manual && now2.state === 'answering' && !isStale(now2)) return;  // another device is on it
+      const over = isGemini(now2.model) ? null : await V.ai.overLimit();  // (the free Gemini isn't held back by Claude's limit)
+      if (over) {
+        now2.state = 'failed';
+        now2.problem = over.message;
+        current.updated = now();
+        await persist(current);
+        reflect();
+        draw();
+        return;
+      }
+      if (busy) return;  // another answer started meanwhile: this one goes after it (the pump, or its own retry)
+      await answer(current, now2, { claim: true });  // (sets busy at once)
+    } finally {
+      sendingTurns.delete(turn.id);
     }
-    await answer(current, now2, { claim: true });
+  }
+
+  /* A Gemini message held because Gemini was busy (Google answered, so the network works), slow, or slow to take this
+     chat's earlier pictures: sent again soon, by itself, sooner each time than the minute the pump waits
+     (retryWaits). */
+  const GEMINI_SOON = new Set(['busy', 'slow', 'quota', 'uplink']);
+  const soon = new Map();  // turn id -> { timer, tries }
+  function forgetSoon(id) {
+    const was = soon.get(id);
+    if (was) clearTimeout(was.timer);
+    soon.delete(id);
+  }
+  function retrySoon(chat, turn) {
+    const was = soon.get(turn.id) || { tries: 0 };
+    clearTimeout(was.timer);
+    const base = turn.waitWhy === 'quota' ? retryWaits.quota : turn.waitWhy === 'uplink' ? retryWaits.big : retryWaits.busy;
+    const delay = Math.min(retryWaits.most, base * 2 ** was.tries);
+    const entry = { tries: was.tries + 1, timer: null };
+    const go = async () => {
+      if (soon.get(turn.id) !== entry) return;
+      if (busy || pumping) { entry.timer = setTimeout(go, 2000); return; }  // (after the answer coming now)
+      const c = chatOf(chat.id);
+      const t = c && (c.turns || []).find((x) => x.id === turn.id);
+      if (!t || !needsSend(t)) { forgetSoon(turn.id); return; }
+      pumping = true;
+      try { await sendWaiting(c, t); } finally { pumping = false; }
+    };
+    entry.timer = setTimeout(go, delay);
+    soon.set(turn.id, entry);
+  }
+
+  /* What a waiting message's line says: why it's held, naming the model this chat uses (never Claude for Gemini). */
+  function waitingWords(turn) {
+    const who = isGemini(turn.model) ? 'Gemini' : 'Claude';
+    const why = turn.waitWhy || 'offline';
+    if (why === 'away') return 'Waiting to send — it\'ll go when you\'re back online';
+    if (who === 'Gemini') {
+      if (why === 'busy') return 'Gemini is busy right now — trying again in a moment…';
+      if (why === 'slow') return 'Gemini is slow right now — trying again in a moment…';
+      if (why === 'quota') return 'Google\'s free Gemini limit is used up for now — trying again in a minute…';
+      if (why === 'uplink') return 'Slow to send — this chat\'s pictures go with every message. Trying again soon (a new chat is quicker)…';
+    } else if (why === 'busy') {
+      return 'Claude is busy right now — it\'ll go again in a minute';
+    }
+    return `Waiting to send — it'll go when ${who} can be reached`;
   }
 
   /* "Cancel" on a waiting message: drop the turn and put its words, notes and files back in the box. */
   async function cancelWaiting(chat, turn) {
+    forgetSoon(turn.id);
     chat.turns = chat.turns.filter((t) => t !== turn);
     const draft = draftOf(chat.id);
     draft.text = turn.text || '';
@@ -861,36 +934,60 @@ V.chat = (() => {
     draw();
   }
 
-  /* The box's words, notes and files sent as the next message. */
+  /* The box's words, notes and files sent as the next message. One at a time: what's in the box is taken out at once
+     (a second tap or Enter has nothing to send, and the Send button waits), and put back if it can't go. */
   async function send() {
     const id = openId;
     const chat = chatOf(id);
-    if (!chat) return;
+    if (!chat || sendingId) return;
     const draft = draftOf(id);
     const text = draft.text.trim();
     if (!text && !draft.notes.length && !draft.files.length) return;
-    if (busy) return V.toast('Wait for Claude to finish this answer first (or press Stop).');
+    if (busy) return V.toast('Wait for this answer to finish first (or press Stop).');
     if (draft.files.some((f) => f.state !== 'ready')) return V.toast('Wait for the files to finish going up.');
-    if (tooOld(chat)) { trouble = { chatId: id, kind: 'old', message: WORDS.old }; return drawBox(); }
-    const over = await V.ai.overLimit();
-    if (over) { trouble = { chatId: id, kind: 'limit', message: over.message }; return drawBox(); }
-    if (chats.has(id)) await quickRefresh();
-    const current = chatOf(id) || chat;  // (another device may have added to it meanwhile)
-    const turn = { id: V.uuid().slice(0, 8), at: now(), text: draft.text.trim(), model: current.model, think: !!current.think,
-      search: !!current.search, notes: draft.notes.map((n) => ({ id: n.id, title: n.title })),
-      files: draft.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, mime: f.mime, size: f.size, path: f.path,
-        w: f.w, h: f.h, pages: f.pages, tokens: f.tokens })),
-      content: contentFor(draft.text.trim(), draft.notes, !!current.search), replies: [], state: 'answering' };
-    turn.tools = JSON.stringify(toolsFor(turn));
-    sentNotes.set(turn, draft.notes);
-    if (!current.title) current.title = titleFrom(turn);
-    current.turns.push(turn);
-    chats.set(current.id, current);
-    unsent.delete(current.id);
+    const taken = { text: draft.text, notes: draft.notes, files: draft.files };
     drafts.set(id, { text: '', notes: [], files: [] });
-    trouble = null;
-    if (parts && parts.input) parts.input.value = '';
-    await answer(current, turn, { first: true });
+    sendingId = id;
+    drawBox();
+    let started = false;
+    try {
+      if (!V.ai.state() && blankDefault(chat)) {  // sent before the key check answered: which model is still open
+        await V.ai.check().catch(() => {});
+        retarget();
+      }
+      if (tooOld(chat)) { trouble = { chatId: id, kind: 'old', message: WORDS.old }; return; }
+      if (chats.has(id)) await quickRefresh();
+      const current = chatOf(id) || chat;  // (another device may have added to it meanwhile)
+      // The monthly limit is Claude's: the free Gemini is never held back by it.
+      const over = isGemini(current.model) ? null : await V.ai.overLimit();
+      if (over) { trouble = { chatId: id, kind: 'limit', message: over.message }; return; }
+      if (busy) { V.toast('Wait for this answer to finish first (or press Stop).'); return; }  // (one started meanwhile)
+      const turn = { id: V.uuid().slice(0, 8), at: now(), text: taken.text.trim(), model: current.model, think: !!current.think,
+        search: !!current.search, notes: taken.notes.map((n) => ({ id: n.id, title: n.title })),
+        files: taken.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, mime: f.mime, size: f.size, path: f.path,
+          w: f.w, h: f.h, pages: f.pages, tokens: f.tokens })),
+        content: contentFor(taken.text.trim(), taken.notes, !!current.search), replies: [], state: 'answering' };
+      turn.tools = JSON.stringify(toolsFor(turn));
+      sentNotes.set(turn, taken.notes);
+      if (!current.title) current.title = titleFrom(turn);
+      current.turns.push(turn);
+      chats.set(current.id, current);
+      unsent.delete(current.id);
+      trouble = null;
+      started = true;
+      const going = answer(current, turn, { first: true });  // (sets busy at once)
+      sendingId = null;
+      await going;
+    } finally {
+      sendingId = null;
+      if (!started) {  // it didn't go: back in the box (before anything typed meanwhile)
+        const now2 = draftOf(id);
+        drafts.set(id, { text: [taken.text, now2.text].filter((t) => t.trim()).join('\n'),
+          notes: [...taken.notes, ...now2.notes.filter((n) => !taken.notes.some((t) => t.id === n.id))],
+          files: [...taken.files, ...now2.files] });
+        drawBox();
+      }
+    }
   }
 
   function titleFrom(turn) {
@@ -908,8 +1005,9 @@ V.chat = (() => {
 
   async function retry(chat, turn) {
     if (busy || chat.turns[chat.turns.length - 1] !== turn) return;
-    const over = await V.ai.overLimit();
+    const over = isGemini(turn.model) ? null : await V.ai.overLimit();
     if (over) { trouble = { chatId: chat.id, kind: 'limit', message: over.message }; return drawBox(); }
+    if (busy) return;  // (another answer started meanwhile)
     await answer(chat, turn);
   }
 
@@ -991,7 +1089,7 @@ V.chat = (() => {
       return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
         V.h('div.chat-claude', {}, V.h('div.chat-waiting', {},
           V.h('span.chat-waiting-text', {}, V.icon('clock'),
-            V.h('span', { text: 'Waiting to send — it\'ll go when Claude can be reached' })),
+            V.h('span', { text: waitingWords(turn) })),
           V.h('div.chat-waiting-actions', {},
             V.button('Send now', { kind: 'quiet', icon: 'send', onClick: () => sendWaiting(chat, turn, { manual: true }) }),
             V.button('Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) })))));
@@ -1000,7 +1098,7 @@ V.chat = (() => {
     const text = textOf(turn);
     const body = V.h('div.chat-reply-body');
     if (turn.state === 'refused') {
-      body.append(V.h('p.chat-note', { text: 'Claude declined to answer this one. Try asking it another way.' }));
+      body.append(V.h('p.chat-note', { text: `${isGemini(turn.model) ? 'Gemini' : 'Claude'} declined to answer this one. Try asking it another way.` }));
     } else {
       if (text) body.append(rendered(text));
       if (answering && (!text || turn.replies.some((r) => (r.content || []).filter(Boolean).slice(-1).some((b) => b.type === 'server_tool_use')))) {
@@ -1054,7 +1152,7 @@ V.chat = (() => {
 
   function emptyChat() {
     return V.h('div.chat-empty', {}, V.h('span.chat-empty-mark', {}, V.icon('spark', 'big')),
-      V.h('h2', { text: 'Ask Claude anything' }),
+      V.h('h2', { text: 'Ask anything' }),
       V.h('p', { text: 'Homework, ideas, a quick explanation. Attach a note, a picture or a PDF to ask about it, and save any answer as a note.' }));
   }
 
@@ -1130,7 +1228,7 @@ V.chat = (() => {
     parts.go.title = answering ? 'Stop' : 'Send';
     parts.go.setAttribute('aria-label', parts.go.title);
     parts.go.classList.toggle('stop', !!answering);
-    parts.go.disabled = old || (!answering && (!!busy || (!draft.text.trim() && !draft.files.length && !draft.notes.length)));
+    parts.go.disabled = old || (!answering && (!!busy || !!sendingId || (!draft.text.trim() && !draft.files.length && !draft.notes.length)));
   }
 
   function grow() {
@@ -1140,7 +1238,7 @@ V.chat = (() => {
   }
 
   function buildBox() {
-    const input = V.h('textarea.chat-input', { rows: '1', placeholder: 'Ask Claude anything', 'aria-label': 'Message to Claude',
+    const input = V.h('textarea.chat-input', { rows: '1', placeholder: 'Ask anything', 'aria-label': 'Your message',
       enterkeyhint: enterSends ? 'send' : 'enter' });
     input.addEventListener('input', () => { draftOf(openId).text = input.value; grow(); drawSendButton(); });
     input.addEventListener('keydown', (event) => {
@@ -1181,7 +1279,7 @@ V.chat = (() => {
   function drawSendButton() {
     if (!parts || !parts.go || (busy && busy.chatId === openId)) return;
     const draft = draftOf(openId);
-    parts.go.disabled = tooOld(chatOf(openId)) || !!busy || (!draft.text.trim() && !draft.files.length && !draft.notes.length);
+    parts.go.disabled = tooOld(chatOf(openId)) || !!busy || !!sendingId || (!draft.text.trim() && !draft.files.length && !draft.notes.length);
   }
 
   function draw() {
@@ -1201,7 +1299,7 @@ V.chat = (() => {
     parts = { list, head, scroll, thread };
     const pane = V.h('section.chat-pane', {}, head, scroll, buildBox());
     const side = V.h('aside.chat-side', {},
-      V.h('div.page-head.chat-side-head', {}, V.h('h1', { text: 'Claude' }), V.statusPill(),
+      V.h('div.page-head.chat-side-head', {}, V.h('h1', { text: 'Chat' }), V.statusPill(),
         V.button('New chat', { kind: 'primary', icon: 'plus', onClick: () => open(null) })),
       list);
     parts.app = V.h('div.chat-app', {}, side, pane);
@@ -1213,19 +1311,24 @@ V.chat = (() => {
       draw();
       return refresh();
     }).then(() => { choose(); draw(); reflect(); pump().catch(() => {}); }).catch(() => {});
-    if (!V.desktop) V.ai.check().then(() => {
-      // Only a free Gemini key (no Claude key)? The blank chat that opened before the check finished starts on Claude
-      // by default — move it to the free Gemini model so the first message doesn't dead-end.
-      const c = chatOf(openId);
-      if (c && !c.turns.length && unsent.has(c.id) && c.model === DEFAULT_MODEL && !V.ai.has('claude') && V.ai.has('gemini')) {
-        c.model = GEMINI_MODEL;
-        drawBox();
-      }
-    }).catch(() => {});
+    V.ai.check().then(retarget).catch(() => {});  // (on the PC too: Python says about Claude, the cloud about Gemini)
   }
 
-  const blank = () => [...unsent.values()].find((c) => !c.turns.length && !draftOf(c.id).text && !draftOf(c.id).files.length
-    && !draftOf(c.id).notes.length);
+  /* A chat that has never been sent, still on the default Claude model nobody picked. */
+  const blankDefault = (c) => !!c && !c.turns.length && unsent.has(c.id) && c.model === DEFAULT_MODEL && !picked.has(c.id);
+
+  /* Only a free Gemini key here (no Claude key)? The blank chat that opened before the key check knew starts on Claude
+     by default: it moves to the free Gemini model, so the first message doesn't dead-end. Run when the check answers
+     (here, or Settings' or the note-taker's: the 'ai' event) and before a send that went ahead of it. */
+  function retarget() {
+    const c = chatOf(openId);
+    if (!blankDefault(c) || V.ai.has('claude') || !V.ai.has('gemini')) return;
+    c.model = GEMINI_MODEL;
+    drawBox();
+  }
+
+  const blank = () => [...unsent.values()].find((c) => c.id !== sendingId && !c.turns.length && !draftOf(c.id).text
+    && !draftOf(c.id).files.length && !draftOf(c.id).notes.length);
 
   /* The chat to show when none is open: the newest (a new one when there's none, shown straight away). */
   function choose() {
@@ -1272,6 +1375,7 @@ V.chat = (() => {
         return V.h('button.model-choice' + (m.id === current ? '.on' : ''), { type: 'button', dataset: { model: m.id },
           'aria-current': m.id === current ? 'true' : null, onclick: async () => {
             sheet.close();
+            picked.add(chat.id);
             if (current === m.id) return;
             chat.model = m.id;
             drawBox();
@@ -1299,10 +1403,10 @@ V.chat = (() => {
         .slice(0, 60);
       V.clear(list, shown.length ? shown.map((n) => {
         const on = picked.has(n.id);
-        // A locked note only goes from the note itself, unlocked and showing ("Ask Claude about it" in its menu).
+        // A locked note only goes from the note itself, unlocked and showing (ASK_LABEL in its menu).
         const locked = !!n.locked;
         return V.h('button.chat-note-row' + (on ? '.on' : ''), { type: 'button', disabled: locked,
-          title: locked ? 'Locked: open the note, unlock it, then choose "Ask Claude about it" in its menu' : null,
+          title: locked ? `Locked: open the note, unlock it, then choose "${ASK_LABEL}" in its menu` : null,
           'aria-pressed': String(on), onclick: () => {
             if (picked.has(n.id)) picked.delete(n.id);
             else picked.set(n.id, { id: n.id, title: V.noteTitle(n), text: n.body || '' });
@@ -1369,7 +1473,7 @@ V.chat = (() => {
 
   async function saveNote(chat, turn, folder, body = textOf(turn)) {
     try {
-      const note = await V.cloud.save('notes', V.notes.blankNote({ folder_id: folder ? folder.id : null, title: chat.title || 'From Claude', body }));
+      const note = await V.cloud.save('notes', V.notes.blankNote({ folder_id: folder ? folder.id : null, title: chat.title || 'From Chat', body }));
       V.toast(`Saved to ${folder ? folder.name : 'your notes'}`, { action: 'Open', onAction: () => { V.go('notes'); V.notes.open(note.id); } });
     } catch (error) {
       V.problem(error);
@@ -1388,7 +1492,7 @@ V.chat = (() => {
   async function sendTo(chat, turn, to) {
     try {
       const inbox = V.notes.inbox();
-      await V.cloud.save('notes', V.notes.blankNote({ folder_id: inbox ? inbox.id : null, title: chat.title || 'From Claude',
+      await V.cloud.save('notes', V.notes.blankNote({ folder_id: inbox ? inbox.id : null, title: chat.title || 'From Chat',
         body: textOf(turn), extra: { sent: { to, from: V.device, at: new Date().toISOString() } } }));
       V.toast(V.cloud.status === 'offline'
         ? `Saved here. It goes to ${V.deviceName(to)} when you're back online.`
@@ -1440,9 +1544,9 @@ V.chat = (() => {
     if (!note) return;
     const words = V.editor.words();
     if (note.locked) {
-      if (words === null) return V.toast('Unlock this note first (its lock button), then ask Claude.');
-      const sure = await V.confirm('Send a locked note to Claude?', 'Its words go to Claude and are kept in the chat, which isn\'t locked.',
-        { ok: 'Send to Claude' });
+      if (words === null) return V.toast('Unlock this note first (its lock button), then ask about it.');
+      const sure = await V.confirm('Send a locked note to Chat?', 'Its words go to the AI and are kept in the chat, which isn\'t locked.',
+        { ok: 'Send to Chat' });
       if (!sure) return;
     }
     const item = { id: note.id, title: V.noteTitle({ ...note, body: words || '' }), text: String(words || '').slice(0, 200000), locked: !!note.locked };
@@ -1455,13 +1559,13 @@ V.chat = (() => {
     V.go('claude');
   }
 
-  V.editor.addTool({ name: 'claude', label: 'Ask Claude', icon: () => V.icon('spark'), keepCaret: false, onClick: askAboutOpenNote });
+  V.editor.addTool({ name: 'claude', label: 'Ask in Chat', icon: () => V.icon('spark'), keepCaret: false, onClick: askAboutOpenNote });
 
   /* ---------------------------------------------------------------- outside the tab */
 
   /* A chat as Markdown (for Download everything, and "Save the whole chat as a note"). */
   function markdown(chat, heading = true) {
-    const lines = heading ? [`# ${chat.title || 'Chat with Claude'}`, '', `Claude chat, started ${new Date(chat.created).toLocaleString()}`, ''] : [];
+    const lines = heading ? [`# ${chat.title || 'Chat'}`, '', `Chat, started ${new Date(chat.created).toLocaleString()}`, ''] : [];
     for (const turn of chat.turns) {
       const extras = [...(turn.files || []).map((f) => f.name), ...(turn.notes || []).map((n) => `note: ${n.title}`)];
       lines.push('**You:**', '', turn.text || '', ...(extras.length ? ['', `(Attached: ${extras.join(', ')})`] : []), '');
@@ -1472,13 +1576,14 @@ V.chat = (() => {
     return lines.join('\n');
   }
 
-  /* Every chat this device has, as Markdown files for the ZIP (js/history.js). */
-  function forBackup(root, safeName) {
-    const used = new Set();
+  /* Every chat this device has, as Markdown files for the ZIP (js/history.js). `used`: the ZIP's names so far
+     (lowercase, as Windows sees them), shared with the notes, so a note in a folder called "Chats" never has the same
+     name as a chat. */
+  function forBackup(root, safeName, used = new Set()) {
     return listOf().map((chat) => {
       const stem = safeName(chat.title || 'Chat');
-      let name = `${root}/Claude chats/${stem}.md`;
-      for (let n = 2; used.has(name.toLowerCase()); n++) name = `${root}/Claude chats/${stem} (${n}).md`;
+      let name = `${root}/Chats/${stem}.md`;
+      for (let n = 2; used.has(name.toLowerCase()); n++) name = `${root}/Chats/${stem} (${n}).md`;
       used.add(name.toLowerCase());
       return { name, data: markdown(chat) };
     });
@@ -1486,7 +1591,11 @@ V.chat = (() => {
 
   const filesSize = () => listOf().reduce((sum, chat) => sum + chat.turns.reduce((s, t) => s + (t.files || []).reduce((x, f) => x + (f.size || 0), 0), 0), 0);
 
-  V.on('signed-out', () => { chats = null; index = null; unsent.clear(); drafts.clear(); openId = null; stopPump(); });
+  V.on('signed-out', () => {
+    chats = null; index = null; unsent.clear(); drafts.clear(); picked.clear(); openId = null; stopPump();
+    [...soon.keys()].forEach(forgetSoon);
+  });
+  V.on('ai', () => retarget());  // the key check answered (wherever it was asked for)
   // A waiting message is tried again whenever the network might be back: online, the page shown or focused, the app
   // coming to the front, and the gentle timer. The cloud is pulled first, so a turn another device answered or
   // claimed is seen before this one acts on it.
@@ -1506,6 +1615,7 @@ V.chat = (() => {
     load,
     forBackup,
     filesSize,
+    ASK_LABEL,
     open,
     askAbout: askAboutOpenNote,
     MODELS,
@@ -1514,8 +1624,9 @@ V.chat = (() => {
       attach(list);
       return true;
     },
-    dropText: () => (V.tab() === 'claude' ? 'Drop to attach to your message to Claude' : ''),
+    dropText: () => (V.tab() === 'claude' ? 'Drop to attach to your message' : ''),
     busy: () => !!busy,
     waiting: waitingCount,
+    retryWaits,  // (tests shorten them)
   };
 })();

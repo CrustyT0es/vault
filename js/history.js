@@ -421,7 +421,7 @@ V.backup = (() => {
       settings: { pin_salt: settings.pin_salt || null, pin_check: settings.pin_check || null, extra: settings.extra || {} },
     };
     files.push({ name: `${root}/vault.json`, data: JSON.stringify(everything, null, 2) });
-    if (V.chat) files.push(...V.chat.forBackup(root, safeName));  // Claude chats, as Markdown (their files stay in Vault)
+    if (V.chat) files.push(...V.chat.forBackup(root, safeName, used));  // the Chat tab's chats, as Markdown (their files stay in Vault)
     return { blob: zip(files, now), name: `${root}.zip`, notes: notes.filter((n) => !n.deleted).length };
   }
 
@@ -522,7 +522,7 @@ V.backup = (() => {
   /* Settings' "Backups" card. `ui` is Settings' own { card, line, toggle, draw }. */
   function card(ui) {
     const rows = [ui.line('Download everything', 'Every note as a Markdown file, in its folder, plus all of Vault in '
-      + 'vault.json, and your Claude chats, in one ZIP. Your pictures and files stay in Vault (the PC\'s weekly backup '
+      + 'vault.json, and your chats, in one ZIP. Your pictures and files stay in Vault (the PC\'s weekly backup '
       + 'copies them too). Locked notes stay locked.', V.button('Download', { icon: 'download', onClick: async () => {
       if (V.chat) await V.chat.refresh();  // the chats from the other devices too
       try { download(); } catch (error) { V.problem(error); }

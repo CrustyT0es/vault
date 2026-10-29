@@ -1,16 +1,16 @@
 {
  "format": 1,
- "version": "1.8.2",
+ "version": "1.8.3",
  "min_shell": 1,
  "notes": [
-  "Gemini answers show up as they're written, and never \"think forever\": if Google's newest Flash doesn't start in time, Vault switches to Flash-Lite; if neither answers, your message waits and sends itself later.",
-  "Gemini on your PC too: pick Gemini in the Claude tab. (Claude's paid key stays with Jarvis.)",
-  "Gemini keys that start with AQ. (the only kind Google makes now) work: Vault checks a key with Google when you save it.",
-  "Dictation: tap the new mic in a note and talk \u2014 it types for you. Say \"comma\", \"period\" or \"new line\" for punctuation.",
-  "Send to\u2026: under a Claude answer, send it to your Chromebook, PC or phone. It shows up there as a note a second later.",
-  "Invite friends: on your PC, Settings > Invite people makes a one-time code. Your friend gets their own private Vault and picks their own password."
+  "Gemini answers in seconds: Vault asks Google's two free models side by side, uses whichever starts first, and tells them not to overthink a quick chat.",
+  "The Claude tab is now called Chat.",
+  "Settings > AI > Check Gemini shows how fast each Gemini model is answering right now.",
+  "Chromebook note-taker and dictation stay accurate in long classes: Vault starts a fresh listen at each pause.",
+  "\"Writing your notes...\" never spins for minutes: it shows how long it's taking, you can close it (your words are saved), and \"Use Gemini instead\" shows up if Claude is slow.",
+  "Gemini on your PC too: pick Gemini in the Chat tab. (Claude's paid key stays with Jarvis.)"
  ],
- "build": "1.8.2-c237ac92de0d",
+ "build": "1.8.3-98e8f0b1d71e",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -73,8 +73,8 @@
    "size": 15803
   },
   "js/ai.js": {
-   "sha256": "cfefbdfcbfe68a4c49b067f0868854675dd917c40c15700e4ef157a01587b29f",
-   "size": 46536
+   "sha256": "2f60483a11a19415dc159c36f770f2c36be69323566005c8a552dfcd03ba6260",
+   "size": 76998
   },
   "js/arrivals.js": {
    "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
@@ -85,8 +85,8 @@
    "size": 5778
   },
   "js/chat.js": {
-   "sha256": "549ccb9e3d9d13f458c304b3303ee753dbec8eb7e1e18c29c92fad6b2f3d82dc",
-   "size": 79476
+   "sha256": "c76f7bd9d5b1d2f86ce955fa7296289507626d0599d892b90c2a28e8ec33fbdb",
+   "size": 86141
   },
   "js/clips.js": {
    "sha256": "016e5bcbdce07cb44daee1ab78ccbc1c148df34e52400f492c6a12afc650778f",
@@ -105,8 +105,8 @@
    "size": 17809
   },
   "js/editor.js": {
-   "sha256": "ab773e3bcf7d200c597a4d701e8d03048c21ed592d1ee59b498ecb2f90975000",
-   "size": 108961
+   "sha256": "1c2243704341dfdd6ca2f8ce3226d65025957ec694b0d9a76784fc295cf13f86",
+   "size": 108956
   },
   "js/exams.js": {
    "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
@@ -121,8 +121,8 @@
    "size": 24302
   },
   "js/history.js": {
-   "sha256": "1b66a0994363a4d90dc8e00b20bea180ab05fbca2780625cddfe88c46d910e1c",
-   "size": 26889
+   "sha256": "b73742397b9eeb30fe8f88a0e82aeb1b1e055d49f57d3b37b6558dae9bdaa861",
+   "size": 26896
   },
   "js/ink.js": {
    "sha256": "a42e3e1061f4bb515063da2a7ce92d2e503900aa516e6390f717abfa720bae6c",
@@ -141,8 +141,8 @@
    "size": 47955
   },
   "js/notetaker.js": {
-   "sha256": "9e5960adbbdeff67d0aaf6b0f965042231a0880c9f6fdf73f6bdf01011c71744",
-   "size": 46498
+   "sha256": "c9ad2901892f354bbdf690332507ba69e319d6d740a38e12ca562315a7909542",
+   "size": 55778
   },
   "js/organise.js": {
    "sha256": "e10b0d975f55cc8cedb3d35d9b95503c35bf89550ca535bf10ddb3e20bd4fe7b",
@@ -165,8 +165,8 @@
    "size": 13670
   },
   "js/start.js": {
-   "sha256": "2d7a8547dd1229ba2b9b4b0e9f4c0fc3c6facee74efa03dcf01d6426ac10e5ec",
-   "size": 28615
+   "sha256": "9b391d998dbb0ecb1dbf376d12af968ac0e5ec679ba0d87dfd9e0181000e5e81",
+   "size": 29136
   },
   "js/study.js": {
    "sha256": "c19f8d4e1d12d50fec89d72bfd116a00552184c55e3a0fb0dc5568da6209ad1b",
@@ -177,7 +177,7 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "90920413e709c1e973ff39ac5a6c24de82a72ceab273c7f3b5caf06b4f06e59c",
+   "sha256": "4c6453f633dc2b9c6be4aa454084958f457448df1f95bccd94833a4ca60b064f",
    "size": 30309
   },
   "manifest.webmanifest": {
@@ -185,11 +185,11 @@
    "size": 1452
   },
   "styles.css": {
-   "sha256": "dcf7b2de8d64a4d0316f926237079b26c74971fa41af145e563beb724cb39301",
-   "size": 145864
+   "sha256": "6e40a944fb01fa55edd8d3197cbeeedc3a58bbde1b8a8f91688b66f6dbbc220c",
+   "size": 146212
   },
   "sw.js": {
-   "sha256": "0fc19b0c7138bb1456813883729f20d901d723efde99f8ef56cdde800cccee8d",
+   "sha256": "b9b3d2ac8a63c6c72cb2539db089a40eee1d2b1fef1175dcf811c6ecfc855670",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {
