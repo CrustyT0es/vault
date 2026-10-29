@@ -50,6 +50,8 @@
   --ok-soft: light-dark(#e7f2ec, #1f302b);
   --danger-fill: light-dark(#cb242d, #37282a);
   --on-danger-fill: light-dark(#ffffff, #fb817f);
+  /* ==highlighted== words (a highlighter's yellow, soft enough that every word colour still reads on it) */
+  --highlight: light-dark(#fff0a8, #433a1c);
   /* toasts are always graphite */
   --toast: light-dark(#17191c, #2b2e32);
   --toast-edge: light-dark(#17191c, #44474e);
@@ -389,6 +391,42 @@ textarea.field { resize: vertical; min-height: 48px; }
 @keyframes rise { from { transform: translateY(10px); opacity: 0; } }
 @media (min-width: 900px) { #toasts { bottom: 24px; left: auto; right: 24px; transform: none; width: 400px; } }
 
+/* A card for what just arrived (util.js's V.notice, js/arrive.js): where toasts come up, above them, on the page's
+   own surface (light or dark) with the picture. Never a dialog: nothing behind it waits for it. */
+.notice {
+  pointer-events: auto; position: relative; display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px;
+  align-items: start; padding: 12px 6px 12px 12px; border-radius: var(--r-lg);
+  background: var(--card); border: 1px solid var(--line); color: var(--text); box-shadow: var(--shadow-3);
+  animation: rise var(--d-3) var(--ease-out);
+}
+.notice.leaving { opacity: 0; transform: translateY(4px); transition: opacity var(--d-2) var(--ease-in), transform var(--d-2) var(--ease-in); }
+.notice-picture {
+  width: 64px; height: 64px; border-radius: var(--r-md); overflow: hidden; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--muted);
+}
+.notice-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.notice-picture .icon { width: 26px; height: 26px; }
+.notice-main { display: grid; gap: 2px; min-width: 0; padding-top: 1px; }
+.notice-title { font: 600 14px/20px var(--font); }
+.notice-text {
+  margin: 0; color: var(--text-2); font: 400 13.5px/19px var(--font); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.notice-more { margin: 0; color: var(--muted); font: 400 13px/18px var(--font); }
+.notice-lines:empty { display: none; }
+.notice-line { margin: 4px 0 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
+.notice-line .icon { width: 16px; height: 16px; }
+.notice-line.ok { color: var(--ok); }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.notice-actions .btn { min-height: 36px; padding: 0 12px; font-size: 13.5px; }
+.notice-actions .btn .icon { width: 16px; height: 16px; }
+.notice > .icon-btn { width: 32px; height: 32px; margin-top: -4px; }
+.notice > .icon-btn .icon { width: 18px; height: 18px; }
+@media (pointer: coarse) {
+  .notice-actions .btn { min-height: 44px; }
+  .notice > .icon-btn { width: 44px; height: 44px; margin: -8px -4px 0 0; }
+}
+
 #drop-hint { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: var(--scrim); pointer-events: none; }
 #drop-hint > div {
   border: 1.5px dashed var(--accent-line); border-radius: var(--r-xl); padding: 40px 56px; display: grid; justify-items: center; gap: 14px;
@@ -628,17 +666,25 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 .due-chip.soon, .due-chip.later { color: var(--accent-ink); background: var(--accent-wash); border-color: var(--accent-line); }
 .done-chip.on { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
 .blocks { display: grid; gap: 2px; grid-template-columns: minmax(0, 1fr); }
+/* A box and the see-through copy of its words under it (js/editor.js: shade) get their font from the same rules
+   (.block-field > *: here, in the wide pane and for headings), so the two always match. */
+.block-field { position: relative; min-width: 0; --ink: var(--text); }
+.block-field > * { font: 400 16px/26px var(--font); }
+.block-field > .block-input { position: relative; }
 .block-input {
   width: 100%; background: none; border: none; outline: none; resize: none; overflow: hidden; padding: 4px 0; min-height: 34px;
-  color: var(--text); font: 400 16px/26px var(--font); field-sizing: content; caret-color: var(--accent);
+  color: var(--text); field-sizing: content; caret-color: var(--accent);
 }
 .block-input::placeholder { color: var(--faint); }
+/* see-through, so the bold and the highlight under picked words still show */
+.block-input::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 .check-row {
   display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0 -8px; padding: 5px 8px;
   border-radius: var(--r-md); transition: background var(--d-1);
 }
 .check-row:focus-within { background: var(--surface-2); }
-.check-row .block-input { flex: 1; min-width: 0; }
+.check-row > .block-field { flex: 1; min-width: 0; }
+.check-row .block-input { display: block; }
 .tick {
   position: relative; margin-top: 6px; width: 22px; height: 22px; border-radius: var(--r-sm); border: 1.75px solid var(--control);
   background: var(--page); display: grid; place-items: center; padding: 0; flex: none; color: transparent;
@@ -650,6 +696,7 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 .check-row.done .tick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .check-row.done .tick .icon { transform: none; }
 .check-row.done .block-input { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); color: var(--muted); }
+.check-row.done .block-field { --ink: var(--muted); }
 .remove-item {
   position: relative; opacity: 0; display: grid; place-items: center; width: 28px; height: 28px; margin-top: 3px; padding: 0;
   background: none; border: none; border-radius: 8px; color: var(--muted); flex: none;
@@ -693,7 +740,7 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
   .pane .editor-tools { order: 1; border-top: none; border-bottom: 1px solid var(--line-soft); background: var(--page); min-height: 48px; padding: 4px 12px 4px 14px; }
   .pane .editor-scroll { order: 2; padding: 28px max(28px, calc((100% - 720px) / 2)) 56px; }
   .pane .note-title { font-size: 30px; line-height: 36px; }
-  .pane .block-input { font-size: 15.5px; line-height: 25px; }
+  .pane .block-field > * { font-size: 15.5px; line-height: 25px; }
   .pane .check-row { min-height: 38px; padding: 3px 8px; }
   .pane .tick { margin-top: 5px; }
   .folder-pick { max-width: 280px; }
@@ -863,9 +910,13 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 /* headings: lines of their own, bigger */
 .heading-block { padding-top: 8px; }
 .blocks > .heading-block:first-child { padding-top: 0; }
-.block-input.heading-input { font: 600 22px/30px var(--font-display); letter-spacing: -.012em; min-height: 38px; }
-.heading-block.h2 .block-input.heading-input { font: 600 18px/27px var(--font); letter-spacing: -.005em; min-height: 35px; }
-.heading-block.h3 .block-input.heading-input { font: 600 16px/26px var(--font); color: var(--text-2); }
+.heading-block .block-field > * { font: 600 22px/30px var(--font-display); letter-spacing: -.012em; }
+.heading-block.h2 .block-field > * { font: 600 18px/27px var(--font); letter-spacing: -.005em; }
+.heading-block.h3 .block-field > * { font: 600 16px/26px var(--font); }
+.heading-block.h3 .block-field { --ink: var(--text-2); }
+.block-input.heading-input { min-height: 38px; }
+.heading-block.h2 .block-input.heading-input { min-height: 35px; }
+.heading-block.h3 .block-input.heading-input { color: var(--text-2); }
 
 /* links found in the words, as chips under their line (tap opens, hold copies) */
 .link-chips { display: flex; flex-wrap: wrap; gap: 8px 6px; padding: 2px 0 8px; min-width: 0; }
@@ -1010,6 +1061,9 @@ h4.read-heading { font: 600 16px/26px var(--font); color: var(--text-2); }
 .read-check.done .read-text { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 .read-link { color: var(--accent-ink); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
 .read-link:hover { text-decoration-color: currentColor; }
+.read-body u { text-underline-offset: 3px; }
+.read-body s { text-decoration-color: color-mix(in srgb, currentColor 75%, transparent); }
+mark.read-hl { padding: 0 2px; margin: 0 -2px; border-radius: 3px; background: var(--highlight); color: inherit; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .read-code-span {
   padding: 1px 5px; border: 1px solid var(--line-soft); border-radius: var(--r-xs); background: var(--surface-2);
   font: 500 .88em/1 ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace;
@@ -1735,19 +1789,26 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 /* ---------------------------------------------------------------- the study pack: Review, Learn, blanks and tests
    (js/review.js, learn.js, exams.js) */
 
-/* {{blanks}} in the editor: a copy of the box's words under it, see-through but for a soft wash and a dotted line
-   under each blank (js/editor.js: shade), wrapping just as the box does */
-.text-block { position: relative; }
-.text-block > .block-input { position: relative; }
+/* What a box can't draw itself, under its own letters (js/editor.js: shade): a see-through copy of its words, a line
+   per line, wrapping just as the box does and kept inside it (it never makes the box bigger or scroll). Only paint is
+   added, never anything that makes letters wider (no font-weight, no padding): bold is the letters drawn again with a
+   thin outline under the box's own; underline and strikethrough are lines under see-through letters; a highlight is
+   a colour behind; {{blanks}} get a soft wash and a dotted line. Italic isn't drawn in the box (its marks show it). */
 .blank-shade {
-  position: absolute; top: 0; left: 0; right: 0; padding: 4px 0; pointer-events: none; user-select: none;
-  font: 400 16px/26px var(--font); color: transparent; white-space: pre-wrap; overflow-wrap: break-word;
+  position: absolute; inset: 0; overflow: hidden; padding: 4px 0; pointer-events: none; user-select: none;
+  color: transparent; white-space: pre-wrap; overflow-wrap: break-word;
 }
-.pane .blank-shade { font-size: 15.5px; line-height: 25px; }
+.blank-shade > div { min-height: 1lh; }
+.shade-b { color: var(--ink); -webkit-text-stroke: .05em var(--ink); }
+.shade-u { text-decoration: underline var(--ink); }
+.shade-s { text-decoration: line-through var(--ink); }
+.shade-hl { border-radius: 3px; background: var(--highlight); box-shadow: 0 0 0 1px var(--highlight); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .blank-mark, .read-blank {
   border-radius: 4px; background: var(--accent-wash); box-shadow: 0 0 0 2px var(--accent-wash);
   text-decoration: underline dotted var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 5px;
 }
+/* Windows' high contrast colours draw every letter themselves: the copy would only get in the way. */
+@media (forced-colors: active) { .blank-shade { display: none; } }
 
 /* the Review page, in the Notes tab's list */
 .list.review { gap: 8px; }
@@ -2014,6 +2075,24 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .nt-warn .icon { margin-top: 1px; color: var(--warn); }
 .nt-facts { display: grid; gap: 4px; margin: 14px 0 0; padding-left: 18px; color: var(--muted); font: 400 13.5px/20px var(--font); }
 .nt-facts li::marker { color: var(--faint); }
+/* the PC: the microphone, or this PC's own sound (a video, a class, a call) */
+.nt-source { display: grid; gap: 8px; margin-top: 14px; }
+.nt-source > .label { margin: 0; }
+.nt-source-pick { justify-self: start; }
+.nt-source-pick button[disabled] { opacity: .5; cursor: not-allowed; }
+.nt-hint { margin: 0; color: var(--muted); font: 400 13.5px/20px var(--font); }
+.nt-with-mic { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); min-height: 64px; }
+.nt-test { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nt-test-result { color: var(--text-2); font: 400 13.5px/20px var(--font); }
+.nt-test-result[data-state=heard] { color: var(--text); font-weight: 500; }
+.nt-never { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: var(--text-2); cursor: pointer; }
+.nt-pcsound {
+  display: flex; align-items: center; gap: 10px; flex: none; padding: 8px 8px 8px 12px; border-radius: var(--r-md);
+  background: var(--danger-soft); color: var(--text); font: 600 14px/20px var(--font);
+}
+.nt-pcsound > .icon { flex: none; color: var(--danger); }
+.nt-pcsound-words { flex: 1; min-width: 0; }
+.nt-pcsound > .btn { flex: none; }
 
 /* listening: the words as they come */
 .nt-live { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 640px; margin: 0 auto; }

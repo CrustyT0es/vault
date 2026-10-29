@@ -11,6 +11,12 @@
    itself (vault/notetaker.py, the listenStart / listenStop bridge calls, its words as "listen-text" events). The
    screen is kept on while it listens.
 
+   PC sound: on the PC it can also hear what's playing there (a video, an online class, a call: vault/pcsound.py),
+   alone or with the microphone, when its PC app says it can (pcSoundState); older PC apps never show the choice. With
+   both, each paragraph starts "You:" (the microphone) or "Them:" (the PC). While it hears the PC, a bar says so with
+   Stop, and so does the tray. A phone or Chromebook can only hear its microphone (the browser gives speech recognition
+   nothing else), so there it just says to use the PC for a video or class.
+
    A note's body can't pass 1,000,000 letters (vault/schema.sql), so a lecture longer than about seven hours carries on
    in a "(part 2)" note. Reached from the new-note sheet and as a tool in an open note. */
 'use strict';
@@ -31,6 +37,11 @@ V.notetaker = (() => {
   const slowness = { time: 10000, slow: 30000, rest: 10 * 60 * 1000 };
   const CARDS = 'vault-notetaker-cards';
   const FOLDER = 'vault-notetaker-folder';
+  const SOURCE = 'vault-notetaker-source';      // on the PC: 'mic' or 'pc' (what it listened to last)...
+  const WITH_MIC = 'vault-notetaker-with-mic';  // ...and with 'pc', 'on' for the microphone too (a call)
+  const CONSENT = 'vault-pcsound-ok';           // the first-time "Before you record" box was ticked away
+  const CONSENT_WORDS = 'Only record people who are OK with it. Some classes and meetings need the teacher\'s or host\'s OK first.';
+  const WHO = { you: 'You', them: 'Them' };     // with the microphone and the PC's sound, each paragraph says who
   const DRAWN = {
     listen: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/><path d="M2.5 9v4M21.5 9v4"/>',
     spark: '<path d="M12 3.5 13.8 9a2 2 0 0 0 1.2 1.2l5.5 1.8-5.5 1.8a2 2 0 0 0-1.2 1.2L12 20.5 10.2 15a2 2 0 0 0-1.2-1.2L3.5 12 9 10.2A2 2 0 0 0 10.2 9z"/>',
@@ -265,9 +276,9 @@ V.notetaker = (() => {
     };
   }
 
-  /* Python listening on the PC: words come as "listen-text" events (to the one listening now). */
+  /* Python listening on the PC: words come as "listen-text" events (to the one listening now; `who` with both). */
   let pcEars = null;
-  V.on('pc:listen-text', ({ text }) => { if (pcEars && text) pcEars.final(text); });
+  V.on('pc:listen-text', ({ text, who }) => { if (pcEars && text) pcEars.final(text, who); });
   V.on('pc:listen-state', ({ state, message }) => {
     if (!pcEars) return;
     if (state === 'loading') pcEars.trouble('Getting the PC\'s speech recognition ready...');
@@ -275,21 +286,28 @@ V.notetaker = (() => {
     else if (state === 'error' && message) pcEars.trouble(message);
   });
 
-  function pcHearing(on) {
+  function pcHearing(on, source = 'mic') {
+    // Each start and stop takes a number: a stop's answer that comes after a newer start (Pause, then Resume before
+    // Python answered the pause) mustn't let go of the words that start is now hearing.
+    let turn = 0;
     return {
       async start() {
+        const mine = ++turn;
         pcEars = on;
         try {
-          await V.pc.call('listenStart');
+          // (the microphone alone is asked for as always, so it's the same call an older PC app knows)
+          await (source === 'mic' ? V.pc.call('listenStart') : V.pc.call('listenStart', { source }));
           on.trouble(null);
         } catch (error) {
+          if (turn !== mine) return;  // (a newer start or stop has it now)
           pcEars = null;
           on.fail(error.message || String(error));
         }
       },
       async stop(done = true) {
+        const mine = ++turn;
         try { await V.pc.call('listenStop', { done }); } catch (error) { console.warn('Vault note-taker:', error); }
-        if (pcEars === on) pcEars = null;  // (its last words came before the answer)
+        if (turn === mine && pcEars === on) pcEars = null;  // (its last words came before the answer)
       },
       back() {},
     };
@@ -321,7 +339,7 @@ V.notetaker = (() => {
 
   const text = () => [session.base, ...session.paragraphs].filter((p) => p && p.trim()).join('\n\n');
 
-  function heard(words) {
+  function heard(words, who) {
     if (!session) return;
     const clean = String(words || '').replace(/\s+/g, ' ').trim();
     if (!clean) return;
@@ -329,11 +347,15 @@ V.notetaker = (() => {
       || text().length + clean.length + 2 > TRANSCRIPT_MOST) carryOn();
     const now = Date.now();
     const last = session.paragraphs.length - 1;
-    if (last < 0 || now - session.lastWords > PARAGRAPH_GAP || session.paragraphs[last].length > PARAGRAPH_MOST) {
-      session.paragraphs.push(clean.charAt(0).toUpperCase() + clean.slice(1));
+    const speaker = session.source === 'both' && WHO[who] ? who : '';  // "You:" / "Them:" when both are heard
+    if (last < 0 || now - session.lastWords > PARAGRAPH_GAP || session.paragraphs[last].length > PARAGRAPH_MOST
+      || speaker !== session.lastWho) {
+      const start = clean.charAt(0).toUpperCase() + clean.slice(1);
+      session.paragraphs.push(speaker ? `${WHO[speaker]}: ${start}` : start);
     } else {
       session.paragraphs[last] += ' ' + clean;
     }
+    session.lastWho = speaker;
     session.lastWords = now;
     session.words += wordCount(clean);
     session.dirty = true;
@@ -352,7 +374,7 @@ V.notetaker = (() => {
     const { above } = split(row.body);
     const extra = { ...(row.extra || {}) };
     extra.notetaker = { ...(extra.notetaker || {}), seconds: Math.round(elapsed() / 1000), words: session.words,
-      engine: session.engine };
+      engine: session.engine, ...(session.source !== 'mic' ? { source: session.source } : {}) };
     await V.cloud.save('notes', { ...row, body: join(above, text()), extra });
   }
 
@@ -388,7 +410,7 @@ V.notetaker = (() => {
   }
 
   const handlers = () => ({
-    final: (words) => heard(words),
+    final: (words, who) => heard(words, who),
     interim: (words) => { if (session) { session.interim = words; drawWords(); } },
     trouble: (words) => { if (session && session.trouble !== words) { session.trouble = words; drawStatus(); } },
     waiting: (yes) => {
@@ -414,9 +436,10 @@ V.notetaker = (() => {
     return note;
   }
 
-  async function startListening({ id = null, title = '', folderId = null } = {}) {
+  async function startListening({ id = null, title = '', folderId = null, source = 'mic' } = {}) {
     const how = engine();
     if (!how.kind) return;
+    if (how.kind !== 'pc' || !pcSoundKnown()) source = 'mic';  // only the PC app can hear the PC's own sound
     V.emit('notetaker-listening');  // dictation (js/dictation.js) lets go of the microphone first
     let note = id ? V.data.notes.get(id) : null;
     if (!note) note = await newNote(title.trim(), folderId);
@@ -429,8 +452,8 @@ V.notetaker = (() => {
       interim: '', state: 'starting', engine: how.kind, words: wordCount(parts.transcript), lastWords: 0,
       aboveLength: parts.above.length, part: (note.extra.notetaker && note.extra.notetaker.part) || 1,
       counted: ((note.extra.notetaker && note.extra.notetaker.seconds) || 0) * 1000, runningSince: 0, dirty: false,
-      trouble: null, waiting: false, wasAway: false, problem: '' };
-    session.hearing = how.kind === 'pc' ? pcHearing(handlers()) : webHearing(handlers());
+      trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '' };
+    session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers());
     draw();
     session.saver = setInterval(() => { if (session && session.dirty) save().catch(V.problem); }, SAVE_EVERY);
     session.clock = setInterval(drawClock, 1000);
@@ -441,17 +464,20 @@ V.notetaker = (() => {
 
   async function pause() {
     if (!session || session.state !== 'listening') return;
+    const was = session;
     setState('paused');
-    await session.hearing.stop(false);
+    await was.hearing.stop(false);
     saveSoon.flush();
-    keepAwake(false);
+    if (session === was && was.state === 'paused') keepAwake(false);  // (not when Resume came meanwhile)
   }
 
   async function resume() {
     if (!session || session.state !== 'paused') return;
-    setState('listening');
+    const was = session;
+    setState('starting');  // "listening" once the PC (or the browser) really is again
     keepAwake(true);
-    await session.hearing.start();
+    await was.hearing.start();
+    if (session === was && was.state === 'starting') setState('listening');
   }
 
   /* Stop: the last words are kept and saved, then (with `make`) Claude makes the notes. */
@@ -488,12 +514,16 @@ V.notetaker = (() => {
   /* Who writes the notes here, by name: Gemini when only the free Google key is set up (V.ai.brain), else Claude. */
   const writer = () => (V.ai.brain() === 'gemini' ? 'Gemini' : 'Claude');
 
-  function instructions(cards) {
+  function instructions(cards, speakers = false) {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     return [
       'You turn the transcript of a class, lecture or meeting into clear notes for the student who recorded it.',
-      'The transcript comes from speech recognition: it has misheard words, little punctuation and no speaker names. '
-        + 'Fix obvious mishearings from the context, but never add facts, numbers or names that were not said.',
+      speakers
+        ? 'The transcript comes from speech recognition: it has misheard words and little punctuation. Paragraphs '
+          + 'starting "You:" are the student, ones starting "Them:" are the call, class or video on their PC. '
+          + 'Fix obvious mishearings from the context, but never add facts, numbers or names that were not said.'
+        : 'The transcript comes from speech recognition: it has misheard words, little punctuation and no speaker names. '
+          + 'Fix obvious mishearings from the context, but never add facts, numbers or names that were not said.',
       'Write in the language of the transcript. Answer with the notes only, in exactly this plain-text format (no '
         + 'other Markdown, no tables, no code blocks):',
       '',
@@ -558,7 +588,8 @@ V.notetaker = (() => {
     if (row.locked) throw new Error('Unlock the note first.');
     const { transcript } = split(row.body);
     if (!transcript.trim()) throw new V.ai.AiError('empty', 'There\'s no transcript in this note to make notes from.');
-    const answer = await V.ai.ask({ ...how, system: instructions(cards), text: transcript });
+    const speakers = /^(You|Them): /m.test(transcript);  // (PC sound with the microphone: who said what)
+    const answer = await V.ai.ask({ ...how, system: instructions(cards, speakers), text: transcript });
     if (how.signal && how.signal.aborted) throw new V.ai.AiError('stopped', 'Stopped.');  // (one set of notes only)
     const who = answer.usage && answer.usage.gemini ? 'Gemini' : 'Claude';
     if (answer.stopReason === 'refusal') {
@@ -783,6 +814,88 @@ V.notetaker = (() => {
     V.notes.open(id);
   }
 
+  const stored = (name) => { try { return localStorage.getItem(name) || ''; } catch (e) { return ''; } };
+  const store = (name, value) => { try { localStorage.setItem(name, value); } catch (e) { /* private browsing */ } };
+
+  /* -- this PC's own sound (the PC app, when it's new enough to say whether it can hear it: pcSoundState) */
+
+  const pcSoundKnown = () => !!(V.desktop && V.pc && V.pc.can('pcSoundState') && V.pc.can('listenStart'));
+
+  /* "Before you record", the first time the PC's sound is recorded (until "Don't show this again"). */
+  function consentFirst() {
+    if (stored(CONSENT) === 'ok') return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let yes = false;
+      const never = V.h('input.nt-never-box', { type: 'checkbox' });
+      V.sheet({
+        title: 'Before you record',
+        content: [V.h('p', { text: CONSENT_WORDS }),
+          V.h('label.nt-never', {}, never, V.h('span', { text: 'Don\'t show this again' }))],
+        actions: [{ label: 'Cancel' }, { label: 'Start', kind: 'primary', onClick: () => {
+          yes = true;
+          if (never.checked) store(CONSENT, 'ok');
+        } }],
+        onClose: () => resolve(yes),
+      });
+    });
+  }
+
+  /* What the start screen's choice says: 'mic', 'pc' or 'both' (the PC's sound only once the PC app said it can). */
+  function chosenSource(ready) {
+    if (!ready || !ready.pcSound || !ready.pcSound.available || ready.source !== 'pc') return 'mic';
+    return ready.withMic ? 'both' : 'pc';
+  }
+
+  /* The start screen's "Listen to: Microphone | PC sound", the microphone too for a call, and "Test PC sound". */
+  function soundChoice(remember) {
+    const ready = ui.ready;
+    if (ready.pcSound === undefined) {
+      ready.pcSound = null;  // asking
+      const answered = (answer) => { if (ui && ui.ready === ready) { ready.pcSound = answer; draw(); } };
+      V.pc.call('pcSoundState').then((answer) => answered(answer || {}))
+        .catch((error) => answered({ available: false, why: error.message || String(error) }));
+    }
+    const can = !!(ready.pcSound && ready.pcSound.available);
+    const pc = can && ready.source === 'pc';
+    const pick = (value) => () => {
+      if (value === 'pc' && !can) return;
+      remember();
+      ready.source = value;
+      store(SOURCE, value);
+      draw();
+    };
+    const option = (value, label, picture, disabled) => V.h('button', { type: 'button', role: 'radio',
+      'aria-checked': String((value === 'pc') === pc), disabled, dataset: { source: value }, onclick: pick(value) },
+    picture, V.h('span', { text: label }));
+    const result = V.h('span.nt-test-result', { role: 'status' });
+    const test = V.button('Test PC sound', { onClick: async () => {
+      test.disabled = true;
+      result.textContent = 'Listening for a few seconds...';
+      try {
+        const answer = await V.pc.call('pcSoundTest');
+        result.textContent = answer.message || '';
+        result.dataset.state = answer.state || '';
+      } catch (error) {
+        result.textContent = error.message || String(error);
+        result.dataset.state = 'error';
+      }
+      test.disabled = false;
+    } });
+    const withMic = V.h('input.switch', { type: 'checkbox', checked: !!ready.withMic, 'aria-label': 'Also my microphone',
+      onchange: (event) => { ready.withMic = event.target.checked; store(WITH_MIC, ready.withMic ? 'on' : 'off'); } });
+    return V.h('div.nt-source', {},
+      V.h('span.label', { text: 'Listen to' }),
+      V.h('div.segmented.nt-source-pick', { role: 'radiogroup', 'aria-label': 'Listen to' },
+        option('mic', 'Microphone', icon('listen')), option('pc', 'PC sound', V.icon('pc'), !can)),
+      !ready.pcSound ? V.h('p.nt-hint', { text: 'Checking whether this PC\'s sound can be heard...' })
+        : !can ? V.h('p.nt-hint.nt-pc-why', { text: ready.pcSound.why || 'PC sound can\'t be used on this PC.' })
+          : pc ? V.h('p.nt-hint', { text: 'Writes down a video, an online class or a call playing on this PC. '
+            + 'Only the words are kept, never the sound.' }) : null,
+      pc ? V.h('label.switch-row.nt-with-mic', {}, V.h('span.switch-text', {}, V.h('strong', { text: 'Also my microphone' }),
+        V.h('span', { text: 'For a call where you talk too. Headphones work best.' })), withMic) : null,
+      pc ? V.h('div.nt-test', {}, test, result) : null);
+  }
+
   const wantsCards = () => { try { return localStorage.getItem(CARDS) === 'on'; } catch (e) { return false; } };
   const setCards = (on) => { try { localStorage.setItem(CARDS, on ? 'on' : 'off'); } catch (e) { /* private browsing */ } };
 
@@ -863,10 +976,10 @@ V.notetaker = (() => {
     ? 'This PC turns the talk into words itself, with its own speech recognition. Nothing is sent anywhere while it listens.'
     : `${V.device === 'phone' ? 'Your phone\'s' : 'The browser\'s'} speech service (Google) turns the talk into words.`);
 
-  function folderChoice() {
+  function folderChoice(picked) {
     const folders = V.notes.folders();
-    let saved = '';
-    try { saved = localStorage.getItem(FOLDER) || ''; } catch (e) { /* private browsing */ }
+    let saved = picked || '';
+    if (!saved) try { saved = localStorage.getItem(FOLDER) || ''; } catch (e) { /* private browsing */ }
     const school = folders.find((f) => f.name.toLowerCase() === 'school');
     const chosen = folders.some((f) => f.id === saved) ? saved : (school || V.notes.inbox() || {}).id || '';
     return V.h('select.field.nt-folder', { 'aria-label': 'Folder' }, folders.map((f) => V.h('option', {
@@ -876,20 +989,30 @@ V.notetaker = (() => {
   function drawReady() {
     const { body, foot } = ui.parts;
     const ready = ui.ready;
+    // Drawn again (the PC's answer about its sound, or the AI's state, arriving while the owner types): what was
+    // typed and picked so far stays.
+    if (ready.nameEl) ready.name = ready.nameEl.value;
+    if (ready.folderEl) ready.folderId = ready.folderEl.value;
     const note = ready.id ? V.data.notes.get(ready.id) : null;
     const how = engine();
     const hasTranscript = !!note && !!split(note.body).transcript.trim();
     const cards = V.h('input.switch', { type: 'checkbox', checked: wantsCards(), 'aria-label': 'Also make flash cards',
       onchange: (event) => setCards(event.target.checked) });
     const name = note ? null : V.h('input.field.nt-name', { type: 'text', placeholder: 'Biology class, team meeting...',
-      autocomplete: 'off', maxlength: '120', 'aria-label': 'What is it?' });
-    const folder = note ? null : folderChoice();
+      autocomplete: 'off', maxlength: '120', 'aria-label': 'What is it?', value: ready.name || '' });
+    const folder = note ? null : folderChoice(ready.folderId);
+    ready.nameEl = name;
+    ready.folderEl = folder;
+    const remember = () => { if (name) ready.name = name.value; if (folder) ready.folderId = folder.value; };
+    const choice = how.kind === 'pc' && pcSoundKnown() ? soundChoice(remember) : null;
+    const pcSound = chosenSource(ready) !== 'mic';
     V.clear(body, V.h('div.nt-ready', {},
       V.h('div.nt-hero', {}, icon('listen', 'nt-hero-icon')),
       V.h('h3', { text: note ? `Listen into "${V.noteTitle(note)}"` : 'Notes, written for you' }),
       V.h('p.nt-lead', { text: `Vault writes down what's said in a class or meeting as it happens. When you stop, ${writer()} turns it into tidy notes: a summary, key points, terms, homework and questions.` }),
       name ? V.h('label.label', {}, 'What is it? (optional)', name) : null,
       folder ? V.h('label.label', {}, 'Folder', folder) : null,
+      choice,
       V.h('label.switch-row.nt-cards', {}, V.h('span.switch-text', {}, V.h('strong', { text: 'Also make flash cards' }),
         V.h('span', { text: 'For the Study button: question :: answer.' })), cards),
       how.kind ? null : V.h('p.nt-warn', {}, V.icon('alert'), V.h('span', { text: how.why })),
@@ -900,15 +1023,19 @@ V.notetaker = (() => {
         how.kind === 'web' ? V.h('li', { text: 'Keep Vault open while it listens: the screen stays on by itself.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
-        V.h('li', { text: 'Ask people before you record them.' }))));
+        how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Vault on your PC.' }) : null,
+        V.h('li.nt-consent', { text: pcSound ? CONSENT_WORDS : 'Ask people before you record them.' }))));
     V.clear(foot,
       hasTranscript ? V.button('Make notes now', { icon: 'check', onClick: () => makeNotes(note.id) }) : null,
       V.button(hasTranscript ? 'Listen more' : 'Start listening', { kind: 'primary', icon: 'play', disabled: !how.kind,
-        onClick: () => {
+        onClick: async () => {
+          const source = chosenSource(ui.ready);
+          if (source !== 'mic' && !(await consentFirst())) return;
+          if (!ui || ui.ready !== ready) return;  // (the screen went meanwhile)
           const folderId = folder ? folder.value : null;
           if (folderId) { try { localStorage.setItem(FOLDER, folderId); } catch (e) { /* private browsing */ } }
           ui.ready = null;
-          startListening({ id: note ? note.id : null, title: name ? name.value : '', folderId }).catch((error) => {
+          startListening({ id: note ? note.id : null, title: name ? name.value : '', folderId, source }).catch((error) => {
             session = null;
             V.problem(error);
             closeLayer();
@@ -951,6 +1078,14 @@ V.notetaker = (() => {
     drawStatus();
   }
 
+  /* What the PC sound bar says. */
+  function barWords(s) {
+    if (s.state === 'starting') return 'Getting ready to listen to this PC\'s sound...';
+    if (s.state === 'paused') return 'Paused: not listening to this PC\'s sound';
+    if (s.state === 'stopping') return 'Stopped listening to this PC\'s sound. Saving the last words...';
+    return s.source === 'both' ? 'Listening to this PC\'s sound and your microphone' : 'Listening to this PC\'s sound';
+  }
+
   function drawLive() {
     const { body, foot } = ui.parts;
     const s = session;
@@ -962,7 +1097,13 @@ V.notetaker = (() => {
     ui.interimEl = V.h('span.nt-interim');
     ui.wordsEl = V.h('div.nt-words', { 'aria-live': 'off' }, ui.emptyEl);
     ui.shown = 0;
-    V.clear(body, V.h('div.nt-live', {}, ui.statusEl, ui.troubleEl, ui.wordsEl,
+    // Hearing the PC's sound: a bar that says so the whole time, with Stop (the tray says so too). It says
+    // "listening" only once Python is (the tray's red dot comes then too), never while it's still getting ready.
+    const onAir = s.source !== 'mic' ? V.h('div.nt-pcsound', { role: 'status', dataset: { state: s.state } },
+      V.icon('pc'), V.h('span.nt-pcsound-words', { text: barWords(s) }),
+      V.button('Stop', { disabled: s.state === 'stopping',
+        onClick: () => stopListening({ make: false }).catch(V.problem) })) : null;
+    V.clear(body, V.h('div.nt-live', {}, onAir, ui.statusEl, ui.troubleEl, ui.wordsEl,
       V.h('p.nt-small', { text: `${hearsWith(s.engine)}${s.engine === 'web' ? ' Keep Vault open while it listens.' : ''}` })));
     const paused = s.state === 'paused';
     V.clear(foot,
@@ -1049,6 +1190,12 @@ V.notetaker = (() => {
       drawStatus();
     }
   });
+  // The tray's "Stop listening to PC sound" (vault/desktop.py): stopped here, so what was heard is saved first.
+  V.on('pc:pc-sound-stop', () => {
+    if (!session || session.source === 'mic' || session.state === 'stopping') return;
+    stopListening({ make: false }).then(() => V.toast('Stopped listening to this PC\'s sound. What was heard is in the note.'))
+      .catch(V.problem);
+  });
   // Signing out, or another update: what's been heard is saved first.
   window.addEventListener('pagehide', () => { if (session && session.dirty) save().catch(() => {}); });
 
@@ -1072,7 +1219,7 @@ V.notetaker = (() => {
     show();
     function show() {
       openLayer();
-      ui.ready = { id: note ? note.id : null };
+      ui.ready = { id: note ? note.id : null, source: stored(SOURCE) === 'pc' ? 'pc' : 'mic', withMic: stored(WITH_MIC) === 'on' };
       ui.problem = null;
       ui.making = null;
       draw();

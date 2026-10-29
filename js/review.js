@@ -96,9 +96,12 @@ V.review = (() => {
     const kept = (row.extra && isObject(row.extra.cards)) ? row.extra.cards : {};
     const waiting = pending.get(row.id) || {};
     return list.map((c) => ({ ...c, id: row.id + '|' + c.key, note: row.id, folder: row.folder_id || null,
-      state: c.key in waiting ? waiting[c.key] : kept[c.key] }));
+      state: c.key in waiting ? waiting[c.key] : keptFor(kept, c) }));
   }
   const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  /* A card's progress in its note's extra.cards: by its code, or by the one it had while its marks counted as its
+     words (js/study.js: cards, `was`; it moves to the new code at the note's next save). */
+  const keptFor = (kept, card) => (!kept[card.key] && card.was && kept[card.was]) || kept[card.key];
 
   /* Every flash card in Vault but those in locked, archived, template and deleted notes. */
   function all() {
@@ -112,7 +115,7 @@ V.review = (() => {
     const waiting = pending.get(card.note);
     if (waiting && card.key in waiting) return waiting[card.key];
     const row = V.data.notes.get(card.note);
-    return row && row.extra && isObject(row.extra.cards) ? row.extra.cards[card.key] : undefined;
+    return row && row.extra && isObject(row.extra.cards) ? keptFor(row.extra.cards, card) : undefined;
   }
 
   /* -- decks: everything ('all'), a folder (with the folders inside it), a #tag, a note ('note:<id>'), a test

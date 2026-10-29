@@ -10,6 +10,7 @@
 V.editor = (() => {
   const CHECK = /^(\s*)[-*]\s*\[( |x|X)\]\s?(.*)$/;
   const HEADING = V.format.HEADING;   // "# Plan", "## Monday" (and "### ")
+  const FENCE = /^\s*```/;            // a ``` code block starts or ends
   const MAX_SIDE = 1600;
   const MAX_FILE = 50 * 1024 * 1024;  // the cloud's most for one file (vault/schema.sql)
   const MEMO_MOST = 20 * 60;          // a voice memo stops by itself after 20 minutes
@@ -31,6 +32,7 @@ V.editor = (() => {
   let pending = null;     // a change from elsewhere that came mid-save: put in once the save is stored
   let pendingFrom = null; // what this device had when it came
   let lastField = null;   // the text box last typed in, for the toolbar's buttons
+  let lastInput = '';     // the kind of the last change typed in a box (a drag's own taking out, before its drop)
   let adding = 0;         // pictures and files going up to the cloud now
   let reading = false;    // the Read view (the note formatted; a tap goes back to writing there) instead of the boxes
   let readMap = null;     // the Read view's pieces of text -> where they are in the note
@@ -49,11 +51,20 @@ V.editor = (() => {
 
   /* -- the words as blocks */
 
+  /* The lines of a ``` code block stay in their text block, as written ("# a comment" in Python isn't a heading): one
+     box holds the whole block, so its copy (shade) and the mark buttons know they're code, as the Read view does. */
   function parse(body) {
     const out = [];
     let text = [];
+    let fenced = false;
     const flush = () => { if (text.length) { out.push({ type: 'text', text: text.join('\n') }); text = []; } };
     for (const line of (body || '').split('\n')) {
+      const fence = FENCE.test(line);
+      if (fence || fenced) {
+        if (fence) fenced = !fenced;
+        text.push(line);
+        continue;
+      }
       const box = CHECK.exec(line);
       const head = box ? null : HEADING.exec(line);
       if (box) { flush(); out.push({ type: 'check', done: box[2] !== ' ', text: box[3] }); }
@@ -168,28 +179,102 @@ V.editor = (() => {
     if (scroller && scroller.scrollTop !== top) scroller.scrollTop = top;
   }
 
-  /* {{blanks}} in a text box (fill-in-the-blank flash cards) get a soft wash and a dotted line under them. A text box
-     can't style part of its words, so a copy of them sits under it, see-through but for those marks, wrapping just
-     as the box does (styles.css: .blank-shade). The words themselves stay plain text. */
-  const shades = new WeakMap();      // a text box -> the layer under it
-  const shadeWords = new WeakMap();  // ...and the words it was last drawn for
+  /* A text box can only draw all its words one way, so what it can't draw itself is drawn under it, in a see-through
+     copy of its words that wraps just as the box does, every letter right under the box's own (styles.css:
+     .blank-shade): **bold** (its letters drawn again with a thin outline, so the box's letters on top look bold),
+     ++underline++ and ~~strikethrough~~ (lines under see-through letters), ==highlight== (a colour behind) and {{blanks}}
+     (fill-in-the-blank cards: a soft wash and a dotted line). The box keeps drawing its own letters as ever, so the phone
+     keyboard's underline under a word being typed, the caret and a selection are untouched, and the words stay plain
+     text. Words without any marks make nothing; otherwise the copy is a line per line of the box, kept by its words,
+     and only the lines that changed are made again, once a frame. */
+  const shades = new WeakMap();   // a text box -> { el, lines: [{ key, node, drawn }], words }
+  const SHADED = /\*\*|__|~~|\+\+|==|\{\{/;  // (words with none of these have nothing to draw)
+  const SHADE_CLASS = { bold: 'shade-b', underline: 'shade-u', strike: 'shade-s', highlight: 'shade-hl' };
+  const shading = new Set();      // the boxes whose copy catches up at the next frame
+  let shadeFrame = 0;
+
   function shade(area) {
     const under = shades.get(area);
-    if (!under) return;
-    const value = area.value.includes('{{') ? area.value : '';
-    if (shadeWords.get(area) === value) return;
-    shadeWords.set(area, value);
-    const found = value ? V.format.blanks(value) : [];
-    under.hidden = !found.length;
-    if (!found.length) { V.clear(under); return; }
-    const pieces = [];
-    let at = 0;
-    for (const blank of found) {
-      pieces.push(value.slice(at, blank.start), V.h('span.blank-mark', { text: value.slice(blank.start, blank.end) }));
-      at = blank.end;
+    if (!under || under.words === area.value) return;
+    if (!under.lines.length && !SHADED.test(area.value)) { under.words = area.value; return; }  // plain words: nothing
+    shading.add(area);
+    if (!shadeFrame) shadeFrame = requestAnimationFrame(shadeAll);
+  }
+
+  function shadeAll() {
+    shadeFrame = 0;
+    const boxes = [...shading];
+    shading.clear();
+    for (const area of boxes) if (area.isConnected) drawShade(area);
+  }
+
+  function drawShade(area) {
+    const under = shades.get(area);
+    const value = area.value;
+    if (!under || under.words === value) return;
+    under.words = value;
+    if (!SHADED.test(value)) {
+      if (under.lines.length) { under.lines = []; V.clear(under.el); }
+      under.el.hidden = true;
+      return;
     }
-    pieces.push(value.slice(at));
-    V.clear(under, pieces);
+    // Each line's key is its words, and whether it's in a ``` block (drawn plain there).
+    const keys = [];
+    let fenced = false;
+    for (const text of value.split('\n')) {
+      const fence = /^\s*```/.test(text);
+      keys.push((fenced || fence ? '`' : ' ') + text);
+      if (fence) fenced = !fenced;
+    }
+    // The lines that stay the same at the start and at the end are kept as they are; the ones between are made again.
+    const old = under.lines;
+    let a = 0;
+    while (a < old.length && a < keys.length && old[a].key === keys[a]) a++;
+    let b = 0;
+    while (b < old.length - a && b < keys.length - a && old[old.length - 1 - b].key === keys[keys.length - 1 - b]) b++;
+    const made = keys.slice(a, keys.length - b).map(shadeLine);
+    for (const line of old.slice(a, old.length - b)) line.node.remove();
+    const room = document.createDocumentFragment();
+    room.append(...made.map((line) => line.node));
+    under.el.insertBefore(room, b ? old[old.length - b].node : null);
+    under.lines = [...old.slice(0, a), ...made, ...old.slice(old.length - b)];
+    under.el.hidden = !under.lines.some((line) => line.drawn);
+  }
+
+  /* One line of the copy: its words as the box has them, the marked ones in spans (js/format.js: pieces, just as the
+     Read view reads them; nothing in `code`, a link's address or a ``` block). */
+  function shadeLine(key) {
+    const text = key.slice(1);
+    let drawn = false;
+    const draw = (list, from, to) => {
+      const out = [];
+      const add = (item) => {
+        if (typeof item !== 'string') out.push(item);
+        else if (item && typeof out[out.length - 1] === 'string') out[out.length - 1] += item;
+        else if (item) out.push(item);
+      };
+      let at = from;
+      for (const piece of list) {
+        add(text.slice(at, piece.start));
+        const cls = SHADE_CLASS[piece.kind];
+        if (piece.kind === 'blank') {
+          drawn = true;
+          add(V.h('span.blank-mark', {}, text.slice(piece.start, piece.from), draw(piece.kids, piece.from, piece.to),
+            text.slice(piece.to, piece.end)));
+        } else if (cls || piece.kids.length) {  // (italic isn't drawn here: its marks show it; the Read view slants it)
+          if (cls) drawn = true;
+          add(text.slice(piece.start, piece.from));
+          const inside = draw(piece.kids, piece.from, piece.to);
+          if (cls) add(V.h('span.' + cls, {}, inside)); else inside.forEach(add);
+          add(text.slice(piece.to, piece.end));
+        } else add(text.slice(piece.start, piece.end));
+        at = piece.end;
+      }
+      add(text.slice(at, to));
+      return out;
+    };
+    const kids = key[0] === '`' || !SHADED.test(text) ? [text] : draw(V.format.pieces(text, true), 0, text.length);
+    return { key, drawn, node: V.h('div', {}, kids) };
   }
 
   function focusBlock(index, where = 'end') {
@@ -218,46 +303,70 @@ V.editor = (() => {
   }
 
   /* Where the caret is, as a line and column of the note's text (the same however the note is drawn), or in the
-     title; null when it's elsewhere. */
+     title; null when it's elsewhere. With words picked, where they end too (endLine, endCol), so Undo picks them
+     again. */
   function caretSpot() {
     const active = document.activeElement;
     if (!el || !active || !el.contains(active)) return null;
-    if (active === parts.title) return { title: true, at: active.selectionStart };
+    if (active === parts.title) return { title: true, at: active.selectionStart, end: active.selectionEnd };
     const fields = [...parts.blocks.querySelectorAll('.block-input')];
     const index = fields.indexOf(active);
     if (index < 0) return null;
     let line = 0;
     for (let i = 0; i < index; i++) line += oneLine(blocks[i]) ? 1 : blocks[i].text.split('\n').length;
-    const before = active.value.slice(0, active.selectionStart).split('\n');
+    const at = (place) => {
+      const before = active.value.slice(0, place).split('\n');
+      return [line + before.length - 1, before[before.length - 1].length + prefix(blocks[index])];
+    };
     const single = oneLine(blocks[index]);
-    const text = single ? serialize().split('\n')[line] : active.value.split('\n')[before.length - 1];
-    return { line: line + before.length - 1, col: before[before.length - 1].length + prefix(blocks[index]), text };
+    // A line's words as they are now (for a heading or an item, with its mark).
+    const words = (lineAt) => (single ? serialize().split('\n')[line] : active.value.split('\n')[lineAt - line]);
+    const [startLine, col] = at(active.selectionStart);
+    const spot = { line: startLine, col, text: words(startLine) };
+    if (active.selectionEnd > active.selectionStart) {
+      [spot.endLine, spot.endCol] = at(active.selectionEnd);
+      spot.endText = spot.endLine === startLine ? spot.text : words(spot.endLine);
+    }
+    return spot;
   }
 
-  /* Puts the caret back at `spot`, its line moved by `map` (a line of the old words to its line now, -1 if gone: then
-     the end of the nearest line before it that stayed). */
+  /* Puts the caret back at `spot` (and picks the words again up to its end), its line moved by `map` (a line of the
+     old words to its line now, -1 if gone: then the end of the nearest line before it that stayed). */
   function placeCaret(spot, map) {
     if (!spot) return;
     if (spot.title) {
       parts.title.focus({ preventScroll: true });
       const at = Math.min(spot.at, parts.title.value.length);
-      parts.title.setSelectionRange(at, at);
+      parts.title.setSelectionRange(at, Math.max(at, Math.min(spot.end ?? at, parts.title.value.length)));
       return;
     }
-    let line = map ? map(spot.line) : spot.line;
-    let col = spot.col;
+    const start = spotIn(spot.line, spot.col, spot.text, map);
+    // (the end moves with its own line's words too, so the same words stay picked, never more)
+    const end = typeof spot.endLine === 'number' ? spotIn(spot.endLine, spot.endCol, spot.endText ?? null, map) : null;
+    focusBlock(start[0], start[1]);
+    if (end && end[0] === start[0] && end[1] > start[1]) {
+      const field = parts.blocks.querySelectorAll('.block-input')[start[0]];
+      if (field) field.setSelectionRange(start[1], Math.min(end[1], field.value.length));
+    }
+  }
+
+  /* A line and column of the note's text (the line moved by `map`) as [block, place in its box]. `text`: the line's
+     words when the spot was taken (words added or taken away before it since move it along). */
+  function spotIn(lineAt, colAt, text, map) {
+    let line = map ? map(lineAt) : lineAt;
+    let col = colAt;
     if (line < 0) {
-      let k = spot.line - 1;
+      let k = lineAt - 1;
       while (k >= 0 && map(k) < 0) k--;
       line = k >= 0 ? map(k) : 0;
       col = k >= 0 ? Infinity : 0;
-    } else if (typeof spot.text === 'string') {
+    } else if (typeof text === 'string') {
       // The line itself changed: words added or taken away before the caret move it along with its own words.
       const now = serialize().split('\n')[line];
-      if (typeof now === 'string' && now !== spot.text) {
+      if (typeof now === 'string' && now !== text) {
         let same = 0;
-        while (same < now.length && same < spot.text.length && now[same] === spot.text[same]) same++;
-        if (col > same) col += now.length - spot.text.length;
+        while (same < now.length && same < text.length && now[same] === text[same]) same++;
+        if (col > same) col += now.length - text.length;
       }
     }
     for (let i = 0; i < blocks.length; i++) {
@@ -265,13 +374,14 @@ V.editor = (() => {
       const lines = oneLine(block) ? [block.text] : block.text.split('\n');
       if (line < lines.length || i === blocks.length - 1) {
         line = Math.min(line, lines.length - 1);
-        if (oneLine(block)) return focusBlock(i, Math.max(0, Math.min(col - prefix(block), block.text.length)));
+        if (oneLine(block)) return [i, Math.max(0, Math.min(col - prefix(block), block.text.length))];
         let at = 0;
         for (let k = 0; k < line; k++) at += lines[k].length + 1;
-        return focusBlock(i, at + Math.min(col, lines[line].length));
+        return [i, at + Math.min(col, lines[line].length)];
       }
       line -= lines.length;
     }
+    return [0, 0];
   }
 
   function drawBlocks(focus) {
@@ -291,6 +401,7 @@ V.editor = (() => {
         : index === 0 && blocks.length === 1 ? 'Start writing...' : '',
       'aria-label': block.type === 'check' ? 'Checklist item' : block.type === 'heading' ? 'Heading' : 'Note text',
       oninput: (event) => {
+        lastInput = event.inputType || '';
         // A new line in a list item or heading (a keyboard that skipped the Enter key below) is tidied once the word
         // is done: changing the words mid-word would break the keyboard's word.
         if (oneLine(block) && !event.isComposing && area.value.includes('\n')) {
@@ -305,14 +416,17 @@ V.editor = (() => {
       onbeforeinput: (event) => beforeInput(event, index, area),
     });
     owner.set(area, block);
-    const under = block.type === 'text' ? V.h('div.blank-shade', { 'aria-hidden': 'true', hidden: true }) : null;
-    if (under) { shades.set(area, under); shade(area); }
+    // The box and the copy under it (see shade), together: the copy is placed over exactly the box.
+    const under = V.h('div.blank-shade', { 'aria-hidden': 'true', inert: true, hidden: true });
+    shades.set(area, { el: under, lines: [], words: '' });
+    shade(area);
+    const field = V.h('div.block-field', {}, under, area);
     requestAnimationFrame(() => grow(area));
     const chips = V.h('div.link-chips', { hidden: true });
     chipRows.set(area, chips);
     drawChips(area, block);
-    if (block.type === 'text') return V.h('div.block.text-block', {}, under, area, chips);
-    if (block.type === 'heading') return V.h(`div.block.heading-block.h${block.level}`, {}, area, chips);
+    if (block.type === 'text') return V.h('div.block.text-block', {}, field, chips);
+    if (block.type === 'heading') return V.h(`div.block.heading-block.h${block.level}`, {}, field, chips);
     const row = V.h('div.block.check-row' + (block.done ? '.done' : ''));
     const tick = V.h('button.tick', {
       type: 'button', 'aria-label': block.done ? 'Not done' : 'Done', 'aria-pressed': String(block.done),
@@ -327,7 +441,7 @@ V.editor = (() => {
         afterChange(true);
       },
     }, V.icon('check'));
-    row.append(tick, area, V.h('button.remove-item', { type: 'button', 'aria-label': 'Remove item', tabindex: '-1',
+    row.append(tick, field, V.h('button.remove-item', { type: 'button', 'aria-label': 'Remove item', tabindex: '-1',
       onclick: () => {
         // The caret stays with the words it was in (the mousedown kept it); none appears if there wasn't one, so
         // no keyboard pops up.
@@ -347,16 +461,19 @@ V.editor = (() => {
   }
 
   /* After the words in a box changed (typed, pasted, or by a button): its link chips, the count, Undo's next step,
-     and the "# " / "[] " shortcuts. `event` is the input event (null for a change made here). */
+     and the "# " / "[] " shortcuts. `event` is the input event (null for a change made here). A paste or a drop is an
+     Undo step of its own (what was typed before it became one in beforeInput); its lines tidied into headings and
+     items are the same words, so they come and go with it. */
   function typed(block, area, event) {
-    afterChange(!event);
-    if (event && event.isComposing) return;  // a word still being written: the rest waits for it
     const pasted = !!event && /^insertFrom/.test(event.inputType || '');
+    // A paste's lines become headings and items before its Undo step is taken: the step is the words as they stay
+    // (the raw lines, "* [ ] milk", would never match what's shown, and Undo would get stuck on them).
+    const tidied = pasted && !event.isComposing && block.type === 'text' && tidy(blocks.indexOf(block));
+    afterChange(!event || pasted);
+    if (tidied || (event && event.isComposing)) return;  // (a word still being written: the rest waits for it)
     chipsSoon(area, block, !event || pasted);  // a pasted link shows its chip at once
-    if (!event || block.type !== 'text') return;
-    const index = blocks.indexOf(block);
-    if (pasted) tidy(index);
-    else if (event.inputType === 'insertText' && / $/.test(event.data || '')) shortcut(index, area);
+    if (!event || pasted || block.type !== 'text') return;
+    if (event.inputType === 'insertText' && / $/.test(event.data || '')) shortcut(blocks.indexOf(block), area);
   }
 
   /* `now`: the change was made here (a button, Enter), so it's an Undo step of its own at once; typing becomes one
@@ -410,6 +527,14 @@ V.editor = (() => {
     if (kind === 'historyUndo' || kind === 'historyRedo') {  // the browser's own Undo (a menu, a keyboard's key)
       event.preventDefault();
       if (kind === 'historyUndo') undo(); else redo();
+      return;
+    }
+    typingStarts();
+    // What was typed before a paste or a drop is an Undo step of its own (a drag within the words first takes them
+    // out, deleteByDrag: the step before that, and the taking out and the drop are one step).
+    if (kind === 'deleteByDrag') checkpoint();
+    if (/^insertFrom(Paste|Drop)/.test(kind) && !(kind === 'insertFromDrop' && lastInput === 'deleteByDrag')) {
+      checkpoint();
       return;
     }
     const block = blocks[index];
@@ -524,18 +649,22 @@ V.editor = (() => {
     }
   }
 
-  /* Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) step through Undo; Ctrl+B, Ctrl+I and Ctrl+K make bold, italic and a link. */
+  /* Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) step through Undo anywhere in the note (the words, the title, its buttons); in
+     the words, Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+Shift+X and Ctrl+Shift+H make bold, italic, underline, strikethrough and
+     highlight (or take them off again), and Ctrl+K a link. */
+  const MARK_KEYS = { b: ['bold', false], i: ['italic', false], u: ['underline', false], x: ['strike', true], h: ['highlight', true] };
   function shortcutKeys(event) {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing) return;
     const target = event.target;
-    if (!target || !target.matches || !target.matches('.block-input, .note-title')) return;
+    if (!target || !target.matches || !el || !el.contains(target)) return;
+    if (target.matches('input:not(.note-title), select, textarea:not(.block-input), [contenteditable]')) return;  // a field of its own
     const key = (event.key || '').toLowerCase();
-    const inWords = target.matches('.block-input');
-    if (key === 'z' && !event.shiftKey) { event.preventDefault(); undo(); }
-    else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); redo(); }
-    else if (inWords && key === 'b') { event.preventDefault(); wrap('**'); }
-    else if (inWords && key === 'i') { event.preventDefault(); wrap('_'); }
-    else if (inWords && key === 'k') { event.preventDefault(); addLink(); }
+    if (key === 'z' && !event.shiftKey) { event.preventDefault(); undo(); return; }
+    if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); redo(); return; }
+    if (!target.matches('.block-input')) return;
+    const mark = MARK_KEYS[key];
+    if (mark && mark[1] === event.shiftKey) { event.preventDefault(); wrap(V.format.MARKS[mark[0]]); }
+    else if (key === 'k' && !event.shiftKey) { event.preventDefault(); addLink(); }
   }
 
   /* Next-door text blocks become one; returns where the start of block `watch` ended up, as [block, caret]. */
@@ -562,6 +691,8 @@ V.editor = (() => {
     const head = /^(#{1,3}) $/.exec(lead);
     const box = /^(?:[-*] )?\[([ xX]?)\] $/.exec(lead);
     if (!head && !box) return false;
+    // In a ``` code block it's code ("# a comment"): it stays as typed.
+    if (area.value.slice(0, start).split('\n').filter((line) => FENCE.test(line)).length % 2) return false;
     const found = area.value.indexOf('\n', caret);
     const end = found < 0 ? area.value.length : found;
     const words = area.value.slice(caret, end);
@@ -712,21 +843,47 @@ V.editor = (() => {
     afterChange(true);
   }
 
-  /* The chosen words wrapped in `mark` (** for bold, _ for italic), or unwrapped when they already are. */
+  /* The B, I, U, S and highlighter buttons (and their keys): `mark` (** bold, _ italic, ++ underline, ~~ strikethrough,
+     == highlight) round the chosen words or the word the caret is in, or taken off again (js/format.js: toggleMark),
+     as one Undo step, in the same box (so the phone's keyboard stays up). A word the keyboard is still writing is
+     finished first. */
   function wrap(mark) {
+    if (reading) return;
+    const writing = wordInProgress();  // (the button is then for the word being written, caret at its end or not)
+    finishWord();
     const at = here();
     if (!at) return;
-    finishWord();
-    checkpoint();
     const field = at.field;
-    const a = field.selectionStart;
-    const b = field.selectionEnd;
-    const v = field.value;
-    const n = mark.length;
-    if (v.slice(a - n, a) === mark && v.slice(b, b + n) === mark) replaceValue(field, v.slice(0, a - n) + v.slice(a, b) + v.slice(b + n), a - n, b - n);
-    else replaceValue(field, v.slice(0, a) + mark + v.slice(a, b) + mark + v.slice(b), a + n, b + n);
-    changed(at.block, field);
+    const next = V.format.toggleMark(field.value, field.selectionStart, field.selectionEnd, mark, { word: writing });
+    if (!next) return;
+    if (document.activeElement !== field) field.focus({ preventScroll: true });
+    if (next.value === field.value) field.setSelectionRange(next.start, next.end);  // only stepped out past the marks
+    else {
+      checkpoint();
+      replaceValue(field, next.value, next.start, next.end);
+      changed(at.block, field);
+    }
+    pressedSoon();
   }
+
+  /* Each mark's button shows pressed while the caret or the chosen words are in that mark (looked at once a frame,
+     only the caret's own lines). */
+  let pressedFrame = 0;
+  const pressedSoon = () => { if (!pressedFrame && parts.marks) pressedFrame = requestAnimationFrame(drawPressed); };
+
+  function drawPressed() {
+    pressedFrame = 0;
+    if (!parts.marks || !el || !el.isConnected) return;
+    const at = !reading && canEdit() ? here() : null;
+    const on = at ? V.format.marksAt(at.field.value, at.field.selectionStart, at.field.selectionEnd) : new Set();
+    for (const [kind, button] of Object.entries(parts.marks)) {
+      const now = on.has(kind);
+      if (button.classList.contains('on') === now) continue;
+      button.classList.toggle('on', now);
+      button.setAttribute('aria-pressed', String(now));
+    }
+  }
+  document.addEventListener('selectionchange', () => { if (el && el.contains(document.activeElement)) pressedSoon(); });
 
   /* The link button: the chosen words become a link ("[words](address)"), or a link goes in where the caret is. */
   async function addLink() {
@@ -1241,6 +1398,7 @@ V.editor = (() => {
     if (!undoLog.last) { undoLog.last = now; drawUndo(); return; }
     if (now.title === undoLog.last.title && now.words === undoLog.last.words) {
       if (now.spot) undoLog.last.spot = now.spot;
+      drawUndo();  // (a pause that changed nothing: no step waits any more, and Redo still has its steps)
       return;
     }
     undoLog.past.push(undoLog.last);
@@ -1253,6 +1411,12 @@ V.editor = (() => {
     drawUndo();
   }
   const checkpointSoon = V.debounce(checkpoint, 900);
+
+  /* The first change of a run of typing (no step waiting yet): where the caret was, and what was picked, go with the
+     step before it, so Undo puts the caret back there (and picks the words typed over again). */
+  function typingStarts() {
+    if (!checkpointSoon.pending() && undoLog.last) checkpoint();
+  }
 
   const undo = () => step('past', 'future');
   const redo = () => step('future', 'past');
@@ -1272,6 +1436,7 @@ V.editor = (() => {
     const writing = keepsCaret();  // with no caret (the phone's keyboard down), none appears
     const spot = state.spot || caretSpot();
     fill(state.words);
+    state.words = serialize();  // (words the boxes write another way, "* [ ] milk", are kept as they show)
     if (!reading && writing) placeCaret(spot);
     saveSoon();
     countSoon();
@@ -1666,6 +1831,12 @@ V.editor = (() => {
     quietClipboard(false);
     resetHistory();  // (nothing of the words is kept for Undo)
     readMap = null;
+    // The boxes, the copies of their words under them (see shade) and the Read view let go of the words at once.
+    lastField = null;
+    composingField = null;
+    shading.clear();
+    if (parts.blocks) V.clear(parts.blocks);
+    if (parts.read) { V.clear(parts.read); parts.read = null; }
     if (note) drawBody();
   }
 
@@ -1704,21 +1875,33 @@ V.editor = (() => {
     drawCount();
     drawUndo();
     refreshTools();
+    pressedSoon();
   }
 
   function toolsBar() {
-    const tool = (name, label, icon, onClick, keep = true) => V.h('button.tool-btn' + (keep ? '.keep-caret' : ''), {
-      type: 'button', title: label, 'aria-label': label, dataset: { tool: name },
+    const tool = (name, label, icon, onClick, keep = true, keys = '') => V.h('button.tool-btn' + (keep ? '.keep-caret' : ''), {
+      type: 'button', title: keys ? `${label} (${keys})` : label, 'aria-label': label, dataset: { tool: name },
+      'aria-keyshortcuts': keys ? keys.replace(/Ctrl/g, 'Control') : null,
       onclick: (event) => { if (event.currentTarget.getAttribute('aria-disabled') !== 'true') onClick(event); },
     }, icon, V.h('span.tool-label', { text: label }));
     const F = V.format;
-    parts.undo = tool('undo', 'Undo', F.icon('undo'), undo);
-    parts.redo = tool('redo', 'Redo', F.icon('redo'), redo);
+    // The formatting comes first: the five marks (pressed while the caret is in one), then the lines' own kinds.
+    const mark = (kind, label, keys) => {
+      const button = tool(kind, label, F.icon(kind), () => wrap(F.MARKS[kind]), true, keys);
+      button.setAttribute('aria-pressed', 'false');
+      parts.marks[kind] = button;
+      return button;
+    };
+    parts.marks = {};
+    parts.undo = tool('undo', 'Undo', F.icon('undo'), undo, true, 'Ctrl+Z');
+    parts.redo = tool('redo', 'Redo', F.icon('redo'), redo, true, 'Ctrl+Y');
     parts.strip = V.h('div.tool-strip', { role: 'toolbar', 'aria-label': 'Writing tools' },
-      parts.undo, parts.redo, V.h('span.tool-sep'),
-      tool('checklist', 'Checklist', V.icon('checklist'), addChecklist),
-      tool('list', 'List', F.icon('list'), toggleList),
+      mark('bold', 'Bold', 'Ctrl+B'), mark('italic', 'Italic', 'Ctrl+I'), mark('underline', 'Underline', 'Ctrl+U'),
+      mark('strike', 'Strikethrough', 'Ctrl+Shift+X'), mark('highlight', 'Highlight', 'Ctrl+Shift+H'),
       tool('heading', 'Heading', F.icon('heading'), addHeading),
+      tool('list', 'List', F.icon('list'), toggleList),
+      tool('checklist', 'Checklist', V.icon('checklist'), addChecklist),
+      parts.undo, parts.redo, V.h('span.tool-sep'),
       tool('picture', 'Picture', V.icon('camera'), () => parts.file.click(), false),
       tool('link', 'Link', V.icon('link'), addLink),
       tool('file', 'File', F.icon('clip'), () => parts.anyFile.click(), false),
@@ -1758,6 +1941,12 @@ V.editor = (() => {
         type: 'text', placeholder: 'Title', value: note.title || '', 'aria-label': 'Title', maxlength: '200',
         oninput: (event) => { note.title = parts.title.value; saveSoon(); checkpointSoon(); drawUndo(); tell('title', parts.title, event); },
         onkeydown: (event) => { if (event.key === 'Enter') { event.preventDefault(); focusBlock(0, 'end'); } },
+        // The browser's own Undo here (a menu, a keyboard's key) is the note's: the title and the words are one history.
+        onbeforeinput: (event) => {
+          if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') { typingStarts(); return; }
+          event.preventDefault();
+          if (event.inputType === 'historyUndo') undo(); else redo();
+        },
       }),
       body: V.h('div.editor-body'),
       blocks: V.h('div.blocks'),
@@ -1816,6 +2005,7 @@ V.editor = (() => {
       onfocusin: (event) => {
         if (event.target.matches && event.target.matches('.block-input')) lastField = event.target;
         else if (event.target === parts.title) lastField = null;
+        pressedSoon();
       },
       oncompositionstart: (event) => { composingField = event.target; },
       oncompositionend: (event) => { composingField = null; afterWord(event.target); },

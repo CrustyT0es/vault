@@ -3,7 +3,9 @@
    ends after them. Words not final yet only show in a small pill by the tools, never in the note. Said punctuation
    ("comma", "period" or "full stop", "question mark", "exclamation mark" or "point", "colon") becomes the mark, "new
    line" and "new paragraph" press Enter once or twice (so a checklist or a "- " list carries on as it does when
-   typing), a sentence's first word gets its capital, and the spaces come out right.
+   typing), a sentence's first word gets its capital, and the spaces come out right. Right after B, I, U, S or the
+   highlighter put an empty pair in at the caret, the words go inside it (as typing would), spaced and capitalised by
+   the words before the opening mark.
 
    Hearing: on the phone and the Chromebook, the browser's speech recognition with the note-taker's own handling of it
    (js/notetaker.js webHearing: Chrome on Android hears one phrase at a time, and a phrase handed over again is kept
@@ -69,11 +71,13 @@ V.dictation = (() => {
     return word;
   }
 
-  /* One run of words and marks as it goes in after `before`: { text, trim }, `trim` being the spaces just before the
-     caret that go (a mark never has a space before it). */
+  /* One run of words and marks as it goes in after `before`: { text, trim, first }, `trim` being the spaces just before
+     the caret that go (a mark never has a space before it), `first` where the first word starts in `text` (after its
+     space; all of `text` when there's no word). */
   function compose(before, run) {
     let text = '';
     let trim = 0;
+    let first = -1;
     for (const t of run) {
       if (t.mark) {
         if (text) text = text.replace(/[ \t]+$/, '');
@@ -83,9 +87,24 @@ V.dictation = (() => {
       }
       const so = before.slice(0, before.length - trim) + text;
       const spaced = !!so && !/[\s(\[{"“‘]$/.test(so);
+      if (first < 0) first = text.length + (spaced ? 1 : 0);
       text += (spaced ? ' ' : '') + fit(t.word, startsSentence(so));
     }
-    return { text, trim };
+    return { text, trim, first: first < 0 ? text.length : first };
+  }
+
+  /* One run going in at `caret` in a box's `value`. Right after B, I, U, S or the highlighter put an empty pair in with
+     the caret between ("**|**", "word ==|=="), the words go inside the marks but are worked out from the words before
+     the opening mark: a space they need goes before it (marks with a space just inside them aren't marks), the capital
+     comes from the sentence there, and punctuation said before any word stays out there with the words it follows.
+     The caret ends before the closing mark, so the next phrase carries on inside. */
+  function composeAt(value, caret, run) {
+    const before = value.slice(0, caret);
+    const open = V.format.openPairAt(value, caret);
+    if (!open) return compose(before, run);
+    const piece = compose(before.slice(0, before.length - open.length), run);
+    const at = piece.first;
+    return { text: piece.text.slice(0, at) + open + piece.text.slice(at), trim: piece.trim + open.length };
   }
 
   /* Enter at the end of a note's words, as the editor does it: a checklist or a "- " / "1. " list carries on (an
@@ -188,8 +207,10 @@ V.dictation = (() => {
     for (; i < steps.length; i++) {
       const field = target();
       if (!field) break;
+      const caret = field.selectionStart;
       if (steps[i].enter) pressEnter(field);
-      else typeInto(field, compose(field.value.slice(0, field.selectionStart), steps[i].run));
+      else if (caret === field.selectionEnd) typeInto(field, composeAt(field.value, caret, steps[i].run));
+      else typeInto(field, compose(field.value.slice(0, caret), steps[i].run));  // (picked words: replaced)
     }
     if (i >= steps.length) return;
     // No box has the caret: at the end of the note (one Undo step), without bringing a phone's keyboard up.
@@ -369,5 +390,6 @@ V.dictation = (() => {
   }, true);
   window.addEventListener('pagehide', () => { if (session) stop({ done: true }); });
 
-  return { start, stop, toggle, engine, plan, append, compose, listening: () => !!session && session.state !== 'stopping' };
+  return { start, stop, toggle, engine, plan, append, compose, composeAt,
+    listening: () => !!session && session.state !== 'stopping' };
 })();

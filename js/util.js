@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.8.3';
+V.VERSION = '1.9.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.
@@ -352,9 +352,123 @@ V.toast = function toast(text, { kind = '', action, onAction, ms = 3200 } = {}) 
     action ? V.h('button.toast-action', { type: 'button', text: action, onclick: () => { onAction(); gone(); } }) : null);
   const gone = () => { item.classList.add('leaving'); setTimeout(() => item.remove(), 200); };
   box.append(item);
-  while (box.children.length > 3) box.firstChild.remove();
+  const all = box.querySelectorAll(':scope > .toast');  // (a card from V.notice above them stays)
+  for (let i = 0; i < all.length - 3; i++) all[i].remove();
   setTimeout(gone, action ? Math.max(ms, 5000) : ms);
 };
+
+/* A small card that comes up for a moment over the corner, for something that just happened (js/arrive.js: what was
+   sent here; js/clips.js: a clip it couldn't copy by itself): a picture, a title, the name or the words, a line or two
+   saying what Vault did, up to two buttons and an x. One at a time: showing another takes its place. Not a dialog: it
+   never takes the focus or stops anything behind it, and it stays while the pointer or the keyboard is on it (else it
+   goes after `ms`). Returns { el, update(changes), close(), open() }; update() changes only what differs (and waits
+   `ms` again): the same buttons stay, so one that has the keyboard keeps it, and #toasts (a polite live region) only
+   reads out the line that changed. The card itself is a labelled group, not a second live region. */
+V.notice = (() => {
+  let current = null;
+  return function notice(options) {
+    if (current) current.close(true);
+    const state = { ms: 8000, ...options };
+    const el = V.h('div.notice', { role: 'group' });
+    const parts = {
+      picture: V.h('div.notice-picture'),
+      title: V.h('strong.notice-title'),
+      text: V.h('p.notice-text'),
+      more: V.h('p.notice-more'),
+      lines: V.h('div.notice-lines'),
+      actions: V.h('div.notice-actions'),
+    };
+    const drawn = { picture: undefined, icon: '', lines: '', actions: '' };
+    let timer = null;
+    let held = false;
+    let closed = false;
+    const wait = () => {
+      clearTimeout(timer);
+      if (!held && !closed) timer = setTimeout(() => close(), state.ms);
+    };
+    function close(quick) {
+      if (closed) return;
+      closed = true;
+      clearTimeout(timer);
+      if (current === handle) current = null;
+      if (quick) el.remove();
+      else { el.classList.add('leaving'); setTimeout(() => el.remove(), 200); }
+      if (state.onClose) state.onClose();
+    }
+    const setText = (node, text) => {
+      node.hidden = !text;
+      if (node.textContent !== (text || '')) node.textContent = text || '';
+    };
+    function draw() {
+      if (state.picture !== drawn.picture || (!state.picture && (state.icon || 'file') !== drawn.icon)) {
+        drawn.picture = state.picture;
+        drawn.icon = state.icon || 'file';
+        parts.picture.classList.toggle('notice-icon', !state.picture);
+        V.clear(parts.picture, state.picture || V.icon(drawn.icon));
+      }
+      setText(parts.title, state.title || '');
+      el.setAttribute('aria-label', state.title || 'Vault');
+      setText(parts.text, state.text || '');
+      setText(parts.more, state.more > 0 ? `and ${state.more} more` : '');
+      const lines = (state.lines || []).filter(Boolean);
+      const lineKey = JSON.stringify(lines.map((line) => [line.text, !!line.ok]));
+      if (lineKey !== drawn.lines) {
+        drawn.lines = lineKey;
+        V.clear(parts.lines, lines.map((line) => V.h('p.notice-line' + (line.ok ? '.ok' : ''), {},
+          line.ok ? V.icon('check') : null, V.h('span', { text: line.text }))));
+      }
+      // The buttons are made again only when they change (each press runs what `actions` says now).
+      const actions = (state.actions || []).filter(Boolean).slice(0, 2);
+      const actionKey = JSON.stringify(actions.map((action) => [action.label, action.kind || '', action.icon || '']));
+      if (actionKey !== drawn.actions) {
+        const had = [...parts.actions.children].indexOf(document.activeElement);
+        drawn.actions = actionKey;
+        V.clear(parts.actions, actions.map((action, i) => V.button(action.label, {
+          kind: action.kind || '', icon: action.icon,
+          onClick: async () => {
+            const now = (state.actions || []).filter(Boolean)[i];
+            if (!now) return;
+            let keep = false;
+            try { keep = await now.onClick(); } catch (error) { V.problem(error); }
+            if (keep !== true) close();
+          },
+        })));
+        if (had >= 0) (parts.actions.children[Math.min(had, parts.actions.children.length - 1)] || closer).focus();
+      }
+      parts.actions.hidden = !actions.length;
+    }
+    const closer = V.iconButton('x', 'Close', () => close(), 'quiet');
+    el.append(parts.picture,
+      V.h('div.notice-main', {}, parts.title, parts.text, parts.more, parts.lines, parts.actions),
+      closer);
+    el.addEventListener('mouseenter', () => { held = true; clearTimeout(timer); });
+    el.addEventListener('mouseleave', () => { held = el.contains(document.activeElement); wait(); });
+    el.addEventListener('focusin', () => { held = true; clearTimeout(timer); });
+    el.addEventListener('focusout', (event) => {
+      if (el.contains(event.relatedTarget)) return;
+      held = el.matches(':hover');
+      wait();
+    });
+    const handle = {
+      el,
+      update(changes) {
+        if (closed) return;
+        Object.assign(state, changes);
+        draw();
+        // (Still held only while the pointer or the keyboard is on it.)
+        held = el.matches(':hover') || el.contains(document.activeElement);
+        wait();
+      },
+      close: (quick) => close(quick),  // (quick: gone at once, as when another card takes its place)
+      open: () => !closed,
+    };
+    current = handle;
+    draw();
+    document.getElementById('toasts').prepend(el);
+    wait();
+    return handle;
+  };
+})();
 
 V.problem = (error) => {
   const text = (error && (error.message || error.error_description || error.msg)) || String(error);
@@ -440,17 +554,57 @@ V.ago = (iso) => {
 
 V.isLink = (text) => /^https?:\/\/\S+$/i.test(String(text || '').trim());
 
-V.copy = async (text) => {
-  if (V.desktop && V.pc) return V.pc.setClipboard(text);
+/* When something was sent (a transfers row), for "the newest wins" against clips, whose times are the cloud's own:
+   its created_at is the sender's clock (when the sending began), which may run ahead, so never later than the cloud's
+   updated_at on it (when it went up, or changed since). */
+V.sentAt = (t) => {
+  const made = Date.parse((t && t.created_at) || '');
+  const up = Date.parse((t && t.updated_at) || '');
+  return Number.isFinite(made) && Number.isFinite(up) && up < made ? t.updated_at : (t && t.created_at) || '';
+};
+
+/* Programs and scripts: never saved into a folder (js/arrive.js) or put on the clipboard (js/send.js) by themselves.
+   vault/local.py's RISKY_TYPES (tests/test_vault_arrive.py keeps the two the same), and what installs or runs on a
+   Chromebook (Android and Linux apps, Chrome extensions). By the name as it's saved: Windows and ChromeOS drop dots
+   and spaces at its end, so "run.bat." is a .bat. */
+V.RISKY_TYPES = ['exe', 'com', 'scr', 'pif', 'cpl', 'msi', 'msp', 'mst', 'msix', 'msixbundle', 'appx', 'appxbundle',
+  'appinstaller', 'application', 'appref-ms', 'bat', 'cmd', 'ps1', 'psm1', 'psd1', 'ps1xml', 'psc1', 'vbs', 'vbe', 'js',
+  'jse', 'wsf', 'wsh', 'ws', 'hta', 'lnk', 'url', 'scf', 'inf', 'reg', 'dll', 'sys', 'ocx', 'jar', 'msc', 'gadget',
+  'settingcontent-ms', 'library-ms', 'search-ms', 'iso', 'img', 'vhd', 'vhdx', 'chm', 'py', 'pyw', 'sh', 'xll', 'xlam',
+  'ppam', 'docm', 'xlsm', 'pptm', 'dotm', 'xltm', 'potm', 'ppsm', 'sldm'];
+V.CHROMEBOOK_RISKY = ['apk', 'crx', 'deb', 'rpm', 'appimage'];
+V.risky = (name) => {
+  const clean = String(name || '').split(/[\\/]/).pop().replace(/[. ]+$/, '');
+  const dot = clean.lastIndexOf('.');
+  const type = dot > 0 ? clean.slice(dot + 1).toLowerCase() : '';
+  return !!type && (V.RISKY_TYPES.includes(type) || V.CHROMEBOOK_RISKY.includes(type));
+};
+
+/* Copied with a button in Vault: the newest thing on this clipboard, so nothing that came before it (a clip, something
+   sent here, a picture still being made for it) goes over it (js/clips.js). `cloud`: a clip or something sent here,
+   copied again, which "Keep this clipboard in step" then knows isn't new (so it isn't sent back up); anything else
+   Vault copies goes to the other devices (with "in step" on: at once). What Vault knows is on the clipboard changes
+   only once the words are there: a write that failed leaves it as it was. */
+V.copy = async (text, { cloud = false } = {}) => {
+  const clips = V.clips && V.clips.copying ? V.clips : null;
+  if (clips) clips.copying();  // (first: what's waiting to be copied sees it)
+  if (V.desktop && V.pc) {
+    const answer = await V.pc.setClipboard(text);
+    if (clips) clips.copied(text, { cloud });
+    return answer;
+  }
+  let done = true;
   try {
     await navigator.clipboard.writeText(text);
   } catch (error) {
-    const area = V.h('textarea', { style: { position: 'fixed', opacity: '0' } }, text);
+    // (Marked: js/clips.js doesn't take this copy for one made in a note.)
+    const area = V.h('textarea', { style: { position: 'fixed', opacity: '0' }, dataset: { vaultCopy: '' } }, text);
     document.body.append(area);
     area.select();
-    document.execCommand('copy');
+    try { done = document.execCommand('copy'); } catch (failed) { done = false; }
     area.remove();
   }
+  if (done && clips) clips.copied(text, { cloud });
 };
 
 /* The side-by-side layout (styles.css's 900 px line). `V.onWide` hears the window crossing it either way. */

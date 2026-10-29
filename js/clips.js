@@ -3,8 +3,11 @@
    anything that looks like a password or a key) and puts what the others share on it; both can be switched off in
    Settings. A phone or a Chromebook (any browser: 'web' in util.js's V.device) can only touch its clipboard while
    Vault is in front, so with "Keep this clipboard in step" on, that's when it happens: something new copied here goes
-   to the others, else the newest from elsewhere is put on this clipboard, ready to paste. Without it there's a
-   button, and a toast when another device shares something. Its clips say where they came from. */
+   to the others, else the newest from elsewhere is put on this clipboard, ready to paste (and has the focus: one that
+   can't go on yet is tried again at the next click or key in Vault, then a card offers Copy). When both happened since
+   Vault last looked (a clipboard has no times, so which is newer can't be told), neither goes over the other: a card
+   offers Copy, and Send for what's here. Without it there's a button, and a toast when another device shares
+   something. Its clips say where they came from. */
 'use strict';
 
 V.clips = (() => {
@@ -45,6 +48,12 @@ V.clips = (() => {
      clipboard is kept, never the words) */
   const AUTO = 'vault-clip-auto';
   const SEEN = 'vault-clip-seen';
+  // The cloud's time on what Vault last put on this clipboard (a clip, or something sent here: js/arrive.js, or on the
+  // PC js/send.js): the newest wins, so nothing older is put over it.
+  const WROTE = 'vault-clip-wrote';
+  // The cloud's time on the newest clip Vault knew of when it last saw what's on this clipboard (a look on coming
+  // back, or a copy made in Vault): a clip from elsewhere newer than that came since, as may what was copied here.
+  const LOOKED = 'vault-clip-looked';
   const stored = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
   const store = (key, value) => { try { localStorage.setItem(key, value); } catch (error) { /* a private window */ } };
   const canStep = () => !V.desktop && !!(navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText);
@@ -57,39 +66,287 @@ V.clips = (() => {
     return (hash >>> 0).toString(36) + '.' + text.length;
   }
 
-  /* The newest clip from elsewhere onto this clipboard, unless it's there already. */
-  async function take(clip) {
-    if (!clip || clip.from_device === V.device || print(clip.text.trim()) === stored(SEEN)) return false;
+  /* Older than (or as old as) what Vault last put on this clipboard, by the cloud's own clock. `same: false`: only
+     what's older than it (files sent together share one time: js/send.js copies a later batch of them too). */
+  function older(at, { same = true } = {}) {
+    const was = Date.parse(stored(WROTE) || '');
+    const now = Date.parse(at || '');
+    return Number.isFinite(was) && Number.isFinite(now) && (same ? now <= was : now < was);
+  }
+
+  /* Vault itself just put `text` on the clipboard (nothing for a picture; null: the fingerprint stays as it was): its
+     fingerprint, so coming back to Vault doesn't send it up as if it was copied here, and the cloud's time on it
+     (`at`), so nothing older goes over it. */
+  function wrote(text, at) {
+    if (typeof text === 'string') store(SEEN, text.trim() ? print(text.trim()) : '');
+    if (at && Number.isFinite(Date.parse(at)) && !older(at)) store(WROTE, String(at));
+    if (unwritten && older(unwritten.clip.created_at)) forget(unwritten);  // something newer went on instead
+  }
+
+  const newest = (times) => times.filter((at) => Number.isFinite(Date.parse(at || '')))
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+
+  // The newest time on a clip or on something sent here that Vault knows of (util.js's V.sentAt: the sender's clock
+  // never makes it later than the cloud's own time on it).
+  function newestKnown() {
+    return newest([...V.data.clips.map((c) => c.created_at),
+      ...[...V.data.transfers.values()].filter((t) => t.to_device === V.device).map(V.sentAt)]);
+  }
+
+  /* Vault has just seen what's on this clipboard: the clips it knows of now came before what's copied here next. */
+  function lookedNow() {
+    store(LOOKED, newest(V.data.clips.map((c) => c.created_at)) || new Date(0).toISOString());
+  }
+
+  // A clip that came since Vault last saw this clipboard (never seen it, as after an update: it may have).
+  function cameSince(clip) {
+    const was = Date.parse(stored(LOOKED) || '');
+    return !Number.isFinite(was) || Date.parse(clip.created_at || '') > was;
+  }
+
+  /* One write at a time (a clip coming in while something sent here is being copied, and the look at the clipboard on
+     coming back first): each one checks, just before it writes, that nothing newer went on meanwhile. */
+  let writing = Promise.resolve();
+  function chain(job) {
+    const next = writing.then(job, job);
+    writing = next.catch(() => {});
+    return next;
+  }
+
+  /* -- a clip "in step" that couldn't go on this clipboard yet. Chrome lets a page write the clipboard only while it's
+     in front and has the focus: not while the address bar, another window or a dialog has it (and then the write
+     fails). So the newest clip from elsewhere waits, and is tried again the next time Vault gets the focus or is
+     clicked or typed in (a click or a key is also the OK some browsers want); if it still can't be written, a card
+     offers Copy, which a tap always may. Never over something newer: what was copied here meanwhile goes to the
+     others instead (step() reads the clipboard first; when it may be the older of the two, a card offers both:
+     clash()), and nothing older than what's on it goes on (older()). */
+  let unwritten = null;  // { clip, offered (the card offering Copy came up), notice (that card, while it shows) }
+
+  function forget(entry) {
+    if (unwritten === entry) unwritten = null;
+    if (entry.notice) entry.notice.close();
+  }
+
+  /* The newest clip from elsewhere onto this clipboard, unless it's there already (or something newer is). */
+  function take(clip) {
+    if (!clip || clip.from_device === V.device || print(clip.text.trim()) === stored(SEEN)) return Promise.resolve(false);
+    return chain(() => takeNow(clip));
+  }
+
+  async function takeNow(clip) {
+    if (unwritten && unwritten.clip.id !== clip.id) forget(unwritten);  // a newer one came: only it is wanted
+    if (older(clip.created_at) || print(clip.text.trim()) === stored(SEEN)) {  // a picture sent here after it, say
+      if (unwritten) forget(unwritten);
+      return false;
+    }
+    const waited = !!unwritten;
+    if (!inFront()) {  // (Chrome wouldn't): the next time Vault has the focus
+      if (!unwritten) unwritten = { clip, offered: false, notice: null };
+      return false;
+    }
     try {
       await navigator.clipboard.writeText(clip.text);
     } catch (error) {
-      return false;  // not in front after all: the next time it is
+      if (!unwritten) unwritten = { clip, offered: false, notice: null };
+      if (waited) offerCopy(unwritten);  // tried again and still no: one tap does it
+      return false;
     }
-    store(SEEN, print(clip.text.trim()));
+    if (unwritten) forget(unwritten);
+    wrote(clip.text, clip.created_at);
     V.toast(`Copied from ${named(clip.from_device)}: ${clip.text.trim().slice(0, 40)}`);
     return true;
   }
 
+  /* The card for a clip Vault couldn't copy by itself: Copy (a tap, which Chrome lets write) puts it there. Once. */
+  function offerCopy(entry) {
+    if (entry.offered || !inFront()) return;
+    entry.offered = true;
+    const clip = entry.clip;
+    entry.notice = V.notice({
+      title: `From ${named(clip.from_device)}`, text: clip.text.trim().slice(0, 200), icon: 'copy', ms: 15000,
+      lines: [{ text: 'Vault couldn\'t copy it by itself' }],
+      actions: [{ label: 'Copy', kind: 'primary', icon: 'copy', onClick: async () => {
+        if (unwritten === entry) unwritten = null;
+        await V.copy(clip.text, { cloud: true });
+        V.toast('Copied');
+      } }],
+      onClose: () => { entry.notice = null; },
+    });
+  }
+
+  /* Something was copied here (in another app) and on another device too, both since Vault last saw this clipboard: a
+     clipboard has no times, so which is newer can't be told. Neither goes over the other by itself (what's here isn't
+     sent to the others either, where it would go over that device's copy): a card offers Copy for the clip, and Send
+     for what's here. Neither it nor anything else Vault knows of now is put here by itself after that. */
+  function clash(clip, here) {
+    if (unwritten) forget(unwritten);
+    wrote(null, newestKnown());  // (it, and whatever else came: something sent here is offered on its own card)
+    V.notice({
+      title: `From ${named(clip.from_device)}`, text: clip.text.trim().slice(0, 200), icon: 'copy', ms: 15000,
+      lines: [{ text: 'Not copied: you copied something here too' }],
+      actions: [
+        { label: 'Copy', kind: 'primary', icon: 'copy', onClick: async () => {
+          await V.copy(clip.text, { cloud: true });
+          V.toast('Copied');
+        } },
+        mayShare(here) ? { label: 'Send mine', icon: 'upload', onClick: () => share(here) } : null,
+      ],
+    });
+  }
+
+  /* A clip from another device newer than `at` that "in step" puts on this clipboard (now, or the next time Vault is
+     in front): that's what will be there. */
+  const comingAfter = (at) => stepping() && V.data.clips.some((c) => c.from_device !== V.device
+    && Date.parse(c.created_at) > Date.parse(at || ''));
+
+  /* Something sent to this device (js/arrive.js) onto its clipboard: words, or a picture as PNG (the only kind Chrome
+     writes; `png` may be a promise, so its turn is kept while it's made). Says 'copied'; 'older' (something newer is on
+     the clipboard already, or about to be: that stays); 'away' (Vault isn't in front: nothing is tried, the next time
+     it is); 'refused' (the browser wouldn't, in front); or 'failed' (not a picture it could read). With "in step" on,
+     what was copied here since Vault last looked is read first: it's newer, so it stays (and goes to the others). */
+  function put({ text, png, at }) {
+    if (stepping()) step();
+    return chain(async () => {
+      if (older(at) || comingAfter(at)) return 'older';
+      if (!inFront()) return 'away';
+      let picture = null;
+      if (png) {
+        try {
+          picture = await png;
+        } catch (error) {
+          return 'failed';
+        }
+        if (!(picture instanceof Blob)) return 'failed';
+        // Making it took a moment: a Copy pressed meanwhile (or a newer clip) stays on the clipboard.
+        if (older(at) || comingAfter(at)) return 'older';
+        if (!inFront()) return 'away';
+      }
+      try {
+        if (picture) await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': picture })]);
+        else await navigator.clipboard.writeText(text);
+      } catch (error) {
+        return inFront() ? 'refused' : 'away';
+      }
+      wrote(picture ? '' : text, at);
+      return 'copied';
+    });
+  }
+
+  /* Copy pressed on a card (js/arrive.js): a tap, which Chrome lets write. Words, or a picture as PNG (`png` may still
+     be being made: the write starts now, inside the tap). Says 'copied', 'refused' or 'failed' (not a picture). */
+  async function tap({ text, png }) {
+    if (!png) {
+      await V.copy(String(text || ''), { cloud: true });
+      return 'copied';
+    }
+    copying();
+    let made = true;
+    const picture = Promise.resolve(png).then((blob) => {
+      if (!(blob instanceof Blob)) throw new Error('Not a picture');
+      return blob;
+    }).catch((error) => { made = false; throw error; });
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': picture })]);
+    } catch (error) {
+      return made ? 'refused' : 'failed';  // (the clipboard is as it was: so is what Vault knows of it)
+    }
+    wrote('');  // a picture: no words to find there on coming back
+    return 'copied';
+  }
+
+  /* Vault is about to copy something itself (a Copy button: util.js's V.copy; Ctrl+C in a note; Copy on a card): the
+     newest thing on this clipboard, newer than every clip and arrival Vault knows of, so none of those goes over it.
+     Before the write starts, as a picture still being made for the clipboard looks again just before it's written. */
+  function copying() {
+    wrote(null, newestKnown());
+  }
+
+  /* ...and the words are on the clipboard now (only once they are: if the write failed, what's there is as it was;
+     copying() came first). `cloud`: they came from the cloud (a clip, something sent here), so "in step" doesn't send
+     them up again. Else they're Vault's own words, copied here after everything Vault knows of: with "in step" on they
+     go to the other devices now (their time in the cloud is when they were copied, so what was sent after them goes
+     over them, and nothing from before), or when the cloud's back if they're still what's on this clipboard. */
+  function copied(text, { cloud = false } = {}) {
+    const clean = String(text || '').trim();
+    if (cloud || !stepping() || !clean) {
+      if (clean || cloud) wrote(clean);
+      return;
+    }
+    if (print(clean) === stored(SEEN)) return;  // (copied again: it went already)
+    wrote(clean);
+    lookedNow();
+    if (mayShare(clean)) sendMine(clean);
+  }
+
+  let mine = null;  // Vault's own words that couldn't go up yet (only the newest)
+  function sendMine(text, { now = true } = {}) {
+    mine = text;
+    V.cloud.insertClip(text).then((shared) => {
+      if (mine === text) mine = null;
+      // (Sent just now: the cloud's time on them is when they were copied. Sent later, when the cloud was back: not.)
+      if (now && shared && shared.created_at) wrote(null, shared.created_at);
+    }, () => { /* when the cloud's back */ });
+  }
+
+  /* Ctrl+C or Ctrl+X in Vault itself (a note, a chat): Vault's own words, as with a Copy button. What they are is read
+     from the clipboard once the browser has put them there. (Not V.copy's own stand-in for a refused write.) */
+  function copyEvent(event) {
+    if (event.target && event.target.closest && event.target.closest('[data-vault-copy]')) return;
+    copying();
+    if (!stepping()) return;
+    setTimeout(() => chain(async () => {
+      let here;
+      try {
+        here = String((await navigator.clipboard.readText()) || '').trim();
+      } catch (error) {
+        return;  // (seen as something copied here, the next time Vault looks)
+      }
+      if (here) copied(here);
+    }), 0);
+  }
+  document.addEventListener('copy', copyEvent);
+  document.addEventListener('cut', copyEvent);
+
   let busy = null;
   /* Vault came to the front: what was copied here since the last look goes to the others; if nothing was, the newest
-     from elsewhere is put here. */
+     from elsewhere is put here. If both came since the last look, a card offers both (clash). Never waits for the
+     cloud: a write that comes meanwhile (something sent here) isn't held up by a slow network. */
   function step() {
     if (!stepping() || !V.data.user || !inFront() || busy) return busy;
-    busy = (async () => {
+    busy = chain(async () => {
       let here;
       try {
         here = String((await navigator.clipboard.readText()) || '').trim();
       } catch (error) {
         offerTap();  // not allowed (no permission yet, or the phone wants a tap): one tap does it
+        if (unwritten) offerCopy(unwritten);  // (and one for the clip that's waiting)
         return;
       }
-      if (here && print(here) !== stored(SEEN)) {
+      // The newest clip, if it's from elsewhere and not on this clipboard (nor older than what is).
+      const latest = V.data.clips[0];
+      const theirs = latest && latest.from_device !== V.device && print(latest.text.trim()) !== stored(SEEN)
+        && !older(latest.created_at) ? latest : null;
+      const since = !!theirs && cameSince(theirs);
+      const fresh = !!here && print(here) !== stored(SEEN);  // copied here (in another app) since the last look
+      lookedNow();
+      if (fresh) {
         store(SEEN, print(here));
-        if (mayShare(here)) await V.cloud.insertClip(here).catch(() => {});
+        if (theirs && print(theirs.text.trim()) === print(here)) wrote(null, theirs.created_at);  // the same words
+        else if (since) clash(theirs, here);
+        else {
+          // Copied here after everything Vault knew of when it last looked: the newest, so nothing that came before
+          // goes over it; and it goes to the others (the cloud's time on it, once it's there, is newer still).
+          wrote(null, newestKnown());
+          if (mayShare(here)) {
+            V.cloud.insertClip(here).then((shared) => { if (shared && shared.created_at) wrote(null, shared.created_at); },
+              () => { /* not shared: it stays here all the same */ });
+          }
+        }
         return;
       }
-      await take(V.data.clips[0]);
-    })().finally(() => { busy = null; });
+      if (theirs) await takeNow(theirs);
+      else if (unwritten) forget(unwritten);
+    }).finally(() => { busy = null; });
     return busy;
   }
 
@@ -107,6 +364,17 @@ V.clips = (() => {
     };
     go();
   }
+
+  /* A click or a key in Vault while a clip waits: tried again (after that key's own copy, if it was Ctrl+C: newer).
+     Its card's Copy too is the way once it's up (a tap there copies it by itself). */
+  function chance(event) {
+    if (!unwritten) return;
+    const card = unwritten.notice && unwritten.notice.el;
+    if (card && event && card.contains(event.target)) return;
+    setTimeout(() => { if (unwritten && stepping()) step(); }, 0);
+  }
+  document.addEventListener('pointerdown', chance, true);
+  document.addEventListener('keydown', chance, true);
 
   // When reading by itself isn't allowed, a tap is: offered once each time Vault comes back.
   let offered = false;
@@ -126,6 +394,7 @@ V.clips = (() => {
       return;
     }
     if (here) store(SEEN, print(here));
+    lookedNow();
     await share(here);
   }
 
@@ -133,6 +402,7 @@ V.clips = (() => {
     try {
       const here = String((await navigator.clipboard.readText()) || '').trim();
       store(SEEN, here ? print(here) : '');
+      lookedNow();
     } catch (error) {
       return V.toast('Vault wasn\'t allowed to use the clipboard. Allow it in Chrome\'s site settings for Vault, then try again.');
     }
@@ -174,6 +444,7 @@ V.clips = (() => {
     try {
       const text = String((await navigator.clipboard.readText()) || '').trim();
       if (text) store(SEEN, print(text));  // so coming back doesn't send it again
+      lookedNow();
       await share(text);
     } catch (error) {
       V.toast('Vault wasn\'t allowed to read the clipboard. Paste into the box below instead.');
@@ -189,7 +460,7 @@ V.clips = (() => {
       V.h('div.clip-text', { text: clip.text.length > 800 ? clip.text.slice(0, 800) + '...' : clip.text }),
       V.h('div.clip-actions', {},
         V.button(mineHere ? 'Copy' : 'Copy here', { icon: 'copy', kind: mineHere ? 'quiet' : '', onClick: async () => {
-          await V.copy(clip.text); V.toast('Copied');
+          await V.copy(clip.text, { cloud: true }); V.toast('Copied');
         } }),
         V.isLink(clip.text) ? V.button('Open', { icon: 'open', kind: 'quiet', onClick: () => {
           if (V.desktop) V.pc.call('openLink', { url: clip.text.trim() }).catch(V.problem);
@@ -251,14 +522,18 @@ V.clips = (() => {
     if (clip.from_device === V.device) return;
     const name = named(clip.from_device);
     if (V.desktop) {
-      if (V.prefs && V.prefs.clipboardReceive) {
-        V.pc.setClipboard(clip.text).then(() => V.pc.notify(`Copied from ${name}`, clip.text.slice(0, 120))).catch(() => {});
+      // (Not over something newer that was sent here and copied: js/send.js's arrivals.)
+      if (V.prefs && V.prefs.clipboardReceive && !older(clip.created_at)) {
+        V.pc.setClipboard(clip.text).then(() => {
+          wrote(clip.text, clip.created_at);
+          return V.pc.notify(`Copied from ${name}`, clip.text.slice(0, 120));
+        }).catch(() => {});
       }
     } else if (stepping()) {
-      if (inFront()) take(clip);  // else when Vault is next in front
+      take(clip);  // (not in front: it waits for the next time Vault is)
     } else if (!V.away()) {
       V.toast(`${name.charAt(0).toUpperCase() + name.slice(1)} copied: ${clip.text.slice(0, 60)}`,
-        { action: 'Copy', onAction: () => V.copy(clip.text) });
+        { action: 'Copy', onAction: () => V.copy(clip.text, { cloud: true }) });
     }
   });
 
@@ -267,12 +542,24 @@ V.clips = (() => {
   async function sendCopied(text) {
     unsent = text;
     try {
-      await V.cloud.insertClip(text);
+      const shared = await V.cloud.insertClip(text);
       if (unsent === text) unsent = null;
+      // Copied on the PC: the newest there, so a file sent a moment earlier isn't put over it.
+      if (shared && shared.created_at) wrote(text, shared.created_at);
     } catch (error) { /* tried again when the cloud's back */ }
   }
   V.on('pc:clipboard', ({ text }) => { if (V.prefs && V.prefs.clipboardShare && V.data.user) sendCopied(text); });
-  V.on('status', (state) => { if ((state === 'synced' || state === 'held') && unsent) sendCopied(unsent); });
+  V.on('status', (state) => {
+    if (state !== 'synced' && state !== 'held') return;
+    if (unsent) sendCopied(unsent);
+    if (!mine) return;
+    if (stepping() && V.data.user && print(mine) === stored(SEEN)) sendMine(mine, { now: false });
+    else mine = null;  // (something else is on this clipboard since: that's what goes, if anything)
+  });
 
-  return { render, share, mayShare, step, sendNow };
+  return {
+    render, share, mayShare, step, sendNow, wrote, older, put, tap, copying, copied,
+    // What's been put on this clipboard (and the look at it on coming back) finished first.
+    settled: () => Promise.all([busy, writing]).then(() => {}, () => {}),
+  };
 })();

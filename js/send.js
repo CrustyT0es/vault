@@ -9,8 +9,11 @@
    (+ thumb_size, w, h, seconds). Pictures sent together share extra.group (and extra.n, their order) and show as a
    mosaic. Rows without a preview (older ones, a kind this browser can't show) keep their icon. Files sent while
    offline wait in V.db's "outgoing" and go when the internet's back. Each device only takes in, and marks received,
-   what was sent to it: on the PC a file is saved into Downloads\Vault by the app itself (V.pc saveFile); elsewhere it
-   waits in the list with Open / Save / Share. Android's share sheet hands files to Vault through sw.js ("shared"). */
+   what was sent to it: on the PC a file is saved into Downloads\Vault by the app itself (V.pc saveFile), then (where
+   the PC app can, and its settings say so) put on the clipboard ready to paste and shown on a small card with its
+   picture (copyArrival / showArrival), else a tray notice as before; on a Chromebook or another browser js/arrive.js
+   copies it, shows it on a card and can save it into a folder of Files; on the phone it waits in the list with Open /
+   Save / Share. Android's share sheet hands files to Vault through sw.js ("shared"). */
 'use strict';
 
 V.send = (() => {
@@ -378,18 +381,117 @@ V.send = (() => {
       extra: { ...(now.extra || {}), ...extra } });
   }
 
-  /* The PC tells about saved files once for a batch (six photos are one notice, not six). */
+  /* What's put on the PC's clipboard by itself: what came while Vault was open, if it was sent in the last half hour
+     (by the cloud's time on it, which is when the sending began: a big upload takes a while; a clock a little ahead
+     or behind still counts it), and of what came while it was closed only the last couple of minutes'. The rest
+     could go over something copied since, so the card offers Copy instead (or the tray only tells of it). */
+  const COPY_WITHIN = 30 * 60000;
+  const COPY_SOON = 2 * 60000;
+  const recent = (at, live) => Date.now() - Date.parse(at || '') < (live ? COPY_WITHIN : COPY_SOON);  // (and the future)
+  let caughtUp = false;  // the first look after starting is done: what comes after that came while Vault was open
+  const byTime = (a, b) => (Date.parse(b.at || '') || 0) - (Date.parse(a.at || '') || 0) || (b.n || 0) - (a.n || 0);
+  let telling = 0;  // a batch being put on the clipboard and shown right now
+
+  /* The PC tells about saved files once for a batch (six photos are one notice, not six). What arrived by itself (not
+     a Save pressed here) also goes on the clipboard: the newest first, a picture as the picture and the file, other
+     files as files, so Ctrl+V pastes them (the PC app's copyArrival, vault/desktop.py); and a small card shows it with
+     its picture (showArrival). Each only where the PC app can and its setting is on; else the tray notice, as before. */
   const savedNews = [];
   const tellSaved = V.debounce(() => {
     const list = savedNews.splice(0);
     if (!list.length) return;
-    const from = list.every((s) => s.from === list[0].from) ? V.deviceName(list[0].from) : 'your devices';
-    V.pc.notify(`From ${from}`, list.length === 1 ? `${list[0].name} is in ${list[0].folder}`
-      : `${list.length} files are in ${list[0].folder}`);
+    telling++;
+    tellPc(list).catch(() => {}).finally(() => { telling--; });
   }, 1200);
 
-  /* The PC saves what's sent to it by itself, into Downloads\Vault. Gives where it went. */
-  async function saveOnPc(transfer) {
+  async function tellPc(list) {
+    const from = list.every((s) => s.from === list[0].from) ? V.deviceName(list[0].from) : 'your devices';
+    const said = list.length === 1 ? `${list[0].name} is in ${list[0].folder}` : `${list.length} files are in ${list[0].folder}`;
+    if (!list.some((s) => s.auto)) return V.pc.notify(`From ${from}`, said);  // saved with a button here: as before
+    const prefs = V.prefs || {};
+    const order = [...list].sort(byTime);  // newest first
+    // Never a program or script (the PC app leaves those off too).
+    const files = order.filter((s) => s.auto && s.path && !V.risky(s.path));
+    const fresh = files.filter((s) => recent(s.at, s.live));
+    const can = !!prefs.copyArrivals && V.pc.can('copyArrival');
+    let copied = 0;
+    // Not over something newer on the clipboard (a clip that came after it, or a copy made on the PC). Files sent
+    // together all carry the time the sending began, so a later batch of the same send isn't "older" than the first.
+    const sameSend = !!(fresh.length && lastCopy && lastCopy.at && lastCopy.at === fresh[0].at);
+    if (fresh.length && can && !(V.clips && V.clips.older(fresh[0].sent, { same: !sameSend }))) {
+      copied = await copyOnPc(fresh);
+    }
+    const newest = order[0];
+    // The card shows the newest (its picture, if it's one: the PC app looks), with Open and Show in folder, and Copy
+    // when it wasn't copied by itself.
+    const offer = can && !copied && files.length ? { copy: { paths: files.slice(0, 100).map((s) => s.path) } } : {};
+    if (await showOnPc({ title: `From ${from}`, text: newest.name || 'A file', path: newest.path,
+      count: Math.max(list.length, copied), copied: copied > 0, ...offer })) return;
+    return V.pc.notify(copied ? `Copied from ${from}` : `From ${from}`, said);
+  }
+
+  /* Files just saved onto the PC's clipboard, newest first (copyArrival: the newest picture among them as the picture
+     too, so Ctrl+V pastes it into a chat, and all of them as files for a folder). Files sent together come in batches
+     when their uploads finish apart: each later batch is copied with the ones before it (pictures sent together share
+     a group, and everything sent at once the time the sending began), so the clipboard has them all, and a photo from
+     the first batch is still the picture when the later one has none. Gives how many went on it (0: none, the
+     clipboard is left as it was; the PC app leaves off any program, or one moved since). */
+  let lastCopy = null;  // { groups, at, paths, when }
+  async function copyOnPc(fresh) {
+    const paths = fresh.map((s) => s.path);
+    const groups = [...new Set(fresh.map((s) => s.group).filter(Boolean))];
+    const at = fresh[0].at;
+    const before = lastCopy && Date.now() - lastCopy.when < 5 * 60000
+      && (groups.some((g) => lastCopy.groups.includes(g)) || (!!at && lastCopy.at === at)) ? lastCopy : null;
+    const earlier = before ? before.paths.filter((p) => !paths.includes(p)) : [];
+    for (const tried of earlier.length ? [[...paths, ...earlier], paths] : [paths]) {
+      try {
+        const answer = await V.pc.call('copyArrival', { paths: tried });
+        lastCopy = { groups: [...new Set([...groups, ...(tried.length > paths.length ? before.groups : [])])],
+          at, paths: tried, when: Date.now() };
+        if (V.clips) V.clips.wrote(null, fresh[0].sent);
+        return Number(answer && answer.count) || tried.length;
+      } catch (error) { /* an earlier one was moved since: the new ones alone (and if they fail too, as it was) */ }
+    }
+    return 0;
+  }
+
+  /* The PC app's card (showArrival), when there is one and it's wanted: whether it showed (else the tray's notice).
+     Without the file when the PC app won't show that one (a program, or moved since). */
+  async function showOnPc(card) {
+    if (!(V.prefs && V.prefs.arrivalPreview && V.pc.can('showArrival'))) return false;
+    const { path, ...rest } = card;
+    for (const args of path ? [{ ...rest, path }, rest] : [rest]) {
+      try {
+        return !!(await V.pc.call('showArrival', args)).shown;
+      } catch (error) { /* tried without the file next */ }
+    }
+    return false;
+  }
+
+  /* A link or some words sent to the PC: on its clipboard (if they're new: recent()), and said. `live`: they came
+     while Vault was open. */
+  async function tellText(t, live) {
+    const from = V.deviceName(t.from_device);
+    const words = (t.text || '').slice(0, 200);
+    const prefs = V.prefs || {};
+    const can = !!prefs.copyArrivals && V.pc.can('copyArrival') && !!t.text;
+    let copied = false;
+    if (can && recent(t.created_at, live) && !(V.clips && V.clips.older(V.sentAt(t)))) {
+      try {
+        await V.pc.call('copyArrival', { text: t.text });
+        copied = true;
+        if (V.clips) V.clips.wrote(t.text, V.sentAt(t));
+      } catch (error) { /* only said, then */ }
+    }
+    const offer = can && !copied ? { copy: { text: t.text } } : {};
+    if (await showOnPc({ title: `From ${from}`, text: words, count: 1, copied, ...offer })) return;
+    V.pc.notify(copied ? `Copied from ${from}` : t.kind === 'link' ? `A link from ${from}` : `Text from ${from}`, words);
+  }
+
+  /* The PC saves what's sent to it by itself, into Downloads\Vault. Gives where it went. `auto`: arrived() saving it
+     as it came (only those are copied and shown on the card; a Save pressed here gets the notice as before). */
+  async function saveOnPc(transfer, { auto = false, live = false } = {}) {
     if (saving.has(transfer.id)) return '';
     saving.add(transfer.id);
     draw();
@@ -397,7 +499,9 @@ V.send = (() => {
       const url = await V.cloud.link(transfer.path);
       const answer = await V.pc.call('saveFile', { id: transfer.id, url, name: transfer.name || 'file' });
       await received(transfer, { saved: answer.path });
-      savedNews.push({ from: transfer.from_device, name: transfer.name, folder: answer.folder || 'Downloads' });
+      savedNews.push({ from: transfer.from_device, name: transfer.name, folder: answer.folder || 'Downloads',
+        path: answer.path, mime: transfer.mime || '', at: transfer.created_at || '', sent: V.sentAt(transfer),
+        n: (transfer.extra && transfer.extra.n) || 0, group: (transfer.extra && transfer.extra.group) || '', auto, live });
       tellSaved();
       return answer.path;
     } catch (error) {
@@ -422,22 +526,25 @@ V.send = (() => {
     V.toast(`${what} from ${from}`, { action: 'Show', onAction: () => V.go('send') });
   }, 400);
 
+  // A Chromebook or another browser: js/arrive.js copies what comes, shows it on a card and can save it into Files.
+  const onCard = () => V.device === 'web' && !V.desktop && !!V.arrive;
+
   function arrived(list) {
-    for (const t of list) {
-      if (t.to_device !== V.device || t.received_at || t.deleted) continue;
-      if (V.desktop && t.kind === 'file') saveOnPc(t);
+    const here = list.filter((t) => t.to_device === V.device && !t.received_at && !t.deleted);
+    for (const t of here) {
+      if (V.desktop && t.kind === 'file') saveOnPc(t, { auto: true, live: caughtUp });
       else if (announced.has(t.id)) continue;
       else if (V.desktop) {
         announced.add(t.id);
         received(t);
-        const from = V.deviceName(t.from_device);
-        V.pc.notify(t.kind === 'link' ? `A link from ${from}` : `Text from ${from}`, t.text.slice(0, 200));
-      } else if (Date.now() - new Date(t.created_at || 0).getTime() < 10 * 60000) {
+        tellText(t, caughtUp).catch(() => {});
+      } else if (!onCard() && Date.now() - new Date(t.created_at || 0).getTime() < 10 * 60000) {
         announced.add(t.id);
         news.push(t);
         tellNews();
       }
     }
+    if (onCard()) V.arrive.take(here);
     V.emit('badge');
   }
 
@@ -606,10 +713,10 @@ V.send = (() => {
       if (t._dirty) return 'Sending...';
       if (!t.received_at) return `Waiting for ${to}`;
       if (t.kind !== 'file') return `Seen on ${to}`;
-      return t.to_device === 'pc' ? 'Saved on your PC' : `Opened on ${to}`;
+      return t.to_device === 'pc' || (t.extra && t.extra.saved) ? `Saved on ${to}` : `Opened on ${to}`;
     }
     if (saving.has(t.id)) return 'Saving...';
-    if (V.desktop && t.extra && t.extra.saved) return 'In your Downloads';
+    if (t.extra && t.extra.saved) return V.desktop ? 'In your Downloads' : 'Saved to Files';  // (js/arrive.js)
     return t.received_at ? 'Received' : 'New';
   }
 
@@ -635,7 +742,11 @@ V.send = (() => {
     const arrivedHere = out ? !!t.received_at && !t._dirty : !!t.received_at && !saving.has(t.id);
     const actions = fileActions(t, out);
     if (t.kind !== 'file') {
-      actions.push(V.button('Copy', { icon: 'copy', onClick: async () => { await V.copy(t.text); V.toast('Copied'); if (!out) received(t); } }));
+      actions.push(V.button('Copy', { icon: 'copy', onClick: async () => {
+        await V.copy(t.text, { cloud: !out });  // (what came from elsewhere isn't sent back up as a clip)
+        V.toast('Copied');
+        if (!out) received(t);
+      } }));
       if (t.kind === 'link') actions.push(V.button('Open', { icon: 'open', onClick: () => openLink(t.text.trim(), out ? null : t) }));
     }
     actions.push(V.iconButton('trash', 'Delete', () => remove(t), 'quiet'));
@@ -670,15 +781,16 @@ V.send = (() => {
     const got = list.filter((t) => t.received_at).length;
     let state;
     let done;
+    const allSaved = list.every((t) => t.extra && t.extra.saved);
     if (out) {
       const to = V.deviceName(first.to_device);
-      const word = first.to_device === 'pc' ? 'saved' : 'opened';
+      const word = first.to_device === 'pc' || allSaved ? 'saved' : 'opened';
       done = got === n && !list.some((t) => t._dirty);
       state = list.some((t) => t._dirty) ? 'Sending...' : done ? `${cap(word)} on ${to}` : got ? `${got} of ${n} ${word}` : `Waiting for ${to}`;
     } else {
       const busy = list.some((t) => saving.has(t.id));
       done = got === n && !busy;
-      state = busy ? 'Saving...' : V.desktop && list.every((t) => t.extra && t.extra.saved) ? 'In your Downloads'
+      state = busy ? 'Saving...' : allSaved ? (V.desktop ? 'In your Downloads' : 'Saved to Files')
         : got === n ? 'Received' : got ? `${got} of ${n} opened` : 'New';
     }
     const more = n - MOSAIC;
@@ -996,9 +1108,17 @@ V.send = (() => {
   return {
     render, files, text, runQueue, takeShared, unseen, deviceSetting,
     targets, preview,
-    checkIncoming: () => { arrived(incoming()); announce(); },
-    // A file going up, the PC saving one, or files waiting in the tray (for half an hour): not a moment to reload.
-    busy: () => queueRunning || saving.size > 0 || preparing.length > 0
-      || (staged.length > 0 && Date.now() - stagedAt < 30 * 60000),
+    // For js/arrive.js's card: the preview, the big view, opening and marking what came as arrived.
+    image, viewer, received, openHere, openLink, kindIcon,
+    checkIncoming: () => {
+      if (V.arrive) V.arrive.start();  // (a Chromebook's first look: what it knew already isn't new)
+      arrived(incoming());
+      caughtUp = true;
+      announce();
+    },
+    // A file going up, the PC saving one (or about to tell of it), what arrived being copied or saved into Files, or
+    // files waiting in the tray (for half an hour): not a moment to reload.
+    busy: () => queueRunning || saving.size > 0 || preparing.length > 0 || tellSaved.pending() || telling > 0
+      || (V.arrive ? V.arrive.busy() : false) || (staged.length > 0 && Date.now() - stagedAt < 30 * 60000),
   };
 })();

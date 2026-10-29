@@ -1,6 +1,7 @@
 /* Vault: the Settings tab. The account, connecting the phone (a QR code with the cloud's address and public key,
    never a password), the locked-notes PIN, the PC's own settings (start with Windows, the quick-note keys, the
-   clipboard, where received files go), how much of the free space is used, and Vault's own version and updates. */
+   clipboard, what arrives and where received files go), a Chromebook's own (js/arrive.js: copying what arrives, a
+   folder of Files to save it in), how much of the free space is used, and Vault's own version and updates. */
 'use strict';
 
 V.settings = (() => {
@@ -153,6 +154,11 @@ V.settings = (() => {
       line('Quick note', `Press ${V.prefs.hotkey} anywhere for a little note box.`, V.button('Change', { onClick: hotkey })),
       line('Share what I copy', 'Text only; never passwords, keys or what password managers hide.', toggle('clipboardShare')),
       line('Copy what my phone shares', 'Onto this PC\'s clipboard as it arrives.', toggle('clipboardReceive')),
+      // What's sent with Send (js/send.js): on the clipboard, and a card at the corner (a PC app new enough).
+      V.pc.can('copyArrival') && 'copyArrivals' in V.prefs ? line('Copy what arrives',
+        'Pictures, files, links and words sent to this PC go on its clipboard, ready to paste.', toggle('copyArrivals')) : null,
+      V.pc.can('showArrival') && 'arrivalPreview' in V.prefs ? line('Show what arrives',
+        'A small card with the picture, at the corner of the screen.', toggle('arrivalPreview')) : null,
       line('Files from your phone go to', V.prefs.downloads, V.h('div.setting-buttons', {},
         V.button('Open', { icon: 'folder', onClick: () => V.pc.call('showFile', { path: V.prefs.downloads }).catch(V.problem) }),
         V.button('Change', { onClick: async () => {
@@ -217,6 +223,7 @@ V.settings = (() => {
           V.button('Change password', { onClick: changePassword }),
           V.button('Sign out', { kind: 'danger-quiet', onClick: signOut }))),
       phoneCard(),
+      V.arrive ? V.arrive.card({ card, line, toggle, draw }) : null,  // js/arrive.js: a Chromebook's copying and saving
       appearanceCard(),
       card('Locked notes',
         line(V.lock.hasPin() ? 'Your PIN is set' : 'No PIN yet',

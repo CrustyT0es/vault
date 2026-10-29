@@ -57,11 +57,21 @@ V.notes = (() => {
   const isTag = (value) => typeof value === 'string' && value.startsWith('tag:');
   const tagKey = (value) => value.slice(4);
 
+  /* A note's words for its card (and an untitled note's title): one line, tick boxes as ○ and ●, and without the marks
+     of bold, italic, underline, strikethrough or highlight (js/format.js: unmark). Kept with each note's row (the
+     lists are drawn again often, and a long note's marks needn't be read each time): a changed note is a new row, so
+     its old words go with the old one, and a locked note's are never kept. */
+  const plainKept = new WeakMap();
   function plain(note) {
-    return (note.body || '').split('\n').map((line) => {
+    const body = note.body || '';
+    const kept = plainKept.get(note);
+    if (kept && kept.body === body) return kept.words;
+    const words = (V.format ? V.format.unmark(body) : body).split('\n').map((line) => {
       const box = CHECK.exec(line);
       return box ? (box[2] === ' ' ? '○ ' : '● ') + box[3] : line;
     }).join(' ').replace(/\s+/g, ' ').trim();
+    if (V.format && !note.locked) plainKept.set(note, { body, words });
+    return words;
   }
 
   function progress(note) {

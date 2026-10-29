@@ -43,52 +43,90 @@ V.study = (() => {
 
   /* The flash cards in a note's words: [{ key, term, answer, line, kind }]. A "term :: definition" card is kind 'qa';
      a blank's ('blank') term is its line with a gap where the blank is (the other blanks filled in), and it also has
-     `before` and `after`, the words either side of the gap. Lines in ``` code blocks have no blanks. */
+     `before` and `after`, the words either side of the gap. Lines in ``` code blocks have no blanks. A card is read
+     without its marks (**bold**, ==highlight==...: js/format.js unmark), so marking a word in it keeps its code and
+     never shows the marks (or gives the answer away in Learn). `was`: the code a card had when its marks still counted
+     as its words (Ctrl+B in a card on the PC could put some in), where its progress may still be kept (see prune). */
   function cards(text) {
     const out = [];
-    const keys = new Set();
-    const named = (first, again) => {
-      let key = code(first);
-      for (let n = 2; keys.has(key); n++) key = code(again + '#' + n);
-      keys.add(key);
-      return key;
+    const namer = () => {
+      const keys = new Set();
+      return (first, again) => {
+        let key = code(first);
+        for (let n = 2; keys.has(key); n++) key = code(again + '#' + n);
+        keys.add(key);
+        return key;
+      };
+    };
+    const named = namer();
+    const namedBefore = namer();
+    const termKey = (name, term) => name(term.toLowerCase().replace(/\s+/g, ' '), term.toLowerCase());
+    const wordKey = (name, word) => {
+      const low = word.toLowerCase();
+      return name(`{{${low.replace(/\s+/g, ' ')}}}`, `{{${low}}}`);
+    };
+    const unmark = V.format.unmark;
+    const asCard = (line) => {
+      const found = CARD.exec(line);
+      return found && !/^[a-z][\w+.-]*:\/\/?$/i.test(found[1].trim()) ? found : null;
     };
     let fenced = false;
+    let fencedBefore = false;
     String(text || '').split('\n').forEach((line, index) => {
-      const found = CARD.exec(line);
-      if (found && !/^[a-z][\w+.-]*:\/\/?$/i.test(found[1].trim())) {
+      const holes = line.includes('{{') ? V.format.blanks(line) : [];
+      // The line's cards the way they were read before (marks and all): only their codes, `was`.
+      let before = { kind: null, keys: [] };
+      const old = asCard(line);
+      if (old) {
+        if (old[1].trim() && old[2].trim().replace(TAGS_AT_END, '')) before = { kind: 'qa', keys: [termKey(namedBefore, old[1].trim())] };
+      } else if (FENCE.test(line)) fencedBefore = !fencedBefore;
+      else if (!fencedBefore && holes.length) before = { kind: 'blank', keys: holes.map((h) => wordKey(namedBefore, h.word)) };
+      const add = (card, i = 0) => {
+        const was = before.kind === card.kind ? before.keys[i] : undefined;
+        if (was && was !== card.key) card.was = was;
+        out.push(card);
+      };
+      const plain = unmark(line);
+      const found = asCard(plain);
+      if (found) {
         const term = found[1].trim();
         const answer = found[2].trim().replace(TAGS_AT_END, '');
         if (!term || !answer) return;
-        out.push({ key: named(term.toLowerCase().replace(/\s+/g, ' '), term.toLowerCase()), term, answer, line: index, kind: 'qa' });
+        add({ key: termKey(named, term), term, answer, line: index, kind: 'qa' });
         return;
       }
       if (FENCE.test(line)) { fenced = !fenced; return; }
-      if (fenced || !line.includes('{{')) return;
-      const holes = V.format.blanks(line);
+      if (fenced || !holes.length) return;
       const lead = LEAD.exec(line)[0].length;
-      // The words from `from` to `to`, the blanks in `list` filled in with their words.
-      const fill = (from, to, list) => {
-        let words = '';
-        let at = from;
-        for (const h of list) { words += line.slice(at, h.start) + h.word; at = h.end; }
-        return words + line.slice(at, to);
-      };
       holes.forEach((hole, i) => {
-        const before = fill(lead, hole.start, holes.slice(0, i)).replace(/^\s+/, '');
-        const after = fill(hole.end, line.length, holes.slice(i + 1)).replace(/\s+$/, '');
-        const word = hole.word.toLowerCase();
-        out.push({ key: named(`{{${word.replace(/\s+/g, ' ')}}}`, `{{${word}}}`), term: before + GAP + after, answer: hole.word,
-          before, after, line: index, kind: 'blank' });
+        // The line with this blank's word between two markers (the other blanks filled in) without its marks, then cut
+        // at the markers: "The **{{mitochondria}}** makes ATP" is "The ____ makes ATP".
+        let words = '';
+        let at = lead;
+        holes.forEach((h, k) => { words += line.slice(at, h.start) + (k === i ? `\u0001${h.word}\u0002` : h.word); at = h.end; });
+        words += line.slice(at);
+        const cut = (text) => {
+          const open = text.indexOf('\u0001');
+          const close = text.indexOf('\u0002', open);
+          return open >= 0 && close > open ? [text.slice(0, open), text.slice(close + 1)] : null;
+        };
+        const sides = cut(unmark(words)) || cut(words);
+        const answer = unmark(hole.word).trim() || hole.word;
+        const [front, back] = [sides[0].replace(/^\s+/, ''), sides[1].replace(/\s+$/, '')];
+        add({ key: wordKey(named, answer), term: front + GAP + back, answer, before: front, after: back, line: index,
+          kind: 'blank' }, i);
       });
     });
     return out;
   }
 
-  /* Only the cards still in the note keep their progress. */
+  /* Only the cards still in the note keep their progress (a card read with marks before keeps its old code's). */
   function prune(state, list) {
     const out = {};
-    for (const c of list) if (state[c.key]) out[c.key] = state[c.key];
+    for (const c of list) {
+      const value = state[c.key] || (c.was ? state[c.was] : undefined);
+      if (value) out[c.key] = value;
+    }
     return out;
   }
 
