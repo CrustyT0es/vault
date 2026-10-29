@@ -38,9 +38,10 @@ V.chat = (() => {
     { id: GEMINI_MODEL, provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
       about: 'Google\'s free model (its newest Flash). No Claude key needed — just a free Google key (Settings > AI).' },
   ];
-  const CLAUDE_MODELS = MODELS.filter((m) => m.provider !== 'gemini');
   const DEFAULT_MODEL = MODELS[0].id;
   const geminiId = (id) => /^gemini/.test(String(id || ''));
+  /* A PC whose Jarvis is too old for Claude chats (no chatSend): a Gemini chat still works there, from the page. */
+  const tooOld = (chat) => V.desktop && !V.pc.can('chatSend') && !(chat && isGemini(chat.model));
   const isGemini = (id) => modelOf(id).provider === 'gemini';
   /* A new chat defaults to Claude, unless only a free Gemini key is set up (a friend without a paid key). */
   const defaultModel = () => (!V.ai.has('claude') && V.ai.has('gemini') ? GEMINI_MODEL : DEFAULT_MODEL);
@@ -128,6 +129,7 @@ V.chat = (() => {
     credit: 'Your Claude account is out of credit. Add some at console.anthropic.com, then try again.',
     busy: 'Claude is busy right now. Your message is kept: try again in a minute.',
     dropped: 'The connection dropped before the answer finished.',
+    cutOff: 'The answer stopped coming part-way. Tap Retry to ask again.',
     old: 'Update Jarvis to chat on this PC (open Jarvis and click Update). Your chats are on your phone and Chromebook too.',
   };
 
@@ -516,13 +518,13 @@ V.chat = (() => {
     return contents;
   }
 
-  /* One Gemini turn (not streamed: the whole answer comes at once). AiError kinds are turned into ChatError kinds so a
+  /* One Gemini turn, streamed (`onText` gets the words so far). AiError kinds are turned into ChatError kinds so a
      blocked network waits and sends later, exactly like Claude. */
-  async function geminiTurn(chat, turn, job) {
+  async function geminiTurn(chat, turn, job, onText) {
     const contents = await geminiContents(chat, turn);
     const maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
     try {
-      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal });
+      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal, onText });
     } catch (error) {
       if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
       const kind = (error && error.kind) || 'bad';
@@ -681,12 +683,10 @@ V.chat = (() => {
     let failed = null;
     try {
       for (let n = 0; n < MOST_REPLIES; n++) {
-        if (isGemini(turn.model)) {  // Gemini: one call, the whole answer at once (no streaming, tools or fallback)
-          // On the PC the key lives with Jarvis and never enters the page: Gemini is a phone/Chromebook model.
-          if (V.desktop) throw new ChatError('bad', 'This chat uses Gemini — open it on your phone or Chromebook. On this PC, pick a Claude model.');
+        if (isGemini(turn.model)) {  // Gemini: one call, streamed (no tools or server fallback: ai.js picks the model)
           const reply = fresh(turn.model);
           turn.replies.push(reply);
-          const out = await geminiTurn(chat, turn, job);
+          const out = await geminiTurn(chat, turn, job, (words) => { reply.content = [{ type: 'text', text: words }]; showLive(); });
           reply.content = tidy([{ type: 'text', text: out.text || '' }]);
           reply.usage = out.usage || {};
           reply.model = turn.model;  // (the Gemini choice; the model Google answered with is in usage.model)
@@ -694,6 +694,12 @@ V.chat = (() => {
           reply.stop_reason = out.stopReason;
           if (job.stopped) { turn.state = 'stopped'; break; }
           if (!out.text && out.stopReason !== 'refusal') throw new ChatError('dropped', WORDS.dropped);
+          if (out.stopReason === 'cut_off') {  // the words stopped coming part-way: what came stays, with Retry
+            turn.state = 'failed';
+            turn.problem = WORDS.cutOff;
+            showLive();
+            break;
+          }
           turn.state = out.stopReason === 'refusal' ? 'refused' : out.stopReason === 'max_tokens' ? 'cut' : 'done';
           showLive();
           break;
@@ -865,7 +871,7 @@ V.chat = (() => {
     if (!text && !draft.notes.length && !draft.files.length) return;
     if (busy) return V.toast('Wait for Claude to finish this answer first (or press Stop).');
     if (draft.files.some((f) => f.state !== 'ready')) return V.toast('Wait for the files to finish going up.');
-    if (V.desktop && !V.pc.can('chatSend')) { trouble = { chatId: id, kind: 'old', message: WORDS.old }; return drawBox(); }
+    if (tooOld(chat)) { trouble = { chatId: id, kind: 'old', message: WORDS.old }; return drawBox(); }
     const over = await V.ai.overLimit();
     if (over) { trouble = { chatId: id, kind: 'limit', message: over.message }; return drawBox(); }
     if (chats.has(id)) await quickRefresh();
@@ -1096,7 +1102,7 @@ V.chat = (() => {
     const draft = draftOf(openId);
     if (parts.input.value !== draft.text) parts.input.value = draft.text;
     grow();
-    const old = V.desktop && !V.pc.can('chatSend');
+    const old = tooOld(chat);
     const problem = old ? { kind: 'old', message: WORDS.old } : trouble && trouble.chatId === openId ? trouble : null;
     V.clear(parts.trouble, problem ? [V.icon('alert'), V.h('span', { text: problem.message }),
       ['offline', 'away', 'busy', 'bad', 'dropped'].includes(problem.kind) ? V.button('Try again', { onClick: () => send() }) : null,
@@ -1175,7 +1181,7 @@ V.chat = (() => {
   function drawSendButton() {
     if (!parts || !parts.go || (busy && busy.chatId === openId)) return;
     const draft = draftOf(openId);
-    parts.go.disabled = (V.desktop && !V.pc.can('chatSend')) || !!busy || (!draft.text.trim() && !draft.files.length && !draft.notes.length);
+    parts.go.disabled = tooOld(chatOf(openId)) || !!busy || (!draft.text.trim() && !draft.files.length && !draft.notes.length);
   }
 
   function draw() {
@@ -1259,7 +1265,7 @@ V.chat = (() => {
     const current = modelOf(chat.model).id;  // (any "gemini..." id shows as the Gemini choice)
     const sheet = V.sheet({
       title: 'Model',
-      content: [V.h('div.model-choices', {}, (V.desktop ? CLAUDE_MODELS : MODELS).map((m) => {
+      content: [V.h('div.model-choices', {}, MODELS.map((m) => {
         const r = V.ai.rates(m.id);
         const typical = (1500 * r.input + 600 * r.output) / 1e6;
         const costLine = m.free ? 'Free — needs a free Google key (Settings > AI)' : `About ${cents(typical)} a short answer · ${per(r)}`;
@@ -1504,7 +1510,7 @@ V.chat = (() => {
     askAbout: askAboutOpenNote,
     MODELS,
     takeDrop: (list) => {
-      if (V.tab() !== 'claude' || !openId || (V.desktop && !V.pc.can('chatSend'))) return false;
+      if (V.tab() !== 'claude' || !openId || tooOld(chatOf(openId))) return false;
       attach(list);
       return true;
     },

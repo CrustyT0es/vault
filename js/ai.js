@@ -58,7 +58,15 @@ V.ai = (() => {
   // 2026 only "AQ." auth keys. So only the obvious is checked here (one unbroken run of the characters a credential is
   // made of); Google's own answer is the real check (saveGeminiKey asks it before saving).
   const GEMINI_KEY_LOOKS = /^[A-Za-z0-9._~+/=-]{20,512}$/;
-  const KEY_CHECK_MS = 15000;  // how long the check on Save waits for each answer (a network can drop Google silently)
+  // How long Gemini may take (ms): to its first words (its thinking included; longer for the last model, as there's
+  // no other to try), then between two pieces of an answer. A model too slow to start is passed over, and tried last
+  // for SLOW_FOR. (1.8.1 waited for whole answers with no limit: "it says thinking and then thinks forever".)
+  // `check`: how long the check on Save waits for each model (a network can drop Google without a word).
+  const waits = { first: 35000, firstLast: 60000, idle: 45000, check: 15000 };
+  const SLOW_FOR = 10 * 60 * 1000;
+  // A short think: the free models can otherwise think for minutes before the first word. thinkingBudget is the
+  // setting both Gemini 2.5 and 3 take; a model that turns it down is asked without it (plainConfig).
+  const GEMINI_THINKING = 1024;
   const GEMINI_CONSOLE = 'https://aistudio.google.com/apikey';
 
   let key = null;       // a phone's or Chromebook's copy of the key: in memory only
@@ -170,15 +178,21 @@ V.ai = (() => {
 
   /* Where the key is: { cloud: in the owner's storage, pc: Jarvis has one (on the PC) }. */
   async function lookUp() {
+    const listed = async () => {
+      const { data, error } = await V.cloud.sb.storage.from('vault').list(folder(), { limit: 100 });
+      if (error) throw error;
+      return data || [];
+    };
+    const has = (files, name) => files.some((f) => f.name === name && f.id);
     if (!ownKeys()) {
-      if (!V.pc.can('aiKeyState')) return { cloud: false, pc: false, old: true };
-      return V.pc.call('aiKeyState');
+      const pc = V.pc.can('aiKeyState') ? await V.pc.call('aiKeyState') : { cloud: false, pc: false, old: true };
+      // The paid Claude key stays with Jarvis; the free Gemini key is used here like on a phone (1.8.2).
+      let gemini = false;
+      try { gemini = has(await listed(), GEMINI_KEY_FILE); } catch (error) { /* not known: no Gemini here for now */ }
+      return { ...pc, gemini };
     }
-    const { data, error } = await V.cloud.sb.storage.from('vault').list(folder(), { limit: 100 });
-    if (error) throw error;
-    const files = data || [];
-    return { cloud: files.some((f) => f.name === KEY_FILE && f.id),
-      gemini: files.some((f) => f.name === GEMINI_KEY_FILE && f.id) };
+    const files = await listed();
+    return { cloud: has(files, KEY_FILE), gemini: has(files, GEMINI_KEY_FILE) };
   }
 
   function check() {
@@ -266,11 +280,11 @@ V.ai = (() => {
 
   /* A key pasted on a phone, a Chromebook or a Vault on its own: first one tiny request to Google with it (free), then
      saved beside the Claude key. Google refusing the key = nothing saved, and its reason in plain words. Saved anyway,
-     to be checked when first used: no answer from Google within KEY_CHECK_MS (offline, or a network that blocks it),
+     to be checked when first used: no answer from Google in time (offline, or a network that blocks it),
      Google's own trouble, or Google turning down the check itself rather than the key (its words are passed on: Vault
      can't be sure its check is how Google wants it, and a good key must never be refused for that). A used-up free quota
      means Google took the key. Returns { checked, why, said } (why: 'offline', 'busy' or 'bad' when it couldn't be
-     checked). */
+     checked; 'slow': no answer in time). */
   async function saveGeminiKey(pasted) {
     const clean = tidyKey(pasted);
     const problem = geminiKeyProblem(clean);
@@ -279,10 +293,10 @@ V.ai = (() => {
     let said = '';
     try {
       await geminiRequest(clean, { contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK.' }] }], maxTokens: 16,
-        wait: KEY_CHECK_MS });
+        wait: waits.check });
     } catch (error) {
       if (error.kind === 'key' || !error.kind) throw new Error(error.message);
-      if (error.kind !== 'quota') { why = error.kind; said = error.message; }
+      if (error.kind !== 'quota') { why = error.slow ? 'slow' : error.kind; said = error.message; }
     }
     const record = { format: 1, key: clean, from: V.device, at: new Date().toISOString() };
     await V.cloud.upload(geminiPath(), new Blob([JSON.stringify(record)], { type: 'application/json' }), { mime: 'application/json' });
@@ -303,6 +317,7 @@ V.ai = (() => {
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
     geminiOffline: 'Gemini can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     geminiBusy: 'Gemini is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
+    geminiSlow: 'Gemini is taking too long right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     geminiQuota: 'Google\'s free Gemini limit is used up for the moment. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     busy: 'Claude is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
@@ -388,42 +403,156 @@ V.ai = (() => {
     return `Google didn't accept the Gemini key${why.message ? ` (${why.message})` : ''}. ${again}`;
   }
 
-  /* One generateContent request with `sending` as the key, trying GEMINI_MODELS in turn: one Google doesn't offer this
-     key, whose free quota is used up, that's overloaded or that turns the key down moves on to the next. `wait` (ms)
-     gives up on an answer that takes longer (the check on Save; a chat has Stop). Returns { data, model }, or throws an
-     AiError: 'stopped' (`signal` aborted), 'bad' (Google turned this request down), or, when no model answered: 'quota'
-     (Google took the key, its free quota is used up), 'key' (a model refused the key itself: why, in plain words),
-     'busy' (Google's own trouble), 'key' again for a refusal that may have been one model's (none took the key),
-     'offline' (no answer: no internet, a network that blocks Google, or too slow), else 'bad' (none offered). */
-  async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0 } = {}) {
+  const slowUntil = new Map();  // model -> until when it's tried last (it was too slow to start)
+  const plainConfig = new Set();  // models that turned the thinking setting down
+
+  /* The pieces of a streamed answer (server-sent events, "data: {json}" each) in `buffer`, as parsed objects, and
+     what's left over (a piece not complete yet). */
+  function ssePieces(buffer) {
+    const pieces = [];
+    let cut;
+    while ((cut = buffer.search(/\r?\n\r?\n/)) >= 0) {
+      const event = buffer.slice(0, cut);
+      buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, '');
+      const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
+      if (!data) continue;
+      try { pieces.push(JSON.parse(data)); } catch (error) { /* not a piece of the answer */ }
+    }
+    return { pieces, buffer };
+  }
+
+  /* One model, streamed (streamGenerateContent, alt=sse): its words go to `onText` as they come. Returns { answer:
+     { text, finish, usage, model, cut } } (cut: the answer stopped part-way), { trouble, why } when the model didn't
+     answer (geminiTrouble's kinds, or 'slow': no first words within `first` ms), or throws an AiError 'stopped' (and no
+     words yet) or 'offline' (no answer at all). */
+  async function geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first }) {
     const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
-    const failed = [];
-    for (const model of GEMINI_MODELS) {
+    if (!plainConfig.has(model)) body.generationConfig.thinkingConfig = { thinkingBudget: GEMINI_THINKING };
+    const own = new AbortController();
+    const follow = () => own.abort();
+    if (signal) { if (signal.aborted) own.abort(); else signal.addEventListener('abort', follow, { once: true }); }
+    let why = '';  // 'slow' (no first words in time) or 'idle' (an answer that stopped coming): we stopped it
+    let timer = setTimeout(() => { why = 'slow'; own.abort(); }, first);
+    const keepWaiting = () => { clearTimeout(timer); timer = setTimeout(() => { why = 'idle'; own.abort(); }, waits.idle); };
+    let text = '';
+    let finish = '';
+    let usage = {};
+    const take = (piece) => {
+      const cand = (piece.candidates || [])[0] || {};
+      const words = (((cand.content || {}).parts) || []).filter((p) => p && typeof p.text === 'string' && !p.thought)
+        .map((p) => p.text).join('');
+      if (cand.finishReason) finish = String(cand.finishReason);
+      if (piece.usageMetadata) usage = piece.usageMetadata;
+      if (text || words) keepWaiting();  // once the words have started, only a stalled answer is given up on
+      if (words) {
+        text += words;
+        if (onText) onText(text);
+      }
+    };
+    const stopped = () => signal && signal.aborted;
+    const answer = (cut) => ({ answer: { text, finish: stopped() ? 'STOPPED' : finish, usage, model, cut } });
+    try {
       let response;
-      let data = null;
       try {
-        response = await fetch(`${GEMINI_API}${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST', signal: signal || (wait && AbortSignal.timeout ? AbortSignal.timeout(wait) : undefined),
+        response = await fetch(`${GEMINI_API}${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+          method: 'POST', signal: own.signal,
           headers: { 'content-type': 'application/json', 'x-goog-api-key': sending },
           body: JSON.stringify(body),
         });
-        try { data = await response.json(); } catch (error) { /* not JSON, or cut off */ }
       } catch (error) {
-        if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
+        if (stopped()) throw new AiError('stopped', 'Stopped.');
+        if (why === 'slow') return { trouble: 'slow' };
+        throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
+      }
+      if (!response.ok) {
+        let data = null;
+        try { data = await response.json(); } catch (error) { /* not JSON */ }
+        const said = googleError(data, sending);
+        if (response.status === 400 && body.generationConfig.thinkingConfig && /thinking/i.test(said.message)) {
+          plainConfig.add(model);  // this model takes no thinking setting: once more without it
+          clearTimeout(timer);
+          if (signal) signal.removeEventListener('abort', follow);
+          return geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first });
+        }
+        return { trouble: geminiTrouble(response.status, said), why: said };
+      }
+      let buffer = '';
+      let pieces = 0;
+      try {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const read = ssePieces(buffer + decoder.decode(value, { stream: true }));
+          buffer = read.buffer;
+          for (const piece of read.pieces) {
+            pieces += 1;
+            if (piece.error) {  // Google's trouble in the middle of an answer
+              if (text) return answer(true);
+              const said = googleError(piece, sending);
+              return { trouble: geminiTrouble(Number(piece.error.code) || 500, said), why: said };
+            }
+            take(piece);
+          }
+        }
+        const last = ssePieces(`${buffer}${decoder.decode()}\n\n`);  // (the last piece, even without its blank line)
+        buffer = last.pieces.length ? '' : buffer;
+        last.pieces.forEach((piece) => { pieces += 1; if (!piece.error) take(piece); });
+      } catch (error) {  // stopped, too slow, or the connection went
+        if (stopped()) {
+          if (text) return answer(false);
+          throw new AiError('stopped', 'Stopped.');
+        }
+        if (text) return answer(true);
+        if (why === 'slow') return { trouble: 'slow' };
+        return { trouble: 'busy' };
+      }
+      if (!pieces && buffer.trim()) {  // a plain JSON answer (a list of pieces) rather than events
+        try { [].concat(JSON.parse(buffer)).forEach(take); } catch (error) { /* not JSON */ }
+      }
+      if (!text && !finish) return { trouble: 'busy' };  // (nothing came back)
+      return answer(!finish);
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', follow);
+    }
+  }
+
+  /* One request with `sending` as the key, trying GEMINI_MODELS in turn (one that was too slow lately, last): one
+     Google doesn't offer this key, whose free quota is used up, that's overloaded or too slow to start, or that turns the
+     key down moves on to the next. `wait` (ms) is how long the check on Save waits for each; otherwise `waits`. Returns
+     geminiTry's answer, or throws an AiError: 'stopped', 'bad' (Google turned this request down), or, when no model
+     answered: 'quota' (Google took the key, its free quota is used up), 'key' (a model refused the key itself: why, in
+     plain words), 'busy' (Google's own trouble, or too slow), 'key' again for a refusal that may have been one model's
+     (none took the key), 'offline' (no answer: no internet, a network that blocks Google), else 'bad' (none offered). */
+  async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0, onText = null } = {}) {
+    const now = Date.now();
+    const order = [...GEMINI_MODELS.filter((m) => !(slowUntil.get(m) > now)), ...GEMINI_MODELS.filter((m) => slowUntil.get(m) > now)];
+    const failed = [];
+    for (const [i, model] of order.entries()) {
+      const first = wait || (i === order.length - 1 ? waits.firstLast : waits.first);
+      let tried;
+      try {
+        tried = await geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first });
+      } catch (error) {
+        if (error.kind !== 'offline') throw error;
         failed.push({ trouble: 'offline' });
         break;  // (the next model is on the same network)
       }
-      if (response.ok && data) return { data, model };
-      const why = googleError(data, sending);
-      const trouble = response.ok ? 'busy' : geminiTrouble(response.status, why);  // (an answer that isn't JSON: busy)
-      if (trouble === 'bad') throw new AiError('bad', `Gemini couldn't answer this${why.message ? ` (${why.message})` : ''}.`);
-      failed.push({ trouble, why });
+      if (tried.answer) return tried.answer;
+      if (tried.trouble === 'bad') {
+        throw new AiError('bad', `Gemini couldn't answer this${tried.why && tried.why.message ? ` (${tried.why.message})` : ''}.`);
+      }
+      if (tried.trouble === 'slow') slowUntil.set(model, Date.now() + SLOW_FOR);
+      failed.push(tried);
     }
-    const first = (trouble) => failed.find((f) => f.trouble === trouble);
+    const first = (...troubles) => failed.find((f) => troubles.includes(f.trouble));
     if (first('quota')) throw new AiError('quota', WORDS.geminiQuota);  // (a model took the key)
     if (first('key')) throw new AiError('key', keyWords(first('key').why, sending));
     if (first('busy')) throw new AiError('busy', WORDS.geminiBusy);  // (likewise)
+    if (first('slow')) throw Object.assign(new AiError('busy', WORDS.geminiSlow), { slow: true });
     if (first('refused')) throw new AiError('key', keyWords(first('refused').why, sending));
     if (first('offline')) throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
     const said = failed[0] && failed[0].why && failed[0].why.message;
@@ -432,28 +561,27 @@ V.ai = (() => {
 
   /* One request straight to Google's Gemini API with the saved key. `contents` is Gemini's own shape ([{ role:
      'user'|'model', parts:[...] }]): the note-taker sends one user turn, the Claude tab a whole conversation (whichever
-     Gemini its chat names, 1.7's "gemini-2.5-flash" too: GEMINI_MODELS decide). Returns { text, stopReason, usage } like
-     `direct`, with usage.gemini so it's priced as free, and usage.model the model that answered. A used-up free quota is
-     'busy', so it waits and goes again later like a busy Claude. */
-  async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal } = {}) {
+     Gemini its chat names, 1.7's "gemini-2.5-flash" too: GEMINI_MODELS decide). Streamed: `onText` gets the words so
+     far as they come. Returns { text, stopReason, usage } like `direct` (stopReason also 'stopped', or 'cut_off' for an
+     answer that stopped coming part-way), with usage.gemini so it's priced as free, and usage.model the model that
+     answered. A used-up free quota is 'busy', so it waits and goes again later like a busy Claude. */
+  async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal, onText = null } = {}) {
     const sending = await getGeminiKey();
     let answer;
     try {
-      answer = await geminiRequest(sending, { system, contents, maxTokens, signal });
+      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText });
     } catch (error) {
       if (error.kind === 'key') geminiKey = null;  // forgotten, so a key set up again elsewhere is read next time
       if (error.kind === 'quota') throw new AiError('busy', error.message);
       throw error;
     }
-    const { data, model } = answer;
-    const cand = (data.candidates || [])[0] || {};
-    const finish = String(cand.finishReason || '');
-    const text = (((cand.content || {}).parts) || []).filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('');
-    const stopReason = finish === 'MAX_TOKENS' ? 'max_tokens'
+    const { text, finish, usage, model, cut } = answer;
+    // An answer that stopped part-way: the chat shows what came (`onText`); the note-taker waits and asks again later.
+    if (cut && !onText && finish !== 'STOPPED') throw new AiError('busy', WORDS.geminiBusy);
+    const stopReason = finish === 'STOPPED' ? 'stopped' : cut ? 'cut_off' : finish === 'MAX_TOKENS' ? 'max_tokens'
       : ['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION', 'SPII'].includes(finish) ? 'refusal'
       : 'end_turn';
-    const m = data.usageMetadata || {};
-    return { text, stopReason, usage: { gemini: true, model, input_tokens: m.promptTokenCount || 0, output_tokens: m.candidatesTokenCount || 0 } };
+    return { text, stopReason, usage: { gemini: true, model, input_tokens: usage.promptTokenCount || 0, output_tokens: usage.candidatesTokenCount || 0 } };
   }
 
   async function viaPc(system, text) {
@@ -504,14 +632,21 @@ V.ai = (() => {
     }
   }
 
+  /* Whether Claude or the free Gemini can be used here: Claude from the cloud (a phone, a Chromebook, a Vault on its
+     own) or with Jarvis's key (the PC); Gemini with its key in the cloud, on any device. */
+  function has(who) {
+    if (who === 'gemini') return !!(known && known.gemini);
+    return !!(known && (known.cloud || (V.desktop && known.pc)));
+  }
+
   /* One request: { text, stopReason, usage, cost }, or an AiError whose message is ready to show. */
   async function ask({ system, text }) {
     const over = await overLimit();
     if (over) throw over;
-    // Which brain: the PC uses Jarvis's Claude; elsewhere Claude if its key is set up, otherwise the free Gemini key
-    // (Vault on its own on a PC too, its Claude going through Python like the PC with Jarvis).
-    if (!known && ownKeys()) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
-    const useGemini = ownKeys() && !(known && known.cloud) && !!(known && known.gemini);
+    // Which brain: Claude when it can be used here (Jarvis's key on the PC, else a key in the cloud; a PC's Claude goes
+    // through Python, Vault on its own too), otherwise the free Gemini key.
+    if (!known) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
+    const useGemini = !has('claude') && has('gemini');
     const answer = useGemini ? await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }] })
       : V.desktop ? await viaPc(system, text)
       : await direct(system, text);
@@ -578,11 +713,9 @@ V.ai = (() => {
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
 
-  /* The free Gemini key row: paste a free Google key on a phone or Chromebook (the owner uses Claude on the PC). */
+  /* The free Gemini key row: paste a free Google key, on any device (on the PC with Jarvis too, 1.8.2: only Claude's
+     paid key stays with Jarvis). */
   function geminiKeyLine(ui) {
-    if (!ownKeys()) {
-      return ui.line('Gemini key (free)', 'A free backup from Google, for when there\'s no Claude key. Add it on your phone or Chromebook (Vault > Settings > AI there).', null);
-    }
     if (!known) return ui.line('Gemini key (free)', 'Checking...', null);  // (its box would be drawn again under the typing)
     if (known.gemini) {
       const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
@@ -592,9 +725,8 @@ V.ai = (() => {
         try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
         ui.draw();
       } });
-      return ui.line('Gemini key (free)', V.desktop
-        ? 'Google\'s free model: on this PC it makes the note-taker\'s notes when there\'s no Claude key (Gemini chats are on your phone or Chromebook).'
-        : 'Google\'s free model, used when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
+      return ui.line('Gemini key (free)', 'Google\'s free model: pick Gemini in the Claude tab to chat for free. The note-taker uses it '
+        + 'when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
     }
     const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
     const save = V.button('Save', { kind: 'primary', onClick: async () => {
@@ -606,6 +738,7 @@ V.ai = (() => {
         V.toast(saved.checked ? 'Gemini key checked with Google and saved — it\'s free to use.'
           : saved.why === 'bad' ? `Gemini key saved, but Google's check said: ${saved.said}`
           : `Gemini key saved. ${saved.why === 'busy' ? 'Google was too busy to check it just now'
+            : saved.why === 'slow' ? 'Google didn\'t answer in time to check it'
             : 'Google couldn\'t be reached from this network to check it'}, so it's checked the first time Vault uses it.`,
         { ms: saved.why === 'bad' ? 9000 : 6000 });
         ui.draw();
@@ -669,7 +802,6 @@ V.ai = (() => {
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, getGeminiKey, saveGeminiKey, removeGeminiKey, forgetGeminiKey, AiError, WORDS, PRICES,
     state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc) || known.gemini)),
-    // The Claude tab on a PC answers with Claude only (chat.js), so a PC never "has" Gemini for it.
-    has: (who) => (who === 'gemini' ? !V.desktop && !!(known && known.gemini) : !!(known && (known.cloud || (V.desktop && known.pc)))),
-    MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS };
+    has,
+    MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS, waits };  // (waits: tests shorten them)
 })();

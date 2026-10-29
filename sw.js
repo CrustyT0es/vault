@@ -11,7 +11,7 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.8.1-3c3934183f87';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.8.2-c237ac92de0d';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 const CACHE = 'vault-' + BUILD;
 const LEGACY = /^vault-1\.0\.\d+$/;  // Vault 1.0.x's caches: its pages can't say "update-now", so it switches itself
 const KEPT = /^vault-(\d+(?:\.\d+)+)-[0-9a-f]{12}$/;  // a version kept here since (vault-<version>-<hash>)
