@@ -1,15 +1,16 @@
 {
  "format": 1,
- "version": "1.8.0",
+ "version": "1.8.1",
  "min_shell": 1,
  "notes": [
+  "Gemini keys that start with AQ. (the only kind Google makes now) work: Vault checks a key with Google when you save it, and says why if Google won't take it.",
+  "Gemini uses Google's newest free model (the one 1.7 used was switched off), and its Flash-Lite when that's busy or used up.",
   "Dictation: tap the new mic in a note and talk \u2014 it types for you. Say \"comma\", \"period\" or \"new line\" for punctuation.",
   "Send to\u2026: under a Claude answer, send it to your Chromebook, PC or phone. It shows up there as a note a second later.",
   "Invite friends: on your PC, Settings > Invite people makes a one-time code. Your friend gets their own private Vault and picks their own password.",
-  "Send feedback from Settings. If you're the one who invited people, their feedback lands in a Feedback folder.",
-  "Free AI with Gemini (new in 1.7): no Claude key? Add a free Google key in Settings > AI."
+  "Send feedback from Settings. If you're the one who invited people, their feedback lands in a Feedback folder."
  ],
- "build": "1.8.0-271c7191135c",
+ "build": "1.8.1-3c3934183f87",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -72,8 +73,8 @@
    "size": 15803
   },
   "js/ai.js": {
-   "sha256": "e722c0c10ebf71f3a6a506e9724761e15e8d58342d97723623ff1f1846fcbdb5",
-   "size": 29822
+   "sha256": "289100a7aedf42cef1d145e7d882ec55492a0ad6f9cd977a9799e04b39be3001",
+   "size": 39365
   },
   "js/arrivals.js": {
    "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
@@ -84,12 +85,12 @@
    "size": 5778
   },
   "js/chat.js": {
-   "sha256": "4ad59f1e02e49467d26c30cc9dc763418a267c70742c44b1809a3ccfafe5dab5",
-   "size": 78660
+   "sha256": "9bb89d19a6120904d19e04f1cea45f4f2c6eb8fa82a18302c774904b7e07437d",
+   "size": 79287
   },
   "js/clips.js": {
-   "sha256": "88a54bc8bcb7ffab26cb2c99588d275f2da0ed4bb61543611f673ef836074318",
-   "size": 13490
+   "sha256": "016e5bcbdce07cb44daee1ab78ccbc1c148df34e52400f492c6a12afc650778f",
+   "size": 13818
   },
   "js/cloud.js": {
    "sha256": "0a974bb9fbeaaee219e359616658ca78fdfa3e1b4dd782999d98e51303e8a06d",
@@ -176,7 +177,7 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "c2959231b9a498fe6b8ee5a597ee76828940b51ebd797940d170563686abfe1a",
+   "sha256": "9317ee695608b12550c530f50ff9f737a9b2b0cf0f39a7eb4b10a515d4fbf729",
    "size": 30309
   },
   "manifest.webmanifest": {
@@ -188,7 +189,7 @@
    "size": 145864
   },
   "sw.js": {
-   "sha256": "d86f7c1dfceccea5bfdc46337405faf721702f75ede28b0ae04b39c9556cf7b4",
+   "sha256": "05fa58db2780bc877f6af0bfaebf417c64c164d6627ab1de34d8f19035f7be9c",
    "size": 8259
   },
   "vendor/LICENSE-supabase-js.txt": {

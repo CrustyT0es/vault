@@ -48,9 +48,17 @@ V.ai = (() => {
   // NOT a way past a school's content filter: like Claude, Google's API is blocked on a school network — use mobile
   // data, or let the note wait and go when you're home.
   const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
-  const GEMINI_MODEL = 'gemini-2.5-flash';   // the free default; the Claude tab offers it as a model
+  // Google retires numbered models (1.7's gemini-2.5-flash was due to be switched off on 16 Oct 2026), so Vault asks
+  // for Google's own "latest" names: the newest Flash, then the newest Flash-Lite when Flash isn't offered to this key,
+  // its free quota is used up or it's overloaded.
+  const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+  const GEMINI_MODEL = GEMINI_MODELS[0];   // the Claude tab's Gemini model
   const GEMINI_KEY_FILE = 'gemini.json';
-  const GEMINI_KEY_SHAPE = /^AIza[0-9A-Za-z_-]{30,}$/;
+  // Google says not to rely on a key's format, and changed it in 2026: AI Studio made "AIza..." keys, and since 28 May
+  // 2026 only "AQ." auth keys. So only the obvious is checked here (one unbroken run of the characters a credential is
+  // made of); Google's own answer is the real check (saveGeminiKey asks it before saving).
+  const GEMINI_KEY_LOOKS = /^[A-Za-z0-9._~+/=-]{20,512}$/;
+  const KEY_CHECK_MS = 15000;  // how long the check on Save waits for each answer (a network can drop Google silently)
   const GEMINI_CONSOLE = 'https://aistudio.google.com/apikey';
 
   let key = null;       // a phone's or Chromebook's copy of the key: in memory only
@@ -224,6 +232,24 @@ V.ai = (() => {
   const geminiPath = () => `${folder()}/${GEMINI_KEY_FILE}`;
   const forgetGeminiKey = () => { geminiKey = null; };
 
+  // Other services' secrets, so one pasted here by mistake is never sent to Google: OpenAI's, Supabase's, a sign-in
+  // token, GitHub's, GitLab's, Slack's, Amazon's.
+  const NOT_GOOGLE = /^(?:sk-|sb_|sbp_|eyJ|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA)/;
+
+  /* What's wrong with `text` as a Gemini key, in plain words ('' when it could be one). */
+  function geminiKeyProblem(text) {
+    if (!text) return 'Paste the key from aistudio.google.com/apikey first.';
+    if (/^sk-ant-/i.test(text)) return 'That\'s a Claude key: paste it in the Claude key row instead.';
+    if (NOT_GOOGLE.test(text)) return 'That\'s another service\'s key, not a Google one. Copy the key from aistudio.google.com/apikey.';
+    if (!GEMINI_KEY_LOOKS.test(text)) {
+      return 'That doesn\'t look like a Google key (it\'s one long piece with no spaces). Copy it again from aistudio.google.com/apikey.';
+    }
+    return '';
+  }
+
+  /* A pasted key without the space or quotes copied round it. */
+  const tidyKey = (text) => String(text || '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
+
   async function getGeminiKey() {
     if (geminiKey) return geminiKey;
     const { data, error } = await V.cloud.sb.storage.from('vault').download(geminiPath());
@@ -233,18 +259,36 @@ V.ai = (() => {
     }
     let found = '';
     try { found = String(JSON.parse(await data.text()).key || '').trim(); } catch (e) { /* not a key file */ }
-    if (!GEMINI_KEY_SHAPE.test(found)) throw new AiError('nokey', 'The Gemini key saved in your cloud isn\'t a Google key. Set it up again in Settings > AI.');
+    if (geminiKeyProblem(found)) throw new AiError('nokey', 'The Gemini key saved in your cloud isn\'t a Google key. Set it up again in Settings > AI.');
     geminiKey = found;
     return geminiKey;
   }
 
+  /* A key pasted on a phone, a Chromebook or a Vault on its own: first one tiny request to Google with it (free), then
+     saved beside the Claude key. Google refusing the key = nothing saved, and its reason in plain words. Saved anyway,
+     to be checked when first used: no answer from Google within KEY_CHECK_MS (offline, or a network that blocks it),
+     Google's own trouble, or Google turning down the check itself rather than the key (its words are passed on: Vault
+     can't be sure its check is how Google wants it, and a good key must never be refused for that). A used-up free quota
+     means Google took the key. Returns { checked, why, said } (why: 'offline', 'busy' or 'bad' when it couldn't be
+     checked). */
   async function saveGeminiKey(pasted) {
-    const clean = String(pasted || '').trim();
-    if (!GEMINI_KEY_SHAPE.test(clean)) throw new Error('That doesn\'t look like a Google key: they start with AIza and are long. Get one free at aistudio.google.com/apikey.');
+    const clean = tidyKey(pasted);
+    const problem = geminiKeyProblem(clean);
+    if (problem) throw new Error(problem);
+    let why = '';
+    let said = '';
+    try {
+      await geminiRequest(clean, { contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK.' }] }], maxTokens: 16,
+        wait: KEY_CHECK_MS });
+    } catch (error) {
+      if (error.kind === 'key' || !error.kind) throw new Error(error.message);
+      if (error.kind !== 'quota') { why = error.kind; said = error.message; }
+    }
     const record = { format: 1, key: clean, from: V.device, at: new Date().toISOString() };
     await V.cloud.upload(geminiPath(), new Blob([JSON.stringify(record)], { type: 'application/json' }), { mime: 'application/json' });
     geminiKey = clean;
     known = { ...(known || {}), gemini: true };
+    return { checked: !why, why, said };
   }
 
   async function removeGeminiKey() {
@@ -257,7 +301,9 @@ V.ai = (() => {
 
   const WORDS = {
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
-    geminiKey: 'Google didn\'t accept the Gemini key. Set it up again in Settings > AI.',
+    geminiOffline: 'Gemini can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
+    geminiBusy: 'Gemini is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
+    geminiQuota: 'Google\'s free Gemini limit is used up for the moment. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     busy: 'Claude is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     away: 'You\'re offline. Your words are saved, and the notes will be made by themselves when you\'re back online.',
@@ -289,38 +335,117 @@ V.ai = (() => {
     return { text: words, stopReason: data.stop_reason || '', usage: data.usage || {} };
   }
 
-  /* One request straight to Google's Gemini API. `contents` is Gemini's own shape ([{ role:'user'|'model', parts:[...] }]);
-     the note-taker sends one user turn, the Claude tab a whole conversation. Returns { text, stopReason, usage } like
-     `direct`, with usage.gemini so it's priced as free. Never retried. */
-  async function callGemini({ system, contents, model = GEMINI_MODEL, maxTokens = MAX_TOKENS, signal } = {}) {
-    const sending = await getGeminiKey();
+  /* -- Gemini's requests */
+
+  /* Google's error answer as { message, reason } (reason: its ErrorInfo's, like API_KEY_INVALID). The message never
+     holds the key, even if Google ever echoed it (or another key-shaped piece), and is cut short after that. */
+  function googleError(data, sending) {
+    const e = (data && data.error) || {};
+    const reasons = (Array.isArray(e.details) ? e.details : []).map((d) => d && d.reason).filter(Boolean);
+    let message = String(e.message || '');
+    if (sending) message = message.split(sending).join('…');
+    message = message.replace(/(?<![A-Za-z0-9_])(?:AQ\.|AIza)[A-Za-z0-9_.-]{8,}/g, '…').slice(0, 300);
+    return { message, reason: String(reasons[0] || '') };
+  }
+
+  // Reasons Google gives for refusing a key itself, for every model: API_KEY_INVALID, API_KEY_..._BLOCKED,
+  // SERVICE_DISABLED, CONSUMER_SUSPENDED. (A bare 401 or 403, ACCESS_TOKEN_TYPE_UNSUPPORTED included, has been tied to
+  // particular models, so another model may still take the key.)
+  const KEY_REASON = /^(?:API_KEY_INVALID|API_KEY_\w*_BLOCKED|SERVICE_DISABLED|CONSUMER_SUSPENDED)$/;
+
+  /* What a failed answer means: 'key' (Google refused the key itself), 'refused' (a 401/403 that may be this model's
+     alone), 'missing' (no such model for this key), 'quota' (its free quota is used up: Google took the key), 'busy'
+     (Google's own trouble) or 'bad' (this request). */
+  function geminiTrouble(status, why) {
+    if ([400, 401, 403].includes(status) && (KEY_REASON.test(why.reason) || /api key/i.test(why.message))) return 'key';
+    if (status === 401 || status === 403) return 'refused';
+    if (status === 404) return 'missing';
+    if (status === 429) return 'quota';
+    if (status >= 500) return 'busy';
+    return 'bad';
+  }
+
+  /* Why Google refused a key, and what to do, in plain words. */
+  function keyWords(why, sending) {
+    const again = 'Make a new key at aistudio.google.com/apikey and paste it in Settings > AI.';
+    if (why.reason === 'ACCESS_TOKEN_TYPE_UNSUPPORTED') {
+      return 'Google refused this key (ACCESS_TOKEN_TYPE_UNSUPPORTED), a known problem on Google\'s side with some of its '
+        + 'new AQ. keys. Make a new key at aistudio.google.com/apikey, in a new project, and paste it in Settings > AI.';
+    }
+    if (why.reason === 'SERVICE_DISABLED' || /has not been used in project|is disabled/i.test(why.message)) {
+      return `The Gemini API is switched off for that key's Google project. ${again}`;
+    }
+    if (/^API_KEY_.*_BLOCKED$/.test(why.reason)) {
+      return `That key is limited to other websites or apps (its restrictions in Google Cloud). ${again}`;
+    }
+    if (/^AIza/.test(sending || '')) {
+      return 'Google is replacing its older keys (the ones starting AIza) with new ones that start with AQ., and didn\'t take '
+        + `this one. ${again}`;
+    }
+    if (why.reason === 'API_KEY_INVALID' || /not valid/i.test(why.message)) {
+      return 'Google says that key isn\'t valid. Copy it again from aistudio.google.com/apikey (all of it) and paste it in Settings > AI.';
+    }
+    return `Google didn't accept the Gemini key${why.message ? ` (${why.message})` : ''}. ${again}`;
+  }
+
+  /* One generateContent request with `sending` as the key, trying GEMINI_MODELS in turn: one Google doesn't offer this
+     key, whose free quota is used up, that's overloaded or that turns the key down moves on to the next. `wait` (ms)
+     gives up on an answer that takes longer (the check on Save; a chat has Stop). Returns { data, model }, or throws an
+     AiError: 'stopped' (`signal` aborted), 'bad' (Google turned this request down), or, when no model answered: 'quota'
+     (Google took the key, its free quota is used up), 'key' (a model refused the key itself: why, in plain words),
+     'busy' (Google's own trouble), 'key' again for a refusal that may have been one model's (none took the key),
+     'offline' (no answer: no internet, a network that blocks Google, or too slow), else 'bad' (none offered). */
+  async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0 } = {}) {
     const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
-    let response;
+    const failed = [];
+    for (const model of GEMINI_MODELS) {
+      let response;
+      let data = null;
+      try {
+        response = await fetch(`${GEMINI_API}${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', signal: signal || (wait && AbortSignal.timeout ? AbortSignal.timeout(wait) : undefined),
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': sending },
+          body: JSON.stringify(body),
+        });
+        try { data = await response.json(); } catch (error) { /* not JSON, or cut off */ }
+      } catch (error) {
+        if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
+        failed.push({ trouble: 'offline' });
+        break;  // (the next model is on the same network)
+      }
+      if (response.ok && data) return { data, model };
+      const why = googleError(data, sending);
+      const trouble = response.ok ? 'busy' : geminiTrouble(response.status, why);  // (an answer that isn't JSON: busy)
+      if (trouble === 'bad') throw new AiError('bad', `Gemini couldn't answer this${why.message ? ` (${why.message})` : ''}.`);
+      failed.push({ trouble, why });
+    }
+    const first = (trouble) => failed.find((f) => f.trouble === trouble);
+    if (first('quota')) throw new AiError('quota', WORDS.geminiQuota);  // (a model took the key)
+    if (first('key')) throw new AiError('key', keyWords(first('key').why, sending));
+    if (first('busy')) throw new AiError('busy', WORDS.geminiBusy);  // (likewise)
+    if (first('refused')) throw new AiError('key', keyWords(first('refused').why, sending));
+    if (first('offline')) throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
+    const said = failed[0] && failed[0].why && failed[0].why.message;
+    throw new AiError('bad', `Google's Gemini models aren't available for this key right now${said ? ` (${said})` : ''}. Try again later.`);
+  }
+
+  /* One request straight to Google's Gemini API with the saved key. `contents` is Gemini's own shape ([{ role:
+     'user'|'model', parts:[...] }]): the note-taker sends one user turn, the Claude tab a whole conversation (whichever
+     Gemini its chat names, 1.7's "gemini-2.5-flash" too: GEMINI_MODELS decide). Returns { text, stopReason, usage } like
+     `direct`, with usage.gemini so it's priced as free, and usage.model the model that answered. A used-up free quota is
+     'busy', so it waits and goes again later like a busy Claude. */
+  async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal } = {}) {
+    const sending = await getGeminiKey();
+    let answer;
     try {
-      response = await fetch(`${GEMINI_API}${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', signal,
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': sending },
-        body: JSON.stringify(body),
-      });
-    } catch (error) {  // stopped, no internet, or a network that blocks Google (a school's)
-      if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
-      throw new AiError('offline', navigator.onLine ? WORDS.offline : WORDS.away);
+      answer = await geminiRequest(sending, { system, contents, maxTokens, signal });
+    } catch (error) {
+      if (error.kind === 'key') geminiKey = null;  // forgotten, so a key set up again elsewhere is read next time
+      if (error.kind === 'quota') throw new AiError('busy', error.message);
+      throw error;
     }
-    if (response.status === 401 || response.status === 403 || response.status === 400) {
-      // 400 is often a bad key too: forget it so a replaced one is read next time.
-      let said = ''; try { said = ((await response.json()).error || {}).message || ''; } catch (e) { /* not JSON */ }
-      geminiKey = null;
-      throw new AiError('key', said && !/key/i.test(said) ? `Google turned the request down (${said}).` : WORDS.geminiKey);
-    }
-    if (response.status === 429 || response.status >= 500) throw new AiError('busy', WORDS.busy);
-    let data = null;
-    try { data = await response.json(); } catch (error) { /* not JSON */ }
-    if (!response.ok || !data) {
-      const said = data && data.error && data.error.message;
-      if (response.status === 404) throw new AiError('bad', `The Gemini model "${model}" isn't available for this key${said ? ` (${said})` : ''}. Try again later.`);
-      throw new AiError('bad', `Gemini couldn't answer this${said ? ` (${said})` : ''}.`);
-    }
+    const { data, model } = answer;
     const cand = (data.candidates || [])[0] || {};
     const finish = String(cand.finishReason || '');
     const text = (((cand.content || {}).parts) || []).filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('');
@@ -458,7 +583,8 @@ V.ai = (() => {
     if (!ownKeys()) {
       return ui.line('Gemini key (free)', 'A free backup from Google, for when there\'s no Claude key. Add it on your phone or Chromebook (Vault > Settings > AI there).', null);
     }
-    if (known && known.gemini) {
+    if (!known) return ui.line('Gemini key (free)', 'Checking...', null);  // (its box would be drawn again under the typing)
+    if (known.gemini) {
       const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
       const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
         const sure = await V.confirm('Remove the Gemini key?', 'This device stops using Google\'s free Gemini.', { ok: 'Remove', danger: true });
@@ -470,15 +596,30 @@ V.ai = (() => {
         ? 'Google\'s free model: on this PC it makes the note-taker\'s notes when there\'s no Claude key (Gemini chats are on your phone or Chromebook).'
         : 'Google\'s free model, used when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
     }
-    const box = V.h('input.field', { type: 'password', placeholder: 'AIza...', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
+    const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
     const save = V.button('Save', { kind: 'primary', onClick: async () => {
-      try { await saveGeminiKey(box.value); box.value = ''; V.toast('Gemini key saved — it\'s free to use.'); ui.draw(); }
-      catch (error) { V.problem(error); }
+      save.disabled = true;
+      save.lastChild.textContent = 'Checking…';  // (with Google: a few seconds at most)
+      try {
+        const saved = await saveGeminiKey(box.value);
+        box.value = '';
+        V.toast(saved.checked ? 'Gemini key checked with Google and saved — it\'s free to use.'
+          : saved.why === 'bad' ? `Gemini key saved, but Google's check said: ${saved.said}`
+          : `Gemini key saved. ${saved.why === 'busy' ? 'Google was too busy to check it just now'
+            : 'Google couldn\'t be reached from this network to check it'}, so it's checked the first time Vault uses it.`,
+        { ms: saved.why === 'bad' ? 9000 : 6000 });
+        ui.draw();
+      } catch (error) {
+        V.toast(error.message || String(error), { kind: 'err', ms: 9000 });  // (long enough to read Google's reason)
+      } finally {
+        save.disabled = false;
+        save.lastChild.textContent = 'Save';
+      }
     } });
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
     const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
     return V.h('div.ai-key.ai-key-gemini', {},
-      ui.line('Gemini key (free)', 'No Claude key? Google\'s Gemini is free. Get a key at aistudio.google.com/apikey and paste it here: it\'s kept in your own cloud and never shown. (Like Claude, it won\'t work on school wifi — use mobile data.)', null),
+      ui.line('Gemini key (free)', 'No Claude key? Google\'s Gemini is free. Get a key at aistudio.google.com/apikey (new ones start with AQ.) and paste it here: Vault checks it with Google, then keeps it in your own cloud, never shown. (Like Claude, it won\'t work on school wifi — use mobile data.)', null),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }));
   }
@@ -522,12 +663,13 @@ V.ai = (() => {
         + 'free, so it isn\'t counted here.' }));
   }
 
-  V.on('signed-out', () => { key = null; known = null; });
+  // Both keys go with the person: the next one to sign in on this device (a friend, say) never uses them.
+  V.on('signed-out', () => { key = null; geminiKey = null; known = null; });
 
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, getGeminiKey, saveGeminiKey, removeGeminiKey, forgetGeminiKey, AiError, WORDS, PRICES,
     state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc) || known.gemini)),
     // The Claude tab on a PC answers with Claude only (chat.js), so a PC never "has" Gemini for it.
     has: (who) => (who === 'gemini' ? !V.desktop && !!(known && known.gemini) : !!(known && (known.cloud || (V.desktop && known.pc)))),
-    MODEL, API, API_VERSION, GEMINI_MODEL };
+    MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS };
 })();

@@ -19,7 +19,9 @@ V.clips = (() => {
   /* -- what's never shared by itself (vault/local.py's may_share, for the phone and the Chromebook): anything that
      looks like a password, a key, a card number or a code. Sharing it from the box or the button is still allowed. */
   const LINKS = /(?:https?:\/\/|www\.)\S+/gi;
-  const KEY = /sk-ant-|\b(?=[\w\-+=]*\d)(?=[\w\-+=]*[A-Za-z])[\w\-+=]{24,}/;
+  // Google's keys ("AQ." and the older "AIza"): a key even inside a web address (?key=...). As jarvis/redact.py's.
+  const GOOGLE_KEY = /(?<![A-Za-z0-9_])(?:AQ\.[A-Za-z0-9_.-]{20,}|AIza[A-Za-z0-9_-]{30,})/;
+  const KEY = /sk-ant-|(?<![A-Za-z0-9_])(?:AQ\.[A-Za-z0-9_.-]{20,}|AIza[A-Za-z0-9_-]{30,})|\b(?=[\w\-+=]*\d)(?=[\w\-+=]*[A-Za-z])[\w\-+=]{24,}/;  // (as jarvis/redact.py)
   const CARD = /\b\d(?:[ .-]{0,2}\d){12,18}\b/g;
   const CUE = /\b(?:pass ?words?|passcodes?|pwd|pin|wi-?fi (?:key|password)|security code|cvv)\s*(?:is|:|=|-)\s*\S/i;
 
@@ -31,7 +33,7 @@ V.clips = (() => {
 
   function mayShare(text) {
     const clean = String(text || '').trim();
-    if (!clean || clean.length > 20000 || clean.includes('sk-ant-')) return false;
+    if (!clean || clean.length > 20000 || clean.includes('sk-ant-') || GOOGLE_KEY.test(clean)) return false;
     const words = clean.replace(LINKS, ' ');  // a long web address isn't a key
     if (CUE.test(words) || KEY.test(words) || (words.match(CARD) || []).some(luhn)) return false;
     // A short run of letters, digits and symbols with no spaces is how passwords look.

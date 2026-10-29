@@ -20,6 +20,9 @@
 'use strict';
 
 V.chat = (() => {
+  // The Gemini choice's id in a chat, kept from 1.7 so an older Vault on another device still reads such a chat as
+  // Gemini (to it, anything else is Claude). It names no model any more: ai.js picks Google's newest itself.
+  const GEMINI_MODEL = 'gemini-2.5-flash';
   const MODELS = [
     { id: 'claude-haiku-5-5', provider: 'claude', name: 'Claude Haiku 5.5', short: 'Haiku 5.5', about: 'Quick and cheap. Good for most questions.',
       search: 'web_search_20250305', fallback: false },
@@ -31,12 +34,13 @@ V.chat = (() => {
       search: 'web_search_20260209', fallback: true },
     // Gemini (Google), free: for anyone without a paid Claude key. Add a free key in Settings > AI. Text and pictures;
     // no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter (use mobile data).
-    { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
-      about: 'Google\'s free model. No Claude key needed — just a free Google key (Settings > AI).' },
+    // (any other "gemini..." id is this one too)
+    { id: GEMINI_MODEL, provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
+      about: 'Google\'s free model (its newest Flash). No Claude key needed — just a free Google key (Settings > AI).' },
   ];
   const CLAUDE_MODELS = MODELS.filter((m) => m.provider !== 'gemini');
   const DEFAULT_MODEL = MODELS[0].id;
-  const GEMINI_MODEL = 'gemini-2.5-flash';
+  const geminiId = (id) => /^gemini/.test(String(id || ''));
   const isGemini = (id) => modelOf(id).provider === 'gemini';
   /* A new chat defaults to Claude, unless only a free Gemini key is set up (a friend without a paid key). */
   const defaultModel = () => (!V.ai.has('claude') && V.ai.has('gemini') ? GEMINI_MODEL : DEFAULT_MODEL);
@@ -96,11 +100,13 @@ V.chat = (() => {
   const dir = () => `${owner()}/chats`;
   const fileOf = (id) => `${dir()}/${id}.json`;
   const filesDir = (id) => `${dir()}/${id}/files`;
-  const modelOf = (id) => MODELS.find((m) => m.id === id) || MODELS[0];
-  /* "Haiku 5.5"; a model the API answered with instead ("claude-opus-4-8") as "Opus 4.8". */
+  const modelOf = (id) => MODELS.find((m) => m.id === id)
+    || (geminiId(id) ? MODELS.find((m) => m.provider === 'gemini') : null) || MODELS[0];
+  /* "Haiku 5.5"; a model the API answered with instead ("claude-opus-4-8") as "Opus 4.8"; any Gemini as "Gemini". */
   const nameOf = (id) => {
     const known = MODELS.find((m) => m.id === id);
     if (known) return known.short;
+    if (geminiId(id)) return 'Gemini';
     const [family, ...version] = String(id || 'Claude').replace(/^claude-/, '').split('-');
     return [family.charAt(0).toUpperCase() + family.slice(1), version.join('.')].filter(Boolean).join(' ');
   };
@@ -516,7 +522,7 @@ V.chat = (() => {
     const contents = await geminiContents(chat, turn);
     const maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
     try {
-      return await V.ai.callGemini({ system: chat.system, contents, model: turn.model, maxTokens, signal: job.controller.signal });
+      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal });
     } catch (error) {
       if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
       const kind = (error && error.kind) || 'bad';
@@ -683,7 +689,7 @@ V.chat = (() => {
           const out = await geminiTurn(chat, turn, job);
           reply.content = tidy([{ type: 'text', text: out.text || '' }]);
           reply.usage = out.usage || {};
-          reply.model = turn.model;
+          reply.model = turn.model;  // (the Gemini choice; the model Google answered with is in usage.model)
           reply.cost = 0;  // free
           reply.stop_reason = out.stopReason;
           if (job.stopped) { turn.state = 'stopped'; break; }
@@ -1250,23 +1256,24 @@ V.chat = (() => {
     if (!chat) return;
     const per = (r) => `$${r.input.toFixed(2)} in · $${r.output.toFixed(2)} out a million tokens`;
     const cents = (d) => `${(d * 100).toFixed(d < 0.001 ? 2 : 1)}¢`;
+    const current = modelOf(chat.model).id;  // (any "gemini..." id shows as the Gemini choice)
     const sheet = V.sheet({
       title: 'Model',
       content: [V.h('div.model-choices', {}, (V.desktop ? CLAUDE_MODELS : MODELS).map((m) => {
         const r = V.ai.rates(m.id);
         const typical = (1500 * r.input + 600 * r.output) / 1e6;
         const costLine = m.free ? 'Free — needs a free Google key (Settings > AI)' : `About ${cents(typical)} a short answer · ${per(r)}`;
-        return V.h('button.model-choice' + (m.id === chat.model ? '.on' : ''), { type: 'button', dataset: { model: m.id },
-          'aria-current': m.id === chat.model ? 'true' : null, onclick: async () => {
+        return V.h('button.model-choice' + (m.id === current ? '.on' : ''), { type: 'button', dataset: { model: m.id },
+          'aria-current': m.id === current ? 'true' : null, onclick: async () => {
             sheet.close();
-            if (chat.model === m.id) return;
+            if (current === m.id) return;
             chat.model = m.id;
             drawBox();
             if (chats.has(chat.id)) await persist(chat);
           } },
         V.h('span.mc-text', {}, V.h('span.mc-name', { text: m.name }), V.h('span.mc-about', { text: m.about }),
           V.h('span.mc-cost', { text: costLine })),
-        m.id === chat.model ? V.icon('check', 'mc-check') : null);
+        m.id === current ? V.icon('check', 'mc-check') : null);
       })),
       V.h('p.hint', { text: 'Changing it in the middle of a chat is fine: the next answer uses the new one. "Think" makes any of them think longer (slower, and it costs more).' })],
     });
