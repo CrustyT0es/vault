@@ -1,9 +1,13 @@
 /* Vault: the Chat tab (called the Claude tab until 1.8.3; its id stays 'claude', so old links and kept places still
-   work). Chats with Claude (or the free Gemini): a list of them (newest first) and one open chat, with the model picked per
-   chat (Haiku unless the owner picks another), "Think harder" and "Search the web" switches, notes and files to ask
-   about, and answers that can be saved as notes.
+   work). Chats with Google's free Gemini, and with Claude too once it's switched on (Settings > AI, "Use Claude too",
+   js/ai.js): a list of them (newest first) and one open chat, with the model picked per chat (Gemini unless the owner
+   picks another), "Think harder" and "Search the web" switches (Claude's), notes and files to ask about, and answers
+   that can be saved as notes. While Claude is off only Gemini is offered, and a chat that was on a Claude model goes on
+   with Gemini (useNow, modelFor): its earlier answers stay as they came, nothing is ever sent to Claude, and its own
+   model is kept for when Claude is switched on again.
 
-   Requests go straight from this device to Claude (api.anthropic.com) with the owner's own key (js/ai.js: the key,
+   Gemini's requests go straight from this device to Google (js/ai.js callGemini). Claude's go straight from this
+   device to Claude (api.anthropic.com) with the owner's own key (js/ai.js: the key,
    the prices and the monthly tally and limit are shared with the note-taker). On the PC the page builds the same
    request and Python sends it (vault/claudechat.py, the chatSend bridge call), so the key never enters the page there;
    the reply streams back as events either way and shows as it comes. Nothing goes any other way: a network that
@@ -33,19 +37,38 @@ V.chat = (() => {
       search: 'web_search_20260209', fallback: true },
     { id: 'claude-fable-5-1', provider: 'claude', name: 'Claude Fable 5.1', short: 'Fable 5.1', about: 'The most capable, and expensive: keep it for the hardest things.',
       search: 'web_search_20260209', fallback: true },
-    // Gemini (Google), free: for anyone without a paid Claude key. Add a free key in Settings > AI. Text and pictures;
-    // no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter (use mobile data).
-    // (any other "gemini..." id is this one too)
+    // Gemini (Google), free: Chat's own model (the only one while Claude is off). Add a free key in Settings > AI.
+    // Text and pictures; no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter
+    // (use mobile data). (any other "gemini..." id is this one too)
     { id: GEMINI_MODEL, provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
-      about: 'Google\'s free model (its newest Flash). No Claude key needed — just a free Google key (Settings > AI).' },
+      about: 'Google\'s free model (its newest Flash). Just needs a free Google key (Settings > AI).' },
   ];
-  const DEFAULT_MODEL = MODELS[0].id;
+  const CLAUDE_MODEL = MODELS[0].id;  // (MODELS[0] stays Claude's: an id nobody knows is read as a Claude model)
   const geminiId = (id) => /^gemini/.test(String(id || ''));
-  /* A PC whose Jarvis is too old for Claude chats (no chatSend): a Gemini chat still works there, from the page. */
-  const tooOld = (chat) => V.desktop && !V.pc.can('chatSend') && !(chat && isGemini(chat.model));
   const isGemini = (id) => modelOf(id).provider === 'gemini';
-  /* A new chat defaults to Claude, unless only a free Gemini key is set up (a friend without a paid key). */
-  const defaultModel = () => (!V.ai.has('claude') && V.ai.has('gemini') ? GEMINI_MODEL : DEFAULT_MODEL);
+  /* The model that answers for `model` now: itself, or Gemini while Claude is switched off. Claude being off never
+     rewrites a chat's or a message's own model: the chat goes back to the Claude model picked for it once Claude is on
+     again, and a message waiting for Claude takes Gemini's name only once Gemini has answered it (answer). */
+  const useNow = (model) => (isGemini(model) || V.ai.claudeOn() ? model : GEMINI_MODEL);
+  /* The model a chat uses now (a chat started on a Claude model goes on with Gemini while Claude is off). */
+  const modelFor = (chat) => useNow((chat && chat.model) || GEMINI_MODEL);
+  /* A PC whose Jarvis is too old for Claude chats (no chatSend): a Gemini chat still works there, from the page. */
+  const tooOld = (chat) => V.desktop && !V.pc.can('chatSend') && !isGemini(modelFor(chat));
+  /* A new chat starts on Gemini; with Claude switched on and its key there, only when the Gemini key is known to be set
+     up: one the key check couldn't tell about (the PC's cloud listing came too late) may not be, and a first message
+     to a Gemini with no key only bounces ("set up Gemini"), so that's Claude until the answer comes (retarget). */
+  const defaultModel = () => (V.ai.claudeOn() && V.ai.has('claude') && !V.ai.has('gemini')
+    && (!V.desktop || V.pc.can('chatSend')) ? CLAUDE_MODEL : GEMINI_MODEL);  // (an older Jarvis can't chat with Claude)
+  /* Whether the default still hangs on a Gemini key the key check couldn't tell about. */
+  const defaultUnsure = () => V.ai.claudeOn() && V.ai.has('claude') && !V.ai.geminiKnown();
+  /* A message that Gemini would answer (always, while Claude is off) when Gemini isn't set up here, as the key check
+     knows: it waits for the free key rather than failing for the lack of it. That answer is looked at again before a
+     message is held for it (V.ai.recheck): a key set up on another device since lets it go. */
+  const needsGemini = (turn) => isGemini(useNow(turn.model)) && V.ai.lacksGemini();
+  /* A message that would go to Gemini only because Claude seems to be off, before this device has read the settings
+     from the cloud: a new device knows nothing yet, so it isn't sent by itself until it does. */
+  const unsure = (turn) => !isGemini(turn.model) && !V.ai.claudeOn() && !V.ai.modeKnown();
+  const SETTLE_MS = 5000;  // a send (or Retry) waits this long at most for a new device to read "Use Claude too"
   const SYSTEM = [
     'You are a helpful AI assistant built into Vault, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
     'Keep answers clear, friendly and no longer than they need to be. Use Markdown: short paragraphs, lists, **bold** for the key words, headings for long answers, and code blocks for code.',
@@ -90,6 +113,7 @@ V.chat = (() => {
   let refreshing = null;
   const unsent = new Map();  // id -> a chat started here that has no messages yet
   const picked = new Set();  // chats whose model was picked by hand (never moved to Gemini by retarget)
+  const defaulted = new Set();  // chats started here on the default model (newChat): only these follow the default
   const drafts = new Map();  // chat id -> { text, notes, files }: what's in the box
   let openId = null;
   let showingChat = false;   // a phone shows the list or one chat
@@ -133,6 +157,8 @@ V.chat = (() => {
   }
 
   const WORDS = {
+    setup: 'Chat uses Google\'s free Gemini. Add a free key once: it only takes a minute.',
+    needsGemini: 'Set up the free Gemini first (Settings > AI). Your message waits till then.',
     offline: 'Claude can\'t be reached from this network. Your message is kept: try again, or send it from another network.',
     away: 'You\'re offline. Your message is kept: try again when you\'re back online.',
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
@@ -156,14 +182,15 @@ V.chat = (() => {
           const chat = await V.db.meta('chat:' + id).catch(() => null);
           if (valid(chat)) map.set(id, chat);
         }
-        index = { prints: kept.prints || {}, waiting: new Set(kept.waiting || []) };
+        index = { prints: kept.prints || {}, waiting: new Set(kept.waiting || []), gone: new Set(kept.gone || []) };
         chats = map;
       })().finally(() => { loading = null; });
     }
     return loading;
   }
 
-  const keepIndex = () => V.db.meta('chats', { ids: [...chats.keys()], prints: index.prints, waiting: [...index.waiting] });
+  const keepIndex = () => V.db.meta('chats', { ids: [...chats.keys()], prints: index.prints, waiting: [...index.waiting],
+    gone: [...index.gone] });
 
   async function listed(search) {
     const { data, error } = await V.cloud.sb.storage.from('vault').list(dir(), { limit: 1000, search,
@@ -196,6 +223,8 @@ V.chat = (() => {
   async function persist(chat) {
     chats.set(chat.id, chat);
     unsent.delete(chat.id);
+    defaulted.delete(chat.id);  // (in the cloud now, where another device may choose its model)
+    index.gone.delete(chat.id);  // (sent again after its only message was cancelled: it's back)
     index.waiting.add(chat.id);
     await V.db.meta('chat:' + chat.id, chat);
     await keepIndex();
@@ -216,6 +245,13 @@ V.chat = (() => {
           const id = f.name.slice(0, -5);
           seen.add(id);
           const print = printOf(f);
+          if (index.gone.has(id)) {
+            // Its only message was cancelled here: taken out of the cloud below, unless another device has changed it
+            // since this one last saw it (answered the message, say): then theirs is kept, and fetched like any other.
+            if (print === index.prints[id]) continue;
+            index.gone.delete(id);
+            unsent.delete(id);
+          }
           if ((index.prints[id] === print && chats.has(id)) || index.waiting.has(id) || (busy && busy.chatId === id)) continue;
           const theirs = await download(id);
           if (!theirs) continue;
@@ -235,6 +271,10 @@ V.chat = (() => {
           changed = true;
         }
         await keepIndex();
+        for (const id of [...index.gone]) {
+          if (!seen.has(id)) { index.gone.delete(id); continue; }
+          await takeOut(id).catch(() => {});
+        }
         for (const id of [...index.waiting]) {
           const chat = chats.get(id);
           if (!chat) { index.waiting.delete(id); continue; }
@@ -246,6 +286,24 @@ V.chat = (() => {
       })().finally(() => { refreshing = null; });
     }
     return refreshing;
+  }
+
+  /* A chat whose only message was cancelled here (it's back in the box, never sent): taken out of the cloud, so no
+     device (this one's next look included) brings the waiting message back or sends it. Its files stay: the box has
+     them again. Until it's out (offline), `index.gone` remembers it and the next look tries again. Only the version
+     this device last saw is taken out: one another device has changed since (it answered the message, maybe paid for)
+     is left, and the next look brings it here instead. */
+  async function takeOut(id) {
+    const there = (await listed(id)).find((f) => f.name === id + '.json');
+    if (there && printOf(there) !== index.prints[id]) {
+      if (index.gone.delete(id)) await keepIndex();
+      return;
+    }
+    if (there) await V.cloud.remove([fileOf(id)]);
+    if (!index.gone.has(id)) return;  // (sent again meanwhile)
+    index.gone.delete(id);
+    delete index.prints[id];
+    await keepIndex();
   }
 
   /* A refresh, but never waiting long for it (a slow network shouldn't hold a message up). */
@@ -271,6 +329,7 @@ V.chat = (() => {
     const chat = { format: 1, id: V.uuid(), title: '', created: now(), updated: now(), model: defaultModel(), think: false,
       search: false, system: SYSTEM, turns: [] };
     unsent.set(chat.id, chat);
+    defaulted.add(chat.id);
     return chat;
   }
   const chatOf = (id) => (chats && chats.get(id)) || unsent.get(id) || null;
@@ -335,9 +394,9 @@ V.chat = (() => {
         w: small.w, h: small.h, tokens: Math.ceil(small.w / 28) * Math.ceil(small.h / 28) };
     }
     if (kind === 'pdf') {
-      if (file.size > PDF_MOST) throw new ChatError('file', `${name} is too big for Claude (20 MB at most for a PDF).`);
+      if (file.size > PDF_MOST) throw new ChatError('file', `${name} is too big to send (20 MB at most for a PDF).`);
       const pages = await pagesOf(file);
-      if (pages > PAGES_MOST) throw new ChatError('file', `${name} has ${pages} pages: Claude reads ${PAGES_MOST} at most.`);
+      if (pages > PAGES_MOST) throw new ChatError('file', `${name} has ${pages} pages: ${PAGES_MOST} is the most that can be read.`);
       return { kind, name, mime: 'application/pdf', blob: file, pages, tokens: Math.max(1, pages || Math.ceil(file.size / 100000)) * PAGE_TOKENS };
     }
     if (file.size > TEXT_MOST) throw new ChatError('file', `${name} is too long to send as text (1 MB at most).`);
@@ -366,7 +425,7 @@ V.chat = (() => {
       }
       const waiting = draft.files.reduce((s, f) => s + (f.size || 0), 0);
       if (filesSent(chat) + waiting + ready.blob.size > FILES_MOST) {
-        V.toast('That\'s more files than one message to Claude can carry. Start a new chat for this one.', { kind: 'err', ms: 6000 });
+        V.toast('That\'s more files than one message can carry. Start a new chat for this one.', { kind: 'err', ms: 6000 });
         continue;
       }
       const item = { id: V.uuid().slice(0, 8), kind: ready.kind, name: ready.name, mime: ready.mime, size: ready.blob.size,
@@ -649,6 +708,7 @@ V.chat = (() => {
   V.on('pc:chat-event', ({ id, event }) => { const fn = listeners.get(id); if (fn) fn(event); });
 
   async function viaPc(body, betas, run, onEvent) {
+    if (!V.ai.claudeOn()) throw new ChatError('nokey', V.ai.WORDS.off);  // (Jarvis's key: never while Claude is off)
     if (!V.pc.can('chatSend')) throw new ChatError('old', WORDS.old);
     const id = V.uuid();
     run.pcId = id;
@@ -683,6 +743,7 @@ V.chat = (() => {
   /* One turn answered (a new message, Retry of the last, or a waiting turn going out once Claude can be reached).
      `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us. */
   async function answer(chat, turn, { first = false, claim = false } = {}) {
+    const model = useNow(turn.model);  // (Claude switched off: it goes with Gemini)
     const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false };
     busy = job;
     trouble = null;
@@ -695,13 +756,16 @@ V.chat = (() => {
     let failed = null;
     try {
       for (let n = 0; n < MOST_REPLIES; n++) {
-        if (isGemini(turn.model)) {  // Gemini: one call, streamed (no tools or server fallback: ai.js picks the model)
-          const reply = fresh(turn.model);
+        if (isGemini(model)) {  // Gemini: one call, streamed (no tools or server fallback: ai.js picks the model)
+          const reply = fresh(model);
           turn.replies.push(reply);
           const out = await geminiTurn(chat, turn, job, (words) => { reply.content = [{ type: 'text', text: words }]; showLive(); });
           reply.content = tidy([{ type: 'text', text: out.text || '' }]);
           reply.usage = out.usage || {};
-          reply.model = turn.model;  // (the Gemini choice; the model Google answered with is in usage.model)
+          reply.model = model;  // (the Gemini choice; the model Google answered with is in usage.model)
+          // Gemini took it (it answered, or said no): the message is Gemini's from now on, so Retry asks Gemini again.
+          // Until then a message meant for Claude keeps Claude's name, and goes to Claude once it's switched on.
+          if (out.text || out.stopReason === 'refusal') turn.model = model;
           reply.cost = 0;  // free
           reply.stop_reason = out.stopReason;
           if (job.stopped) { turn.state = 'stopped'; break; }
@@ -745,11 +809,13 @@ V.chat = (() => {
     delete turn.answeringAt;
     if (failed) {
       const heard = turn.replies.some((r) => r.content.length);
-      if (!heard && WAIT_KINDS.has(failed.kind)) {
+      if (!heard && (WAIT_KINDS.has(failed.kind) || (claim && failed.kind === 'nokey' && isGemini(model)))) {
         // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
-        // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send".
+        // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send". So does a message
+        // that was already waiting when Gemini, which would answer it now, turns out not to be set up: it goes once
+        // the free key is (the box offers it), never lost for the lack of it.
         turn.state = 'waiting';
-        turn.waitWhy = failed.why;  // (the waiting line says why, naming the model the chat uses)
+        turn.waitWhy = failed.kind === 'nokey' ? 'setup' : failed.why;  // (the waiting line says why, naming the model)
         turn.problem = '';
         turn.replies = [];
       } else if (first && !heard && failed.kind !== 'dropped') {
@@ -774,7 +840,7 @@ V.chat = (() => {
       }
     }
     if (turn.state === 'waiting') {
-      if (isGemini(turn.model) && GEMINI_SOON.has(turn.waitWhy)) retrySoon(chat, turn);
+      if (isGemini(model) && GEMINI_SOON.has(turn.waitWhy)) retrySoon(chat, turn);
     } else {
       forgetSoon(turn.id);
       delete turn.waitWhy;
@@ -809,12 +875,19 @@ V.chat = (() => {
   function startPump() { if (!pumpTimer) pumpTimer = setInterval(() => pump().catch(() => {}), PUMP_EVERY); }
   function stopPump() { if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = null; } }
 
+  /* A waiting message that can't go by itself yet: Gemini would answer it and isn't set up, or this device hasn't yet
+     read whether Claude is on (unsure). It stays waiting, and the others behind it still go. */
+  const held = (turn) => needsGemini(turn) || unsure(turn);
+
+  const anyHeldForGemini = () => [...(chats || new Map()).values()]
+    .some((c) => (c.turns || []).some((t) => needsSend(t) && needsGemini(t)));
+
   /* The oldest message waiting to send, across every chat. */
   function oldestPending() {
     let best = null;
     for (const chat of (chats || new Map()).values()) {
       for (const turn of chat.turns || []) {
-        if (needsSend(turn) && (!best || (turn.at || '') < (best.turn.at || ''))) best = { chat, turn, id: chat.id, turnId: turn.id };
+        if (needsSend(turn) && !held(turn) && (!best || (turn.at || '') < (best.turn.at || ''))) best = { chat, turn, id: chat.id, turnId: turn.id };
       }
     }
     return best;
@@ -822,6 +895,8 @@ V.chat = (() => {
 
   /* Try to send one waiting message. One at a time; if it still can't go it stays waiting, quietly. */
   async function pump() {
+    if (pumping || busy || !chats) return;
+    if (anyHeldForGemini()) await V.ai.recheck();  // (a key set up elsewhere since: what waited for it goes now)
     if (pumping || busy || !chats) return;
     const next = oldestPending();
     if (!next) { if (!anyPending()) stopPump(); return; }  // keep the timer while a fresh claim may yet go stale
@@ -849,7 +924,15 @@ V.chat = (() => {
       const now2 = current.turns.find((t) => t.id === turn.id);
       if (!now2 || !(now2.state === 'waiting' || now2.state === 'answering') || repliesOf(now2).length) { reflect(); draw(); return; }
       if (!manual && now2.state === 'answering' && !isStale(now2)) return;  // another device is on it
-      const over = isGemini(now2.model) ? null : await V.ai.overLimit();  // (the free Gemini isn't held back by Claude's limit)
+      if (manual && unsure(now2)) await V.ai.modeReady(SETTLE_MS);  // (is Claude on? a new device asks the cloud first)
+      if (needsGemini(now2)) await V.ai.recheck(manual ? 0 : undefined);  // (set up on another device since?)
+      if (needsGemini(now2)) {  // Gemini would answer it, and isn't set up: it waits for the free key
+        if (manual) V.toast(WORDS.needsGemini, { ms: 6000 });
+        return;
+      }
+      if (!manual && unsure(now2)) return;  // (sent by itself only once this device knows whether Claude is on)
+      // (waiting for Claude, which is switched off now: it goes with Gemini; the free Gemini isn't held back by Claude's limit)
+      const over = isGemini(useNow(now2.model)) ? null : await V.ai.overLimit();
       if (over) {
         now2.state = 'failed';
         now2.problem = over.message;
@@ -897,8 +980,11 @@ V.chat = (() => {
 
   /* What a waiting message's line says: why it's held, naming the model this chat uses (never Claude for Gemini). */
   function waitingWords(turn) {
-    const who = isGemini(turn.model) ? 'Gemini' : 'Claude';
+    const who = isGemini(useNow(turn.model)) ? 'Gemini' : 'Claude';  // (Claude off: Gemini sends it)
     const why = turn.waitWhy || 'offline';
+    if (who === 'Gemini' && (needsGemini(turn) || (why === 'setup' && !V.ai.has('gemini')))) {
+      return 'Waiting to send — it\'ll go once the free Gemini is set up';
+    }
     if (why === 'away') return 'Waiting to send — it\'ll go when you\'re back online';
     if (who === 'Gemini') {
       if (why === 'busy') return 'Gemini is busy right now — trying again in a moment…';
@@ -911,8 +997,21 @@ V.chat = (() => {
     return `Waiting to send — it'll go when ${who} can be reached`;
   }
 
-  /* "Cancel" on a waiting message: drop the turn and put its words, notes and files back in the box. */
-  async function cancelWaiting(chat, turn) {
+  /* "Cancel" on a waiting message: drop the turn and put its words, notes and files back in the box. First a quick
+     look at the cloud: a message another device has answered (or is sending) since this one last looked stays as it
+     is, answer and all. */
+  async function cancelWaiting(shown, shownTurn) {
+    if (chats.has(shown.id)) await quickRefresh();
+    const chat = chatOf(shown.id);
+    const turn = chat && (chat.turns || []).find((t) => t.id === shownTurn.id);
+    if (!turn || repliesOf(turn).length || !needsSend(turn) || (busy && busy.turn === turn)) {
+      V.toast(turn && repliesOf(turn).length ? 'That message was already answered on another device.'
+        : turn && turn.state === 'answering' ? 'That message is being sent right now.'
+        : 'That message isn\'t waiting to send any more.', { ms: 5000 });
+      reflect();
+      draw();
+      return;
+    }
     forgetSoon(turn.id);
     chat.turns = chat.turns.filter((t) => t !== turn);
     const draft = draftOf(chat.id);
@@ -922,10 +1021,14 @@ V.chat = (() => {
       return { id: n.id, title: n.title, text: live ? (live.body || '') : '' };
     });
     draft.files = (turn.files || []).map((f) => ({ ...f, state: 'ready', url: pictures.get(f.path) }));
-    if (!chat.turns.length) {
+    if (!chat.turns.length) {  // its only message: the chat is back to one never sent, here and in the cloud
       chats.delete(chat.id);
       unsent.set(chat.id, chat);
+      index.waiting.delete(chat.id);
+      index.gone.add(chat.id);
+      await V.db.meta('chat:' + chat.id, null);
       await keepIndex();
+      takeOut(chat.id).catch(() => {});  // (offline: the next look at the cloud does it)
     } else {
       chat.updated = now();
       await persist(chat);
@@ -951,18 +1054,25 @@ V.chat = (() => {
     drawBox();
     let started = false;
     try {
-      if (!V.ai.state() && blankDefault(chat)) {  // sent before the key check answered: which model is still open
-        await V.ai.check().catch(() => {});
+      // A new device that hasn't read "Use Claude too" from the cloud yet: for a chat on Claude (or a new one, whose
+      // default hangs on it), that's read first, as "nothing yet" isn't "off".
+      if (!V.ai.modeKnown() && (!isGemini(chat.model) || blankDefault(chat))) await V.ai.modeReady(SETTLE_MS);
+      if (blankDefault(chat)) {  // sent before the key check answered: which model is still open
+        if (!V.ai.state()) await V.ai.check().catch(() => {});
+        // (the Gemini key not known about yet: the look under way given a moment, then what's known decides)
+        else if (defaultUnsure()) await V.ai.keysSettled(SETTLE_MS);
         retarget();
       }
       if (tooOld(chat)) { trouble = { chatId: id, kind: 'old', message: WORDS.old }; return; }
       if (chats.has(id)) await quickRefresh();
       const current = chatOf(id) || chat;  // (another device may have added to it meanwhile)
+      // The model that answers: the chat's own, or Gemini while Claude is off (the chat keeps its own for later).
+      const model = modelFor(current);
       // The monthly limit is Claude's: the free Gemini is never held back by it.
-      const over = isGemini(current.model) ? null : await V.ai.overLimit();
+      const over = isGemini(model) ? null : await V.ai.overLimit();
       if (over) { trouble = { chatId: id, kind: 'limit', message: over.message }; return; }
       if (busy) { V.toast('Wait for this answer to finish first (or press Stop).'); return; }  // (one started meanwhile)
-      const turn = { id: V.uuid().slice(0, 8), at: now(), text: taken.text.trim(), model: current.model, think: !!current.think,
+      const turn = { id: V.uuid().slice(0, 8), at: now(), text: taken.text.trim(), model, think: !!current.think,
         search: !!current.search, notes: taken.notes.map((n) => ({ id: n.id, title: n.title })),
         files: taken.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, mime: f.mime, size: f.size, path: f.path,
           w: f.w, h: f.h, pages: f.pages, tokens: f.tokens })),
@@ -1005,7 +1115,14 @@ V.chat = (() => {
 
   async function retry(chat, turn) {
     if (busy || chat.turns[chat.turns.length - 1] !== turn) return;
-    const over = isGemini(turn.model) ? null : await V.ai.overLimit();
+    if (unsure(turn)) await V.ai.modeReady(SETTLE_MS);  // (is Claude on? a new device asks the cloud first)
+    // Asked again of the model the message went to, or of Gemini while Claude is off (an answer from Claude is then
+    // replaced by Gemini's, and the message is Gemini's once Gemini answers). Gemini not set up: nothing is lost, the
+    // box says how to set it up.
+    if (needsGemini(turn)) await V.ai.recheck(0);  // (set up on another device since?)
+    if (busy) return;
+    if (needsGemini(turn)) { trouble = { chatId: chat.id, kind: 'nokey', message: V.ai.WORDS.geminiNokey }; return drawBox(); }
+    const over = isGemini(useNow(turn.model)) ? null : await V.ai.overLimit();
     if (over) { trouble = { chatId: chat.id, kind: 'limit', message: over.message }; return drawBox(); }
     if (busy) return;  // (another answer started meanwhile)
     await answer(chat, turn);
@@ -1201,10 +1318,18 @@ V.chat = (() => {
     if (parts.input.value !== draft.text) parts.input.value = draft.text;
     grow();
     const old = tooOld(chat);
-    const problem = old ? { kind: 'old', message: WORDS.old } : trouble && trouble.chatId === openId ? trouble : null;
-    V.clear(parts.trouble, problem ? [V.icon('alert'), V.h('span', { text: problem.message }),
+    const model = modelFor(chat);  // (Gemini while Claude is switched off)
+    const gem = isGemini(model);  // Gemini has no "Think" or web search here
+    // No Gemini key yet (the key check says so): a line with the one tap that sets it up, before anything is sent.
+    const unset = gem && V.ai.lacksGemini();
+    const problem = old ? { kind: 'old', message: WORDS.old } : trouble && trouble.chatId === openId ? trouble
+      : unset ? { kind: 'setup', message: WORDS.setup } : null;
+    const setUp = gem && ['setup', 'nokey', 'key'].includes(problem && problem.kind);  // (the free Gemini's own key)
+    V.clear(parts.trouble, problem ? [V.icon(problem.kind === 'setup' ? 'spark' : 'alert'), V.h('span', { text: problem.message }),
       ['offline', 'away', 'busy', 'bad', 'dropped'].includes(problem.kind) ? V.button('Try again', { onClick: () => send() }) : null,
-      ['limit', 'nokey', 'key'].includes(problem.kind) ? V.button('Open Settings', { onClick: () => V.go('settings') }) : null] : []);
+      setUp ? V.button(problem.kind === 'key' ? 'Open Settings' : 'Set up free Gemini', { kind: problem.kind === 'key' ? '' : 'primary',
+        onClick: () => V.ai.setUp() })
+        : ['limit', 'nokey', 'key'].includes(problem.kind) ? V.button('Open Settings', { onClick: () => V.go('settings') }) : null] : []);
     parts.trouble.hidden = !problem;
     parts.trouble.dataset.kind = problem ? problem.kind : '';
     const pdf = draft.files.find((f) => f.kind === 'pdf');
@@ -1212,10 +1337,9 @@ V.chat = (() => {
       draft.files.map((f) => fileChip(f, () => unattach(f))),
       draft.notes.map((n) => noteChip(n, () => { draft.notes = draft.notes.filter((x) => x !== n); drawBox(); })));
     parts.attached.hidden = !draft.files.length && !draft.notes.length;
-    parts.hint.textContent = pdf ? pdfHint(pdf, chat.model) : '';
+    parts.hint.textContent = pdf ? pdfHint(pdf, model) : '';
     parts.hint.hidden = !pdf;
-    parts.model.querySelector('.chat-model-name').textContent = nameOf(chat.model);
-    const gem = isGemini(chat.model);  // Gemini has no "Think" or web search here
+    parts.model.querySelector('.chat-model-name').textContent = nameOf(model);
     parts.think.hidden = gem;
     parts.web.hidden = gem;
     parts.input.placeholder = gem ? 'Ask Gemini anything' : 'Ask Claude anything';
@@ -1314,17 +1438,26 @@ V.chat = (() => {
     V.ai.check().then(retarget).catch(() => {});  // (on the PC too: Python says about Claude, the cloud about Gemini)
   }
 
-  /* A chat that has never been sent, still on the default Claude model nobody picked. */
-  const blankDefault = (c) => !!c && !c.turns.length && unsent.has(c.id) && c.model === DEFAULT_MODEL && !picked.has(c.id);
+  /* A chat that has never been sent, started here on the default model, which nobody picked. Never one that has been in
+     the cloud (a waiting message cancelled puts it back in the box): its model may have been chosen on another device,
+     which `picked` (this device's memory only) can't tell. */
+  const blankDefault = (c) => !!c && !c.turns.length && unsent.has(c.id) && defaulted.has(c.id) && !picked.has(c.id)
+    && [GEMINI_MODEL, CLAUDE_MODEL].includes(c.model);
 
-  /* Only a free Gemini key here (no Claude key)? The blank chat that opened before the key check knew starts on Claude
-     by default: it moves to the free Gemini model, so the first message doesn't dead-end. Run when the check answers
-     (here, or Settings' or the note-taker's: the 'ai' event) and before a send that went ahead of it. */
+  /* The default as the key check (and "Use Claude too") have it now, for every chat still on it: one opened before the
+     check knew starts on Gemini, and moves to Claude when Claude is on and only its key is known to be set up (so the
+     first message doesn't dead-end), and to Gemini once its key is known to be there. Run when the check answers (here,
+     or Settings' or the note-taker's, or the PC's late listing: the 'ai' event) and before a send that went ahead of
+     it. */
   function retarget() {
-    const c = chatOf(openId);
-    if (!blankDefault(c) || V.ai.has('claude') || !V.ai.has('gemini')) return;
-    c.model = GEMINI_MODEL;
-    drawBox();
+    const want = defaultModel();
+    let changed = false;
+    for (const c of unsent.values()) {
+      if (!blankDefault(c) || c.model === want) continue;
+      c.model = want;
+      changed = true;
+    }
+    if (changed) drawBox();
   }
 
   const blank = () => [...unsent.values()].find((c) => c.id !== sendingId && !c.turns.length && !draftOf(c.id).text
@@ -1365,10 +1498,13 @@ V.chat = (() => {
     if (!chat) return;
     const per = (r) => `$${r.input.toFixed(2)} in · $${r.output.toFixed(2)} out a million tokens`;
     const cents = (d) => `${(d * 100).toFixed(d < 0.001 ? 2 : 1)}¢`;
-    const current = modelOf(chat.model).id;  // (any "gemini..." id shows as the Gemini choice)
+    const current = modelOf(modelFor(chat)).id;  // (any "gemini..." id shows as the Gemini choice)
+    // Gemini first; Claude's only while it's switched on (Settings > AI: "Use Claude too").
+    const on = V.ai.claudeOn();
+    const offered = [...MODELS.filter((m) => m.provider === 'gemini'), ...(on ? MODELS.filter((m) => m.provider !== 'gemini') : [])];
     const sheet = V.sheet({
       title: 'Model',
-      content: [V.h('div.model-choices', {}, MODELS.map((m) => {
+      content: [V.h('div.model-choices', {}, offered.map((m) => {
         const r = V.ai.rates(m.id);
         const typical = (1500 * r.input + 600 * r.output) / 1e6;
         const costLine = m.free ? 'Free — needs a free Google key (Settings > AI)' : `About ${cents(typical)} a short answer · ${per(r)}`;
@@ -1385,7 +1521,9 @@ V.chat = (() => {
           V.h('span.mc-cost', { text: costLine })),
         m.id === current ? V.icon('check', 'mc-check') : null);
       })),
-      V.h('p.hint', { text: 'Changing it in the middle of a chat is fine: the next answer uses the new one. "Think" makes any of them think longer (slower, and it costs more).' })],
+      on ? V.h('p.hint', { text: 'Changing it in the middle of a chat is fine: the next answer uses the new one. "Think" (Claude only) makes it think longer: slower, and it costs more.' })
+        : V.h('p.hint.chat-claude-off', {}, V.h('span', { text: 'Gemini is free. Claude (paid, with your own key) is switched off. ' }),
+          V.h('button.link-btn', { type: 'button', text: 'Use Claude too', onclick: () => { sheet.close(); V.ai.setUp('claude'); } }))],
     });
   }
 
@@ -1592,16 +1730,23 @@ V.chat = (() => {
   const filesSize = () => listOf().reduce((sum, chat) => sum + chat.turns.reduce((s, t) => s + (t.files || []).reduce((x, f) => x + (f.size || 0), 0), 0), 0);
 
   V.on('signed-out', () => {
-    chats = null; index = null; unsent.clear(); drafts.clear(); picked.clear(); openId = null; stopPump();
+    chats = null; index = null; unsent.clear(); drafts.clear(); picked.clear(); defaulted.clear(); openId = null; stopPump();
     [...soon.keys()].forEach(forgetSoon);
   });
-  V.on('ai', () => retarget());  // the key check answered (wherever it was asked for)
+  // The key check answered (wherever it was asked for), or "Use Claude too" changed: the box says which model now.
+  V.on('ai', () => {
+    retarget();
+    // The free Gemini set up meanwhile (here, or seen from another device): "set it up first" is old news.
+    if (trouble && trouble.kind === 'nokey' && V.ai.has('gemini') && isGemini(modelFor(chatOf(trouble.chatId)))) trouble = null;
+    if (root && root.isConnected && root.dataset.tab === 'claude') drawBox();
+  });
   // A waiting message is tried again whenever the network might be back: online, the page shown or focused, the app
   // coming to the front, and the gentle timer. The cloud is pulled first, so a turn another device answered or
   // claimed is seen before this one acts on it.
   async function wake() {
     if (!chats) return;
     await refresh().catch(() => {});
+    if (V.ai.lacksGemini()) await V.ai.recheck();  // (the free key set up on another device meanwhile?)
     await pump().catch(() => {});
   }
   window.addEventListener('online', () => wake());
@@ -1625,7 +1770,7 @@ V.chat = (() => {
       return true;
     },
     dropText: () => (V.tab() === 'claude' ? 'Drop to attach to your message' : ''),
-    busy: () => !!busy,
+    busy: () => !!busy || !!sendingId || sendingTurns.size > 0,  // (an answer coming, or a message getting ready to go)
     waiting: waitingCount,
     retryWaits,  // (tests shorten them)
   };

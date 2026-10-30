@@ -1,9 +1,11 @@
 /* Vault: the note-taker. It listens to a class, a lecture or a meeting, shows the words as they're heard, and keeps
    them in a note as they come (under a "# Transcript" heading at its end, saved every few seconds, so nothing is lost
-   if the phone dies). When it stops, Claude turns the transcript into tidy notes (js/ai.js): a title, a short summary,
-   key points, terms, a checklist of homework and deadlines, open questions, and flash cards if asked. They go above
-   the transcript, which stays at the end so the owner can check it. "Make notes" can also be pressed later (a chip by
-   the note's due date), when the network wouldn't let Claude through.
+   if the phone dies). When it stops, the AI turns the transcript into tidy notes (js/ai.js): the free Gemini, even with
+   "Use Claude too" on, unless "Write notes with Claude" is on too or there's no Gemini key but a Claude one (V.ai.brain;
+   every screen names the one actually asked). A title, a short
+   summary, key points, terms, a checklist of homework and deadlines, open questions, and flash cards if asked. They go
+   above the transcript, which stays at the end so the owner can check it. "Make notes" can also be pressed later (a
+   chip by the note's due date), when the network wouldn't let the AI through.
 
    Hearing: on the phone and the Chromebook, the browser's own speech recognition (Google's service turns the sound
    into words; Android stops it after a silence or when Vault goes to the background, so it starts again by itself
@@ -511,7 +513,8 @@ V.notetaker = (() => {
 
   /* -- Claude: the transcript made into notes */
 
-  /* Who writes the notes here, by name: Gemini when only the free Google key is set up (V.ai.brain), else Claude. */
+  /* Who writes the notes here, by name, as far as the key check knows (V.ai.brain): Gemini unless "Write notes with
+     Claude" is on or only Claude can be used here. */
   const writer = () => (V.ai.brain() === 'gemini' ? 'Gemini' : 'Claude');
 
   function instructions(cards, speakers = false) {
@@ -692,8 +695,8 @@ V.notetaker = (() => {
       return;
     }
     if (showing()) {
-      showProblem(words, id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old'].includes(error.kind),
-        settings: ['nokey', 'key', 'limit'].includes(error.kind) });
+      showProblem(words, id, { tryAgain: !['empty', 'refusal', 'limit', 'nokey', 'old', 'off'].includes(error.kind),
+        settings: ['nokey', 'key', 'limit', 'off'].includes(error.kind), gemini: error.brain === 'gemini' });
     } else {
       V.toast(words, { kind: 'err', ms: 8000 });
     }
@@ -752,18 +755,33 @@ V.notetaker = (() => {
     return null;
   }
 
+  // Notes resting because a key was missing: a key check that answers (a key set up, Claude switched on) ends their rest.
+  const keyless = new Set();
+  V.on('ai', () => {
+    for (const id of keyless) resting.delete(id);
+    keyless.clear();
+  });
+
   let remaking = false;
   async function autoMake() {
     if (remaking || session) return;  // not while listening, and one at a time
     const note = firstWanted();
     if (!note) { if (!anyWants()) stopAutoTimer(); return; }  // (one still being written keeps the timer going)
     startAutoTimer();
-    // Where the keys are not known (the cloud didn't say in time): leave it flagged, try later, never a guess at the
-    // brain (a "no key" from guessing wrong would clear the flag for good).
+    // Whether Claude is on, as the cloud says (not yet read on a new device), and where the keys are (the cloud didn't
+    // say in time): until both are known, leave it flagged and try later, never a guess at the brain (a "no key" from
+    // guessing wrong would clear the flag for good).
+    if (!V.ai.modeKnown()) return;
     if (!V.ai.state() || V.ai.state().failed) await V.ai.check().catch(() => {});
     if (!V.ai.state() || V.ai.state().failed) return;
+    // The brain it would use isn't set up here (no Gemini key while Claude is off, say, as on an account that had only
+    // a Claude key when it updated): it stays flagged, and goes by itself once a key is set up or Claude switched on
+    // (the keys are looked at again now and then for that: one set up on another device counts too).
+    if (!V.ai.ready()) await V.ai.recheck();
+    if (!V.ai.ready()) return;
     // Out of this month's budget: leave it flagged, try later. (Only Claude's: the free Gemini is never held back by it.)
-    if (V.ai.brain() === 'claude' && await V.ai.overLimit()) return;
+    // (only once the Gemini key is known: an unseen one would write these notes for free, and ask() looks for it)
+    if (V.ai.brain() === 'claude' && V.ai.geminiKnown() && await V.ai.overLimit()) return;
     if (remaking || session || inFlight.has(note.id)) return;  // something started meanwhile (a manual "Make notes")
     remaking = true;
     let made = false;
@@ -777,7 +795,10 @@ V.notetaker = (() => {
       resting.delete(note.id);
     } catch (error) {
       if (stalled(error)) resting.set(note.id, Date.now() + slowness.rest);  // (a stall: not again for a while)
-      if (!['offline', 'busy'].includes(error.kind)) await clearWants(note.id).catch(() => {});  // a non-network miss: stop looping
+      // A miss that trying again won't fix clears the flag (it mustn't loop). A missing key isn't one: it gets set up
+      // later (meanwhile the key check says it isn't there, and the note rests anyway, so nothing is fetched each minute).
+      if (['nokey', 'off'].includes(error.kind)) { resting.set(note.id, Date.now() + slowness.rest); keyless.add(note.id); }
+      else if (!['offline', 'busy'].includes(error.kind)) await clearWants(note.id).catch(() => {});
     } finally {
       inFlight.delete(note.id);
       remaking = false;
@@ -952,10 +973,10 @@ V.notetaker = (() => {
     if (id) openNote(id);
   }
 
-  function showProblem(words, id, { tryAgain = true, settings = false } = {}) {
+  function showProblem(words, id, { tryAgain = true, settings = false, gemini = false } = {}) {
     openLayer();
     ui.making = null;
-    ui.problem = { words, id, tryAgain, settings };
+    ui.problem = { words, id, tryAgain, settings, gemini };
     draw();
   }
 
@@ -1016,8 +1037,12 @@ V.notetaker = (() => {
       V.h('label.switch-row.nt-cards', {}, V.h('span.switch-text', {}, V.h('strong', { text: 'Also make flash cards' }),
         V.h('span', { text: 'For the Study button: question :: answer.' })), cards),
       how.kind ? null : V.h('p.nt-warn', {}, V.icon('alert'), V.h('span', { text: how.why })),
-      V.ai.ready() || !V.ai.state() || V.ai.state().failed ? null : V.h('p.nt-warn', {}, V.icon('alert'),
-        V.h('span', { text: 'To make notes, set up the AI in Settings > AI. Listening works without it.' })),
+      V.ai.ready() || !V.ai.state() || V.ai.state().failed ? null : V.ai.brain() === 'gemini'
+        ? V.h('div.nt-setup', {}, V.h('p.nt-warn', {}, V.icon('alert'),
+          V.h('span', { text: 'To make notes, set up the free Gemini first (it only takes a minute). Listening works without it.' })),
+        V.button('Set up free Gemini', { kind: 'primary', icon: 'spark', onClick: () => { closeLayer(); V.ai.setUp(); } }))
+        : V.h('p.nt-warn', {}, V.icon('alert'),
+          V.h('span', { text: 'To make notes, set up Claude in Settings > AI. Listening works without it.' })),
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
         how.kind === 'web' ? V.h('li', { text: 'Keep Vault open while it listens: the screen stays on by itself.' }) : null,
@@ -1165,7 +1190,11 @@ V.notetaker = (() => {
     V.clear(body, V.h('div.nt-making.nt-problem', { role: 'alert' }, V.h('span.nt-problem-icon', {}, V.icon('alert')),
       V.h('h3', { text: 'The notes aren\'t made yet' }), V.h('p', { text: p.words })));
     V.clear(foot,
-      p.settings ? V.button('Open Settings', { onClick: () => { closeLayer(); V.go('settings'); } }) : null,
+      // (the free Gemini's key: straight to its row in Settings > AI)
+      p.settings ? V.button(p.gemini ? 'Set up free Gemini' : 'Open Settings', { onClick: () => {
+        closeLayer();
+        if (p.gemini) V.ai.setUp(); else V.go('settings');
+      } }) : null,
       p.id ? V.button('Open the note', { onClick: () => { closeLayer(); openNote(p.id); } }) : null,
       p.tryAgain && p.id ? V.button('Try again', { kind: 'primary', icon: 'restore', onClick: () => makeNotes(p.id) }) : null);
   }

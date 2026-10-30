@@ -666,7 +666,17 @@ V.organise = (() => {
   async function trash(ids) {
     const when = new Date().toISOString();
     const before = await change(ids, (row) => ({ ...row, deleted: true, deleted_at: when }), { reopen: false });
-    V.toast(`Moved ${some(before.length)}to Trash`, { action: 'Undo', onAction: putBack(before, ['deleted', 'deleted_at']) });
+    if (!before.length) return;
+    V.toast(before.length === 1 ? 'Moved to Trash' : `${before.length} notes moved to the Trash`,
+      { action: 'Undo', onAction: putBack(before, ['deleted', 'deleted_at']) });
+  }
+
+  /* Notes in the Trash put back where they were. */
+  async function restore(ids) {
+    const before = await change(ids, (row) => ({ ...row, deleted: false, deleted_at: null }), { reopen: false });
+    if (!before.length) return;
+    V.toast(before.length === 1 ? 'Put back' : `Put back ${before.length} notes`,
+      { action: 'Undo', onAction: putBack(before, ['deleted', 'deleted_at']) });
   }
 
   /* -- your own templates */
@@ -731,7 +741,7 @@ V.organise = (() => {
   return {
     isArchived, isTemplate, stamped, tagsOf, allTags, parseQuery, foldersFor, matcher, terms, marked, snippet,
     SORTS, sort, view, setSort: (value) => setPref('vault-sort', value), setView: (value) => setPref('vault-view', value),
-    comparator, newFolder, folderSheet, folderMenu, chooseFolder, isInbox, move, pin, archive, trash, change,
+    comparator, newFolder, folderSheet, folderMenu, chooseFolder, isInbox, move, pin, archive, trash, restore, change,
     DEPTH, TOP, parentId, children, ancestors, pathOf, depthOf, inside, tree, saveFolder, moveFolder, cantMove,
     saveTemplate, ownTemplates, templateName, templateSection,
   };

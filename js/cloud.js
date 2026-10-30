@@ -112,6 +112,17 @@ V.cloud = (() => {
   let pushAgain = false;
   let status = 'idle';
   const links = new Map();
+  // The settings row as the cloud has it, read since this page started (each sync reads it first of all). Until then
+  // V.data.settings is only this device's copy, or nothing at all on a new or wiped device, so a choice that hangs on
+  // it ("Use Claude too", js/ai.js) waits for this (settingsReady) instead of taking "nothing" for "off".
+  let settingsRead = false;
+  // The last try at reading it failed (offline, the cloud asleep or not answering): a wait for it then ends at once, or
+  // with a fresh try (settingsReady), never sits out its whole time for a row that can't come.
+  let settingsFailed = false;
+  let readingSettings = false;  // a sync that reads it is under way
+  const settingsWaiters = new Set();
+  const SETTING_FIELDS = ['pin_salt', 'pin_check', 'extra'];
+  V.on('signed-out', () => { settingsRead = false; settingsFailed = false; });
 
   const setStatus = (value) => { if (value !== status) { status = value; V.emit('status', value); } };
   // Rows the cloud set aside (a note too big to go up): the status is honest about them ('held') instead of a plain
@@ -393,14 +404,84 @@ V.cloud = (() => {
     clipsChecked = true;
   }
 
+  /* The settings columns changed here and not sent yet: the ones saveSettings was given (`_send`), else (a copy left
+     dirty by a Vault before 1.9, when only a PIN ever made it so) the PIN's two. Never extra unless it was given:
+     extra is changed straight in the cloud (changeExtra), and this device's copy of it may be old. */
+  const unsentSettings = (here) => (Array.isArray(here._send) && here._send.length ? here._send : ['pin_salt', 'pin_check'])
+    .filter((f) => SETTING_FIELDS.includes(f) && f in here);
+
+  function settingsArrived() {
+    settingsRead = true;
+    settingsFailed = false;
+    for (const done of [...settingsWaiters]) done(true);
+  }
+
+  /* The settings row as the cloud has it, kept here: what's changed here and not sent yet (a new PIN) stays; everything
+     else is the cloud's (extra too). */
+  async function keepSettings(data) {
+    const here = V.data.settings || {};
+    const mine = here._dirty ? Object.fromEntries(unsentSettings(here).map((f) => [f, here[f]])) : null;
+    V.data.settings = mine ? { ...data, ...mine, _dirty: here._dirty, _send: Object.keys(mine) } : data;
+    await V.db.meta('settings', V.data.settings);
+    V.emit('data', 'settings');
+  }
+
   async function pullSettings() {
     const { data, error, status } = await sb.from('settings').select('*').maybeSingle();
     if (error) throw Object.assign(error, { status });
-    if (data && !V.data.settings._dirty) {
-      V.data.settings = data;
-      await V.db.meta('settings', data);
-      V.emit('data', 'settings');
+    if (data) await keepSettings(data);
+    settingsArrived();
+  }
+
+  /* One change to the settings row's extra (changeExtra), made only on the version of it just read: written with
+     "if the cloud still has updated_at = what was read" (settings_touch moves it on every write), so another device's
+     change landing in between (a tally, "Use Claude too") is read again and kept, never written over. A read that
+     fails writes nothing: this device's copy may be old, or empty on a new device, and must never replace the
+     cloud's. */
+  async function writeExtra(change, signal) {
+    for (let tries = 0; tries < MOST_TRIES; tries++) {
+      if (signal.aborted) throw lateExtra();
+      const read = await sb.from('settings').select('extra, updated_at').maybeSingle().abortSignal(signal);
+      if (signal.aborted) throw lateExtra();
+      if (read.error) throw Object.assign(read.error, { status: read.status });
+      const have = read.data;
+      // (no row yet: a new account. This device's copy is all there is of it, if anything.)
+      const merged = change({ ...((have ? have.extra : (V.data.settings || {}).extra) || {}) });
+      const wrote = have
+        ? await sb.from('settings').update({ extra: merged }).eq('updated_at', have.updated_at).select().maybeSingle()
+          .abortSignal(signal)
+        : await sb.from('settings').insert({ extra: merged }).select().maybeSingle().abortSignal(signal);
+      if (signal.aborted) throw lateExtra();
+      if (wrote.error) {
+        if (!have && (wrote.status === 409 || wrote.error.code === '23505')) continue;  // made elsewhere meanwhile
+        throw Object.assign(wrote.error, { status: wrote.status });
+      }
+      if (!wrote.data) continue;  // changed elsewhere since it was read: read again
+      await keepSettings(wrote.data);
+      settingsArrived();
+      return wrote.data.extra || merged;
     }
+    throw new Error('Your settings were being changed on another device at the same moment. Try again.');
+  }
+  // One at a time on this device too (a tally written while "Use Claude too" is switched): each starts once the one
+  // before has finished. supabase-js never gives up on a request by itself, so each change has `waits.extra` ms in all
+  // (its reads, writes and tries again): past that its requests are stopped and it fails as any change that couldn't
+  // reach the cloud does (the tally keeps the cost owed, a switch goes back and says so), and the next one goes. One
+  // hung request on stalled mobile data used to hold every later change (a switch stayed greyed out for minutes).
+  let extraChain = Promise.resolve();
+  const waits = { extra: 20000 };  // (tests shorten it)
+  const lateExtra = () => Object.assign(new Error('The cloud didn\'t answer in time, so that setting wasn\'t changed. '
+    + 'Try again in a moment.'), { kind: 'offline', late: true });
+
+  /* writeExtra(change), given waits.extra ms: its requests are stopped once they're up (an aborted request that had
+     already reached the cloud may still land: a later read of the row shows it), and it rejects with lateExtra. */
+  function timedExtra(change) {
+    const stop = new AbortController();
+    let timer = null;
+    const late = new Promise((resolve, reject) => {
+      timer = setTimeout(() => { stop.abort(); reject(lateExtra()); }, waits.extra);
+    });
+    return Promise.race([writeExtra(change, stop.signal), late]).finally(() => clearTimeout(timer));
   }
 
   async function push() {
@@ -431,13 +512,21 @@ V.cloud = (() => {
           }
         }
         if (V.data.settings._dirty) {
-          const { _dirty, ...values } = V.data.settings;
-          const sent = Object.fromEntries(['pin_salt', 'pin_check', 'extra'].filter((f) => f in values).map((f) => [f, values[f]]));
-          const { data, error, status } = await sb.from('settings').upsert(sent).select().single();
-          if (error) throw Object.assign(error, { status });
+          // Only the columns changed here: the rest of the row (extra's "Use Claude too" and the AI tally, which
+          // another device may have changed since this one last looked) stays as the cloud has it.
+          const { _dirty } = V.data.settings;
+          const sent = Object.fromEntries(unsentSettings(V.data.settings).map((f) => [f, V.data.settings[f]]));
+          let data = null;
+          if (Object.keys(sent).length) {
+            const answer = await sb.from('settings').upsert(sent).select().single();
+            if (answer.error) throw Object.assign(answer.error, { status: answer.status });
+            data = answer.data;
+          }
           if (V.data.settings._dirty === _dirty) {
-            V.data.settings = data;
-            await V.db.meta('settings', data);
+            if (data) V.data.settings = data;
+            else { const { _dirty: _, _send, ...rest } = V.data.settings; V.data.settings = rest; }
+            await V.db.meta('settings', V.data.settings);
+            if (data) V.emit('data', 'settings');
           }
         }
       } while (pushAgain);
@@ -538,19 +627,27 @@ V.cloud = (() => {
       setStatus('syncing');
       try {
         if (pullFirst) {
+          readingSettings = !settingsRead;
+          await pullSettings();  // first: one small row, which the AI's choices wait for (a first sync can take a while)
+          readingSettings = false;
           for (const table of SYNCED) await pull(table);
           await pullClips();
-          await pullSettings();
         }
         await push();
         await emptyTrash();
         setStatus(heldCount() ? 'held' : 'synced');
       } catch (error) {
+        if (readingSettings) {  // the settings couldn't be read: whatever waits for them goes on with this device's copy
+          readingSettings = false;
+          settingsFailed = true;
+          for (const done of [...settingsWaiters]) done(false);
+        }
         if (authError(error)) { setStatus('signed-out'); V.emit('signed-out'); return; }
         setStatus(await whyNot(error));
         if (!offlineError(error)) console.warn('Vault sync:', error);
       }
     })().finally(() => {
+      readingSettings = false;
       syncing = null;
       if (syncAgain) {  // something was saved while this one ran: send it now, not at the next check
         syncAgain = false;
@@ -733,6 +830,7 @@ V.cloud = (() => {
   }
 
   async function signOut() {
+    V.emit('signing-out');  // (what else this device keeps for this person goes too: js/ai.js's list of Gemini models)
     try {
       if (channel) sb.removeChannel(channel);
       if (V.desktop) await V.pc.call('signOut');
@@ -792,6 +890,7 @@ V.cloud = (() => {
 
   /* Shows this device's copy at once; the returned promise is the first sync with the cloud. */
   async function start() {
+    settingsRead = false;  // (this person's settings: read again from the cloud)
     await ownCopy();
     await loadLocal();
     window.addEventListener('online', () => sync());
@@ -805,14 +904,50 @@ V.cloud = (() => {
   return {
     client, start, sync, save, keep, push, upload, link, blob, remove, purgeNote, user, signIn, signOut,
     changePassword, accessToken, unsent, mergeExtra, notePrint, mustChange,
+    waits,  // (tests shorten them)
     get sb() { return sb; },
     get status() { return status; },
     get held() { return heldCount(); },
     get live() { return live; },
+    /* Settings columns changed on this device (a new PIN): kept here at once, and only these columns go up. */
     async saveSettings(values) {
-      V.data.settings = { ...V.data.settings, ...values, _dirty: Date.now() };
+      const here = V.data.settings || {};
+      const send = [...new Set([...(here._dirty ? unsentSettings(here) : []), ...Object.keys(values)])];
+      V.data.settings = { ...here, ...values, _dirty: Date.now(), _send: send };
       await V.db.meta('settings', V.data.settings);
       pushSoon();
+    },
+    /* A change to the settings row's extra for every device (`change(extra)` gives the new extra, and may be run again
+       on a newer one): made on the cloud's newest extra, only if nobody changed it in between (writeExtra), one
+       change at a time here, each given waits.extra ms at most (timedExtra: a hung request never holds the next one);
+       extra alone goes up, never the PIN's columns. Throws when the cloud can't be read or written in time (every
+       caller copes: the tally keeps what it owes, a switch goes back and says so).
+       A Vault older than 1.9.1 on another device still writes its own copy of the whole extra when it sends a new PIN
+       (and a Chromebook's first announce did): that can put "Use Claude too" back to what that device last saw
+       (usually off), as 1.9.0 could the tally. It ends once that device updates. */
+    changeExtra(change) {
+      const run = extraChain.catch(() => {}).then(() => timedExtra(change));
+      extraChain = run;
+      return run;
+    },
+    /* Whether the settings row has been read from the cloud since this page started; settingsReady(ms) waits for that
+       (true), or gives up (false: this device's copy is all there is for now, as when offline): after `ms`, at once
+       when offline (or the cloud is asleep, or the PC app says it can't be reached), and as soon as a read under way
+       fails. After a read that failed, a fresh one is tried (and waited for) when the network seems to be there. */
+    settingsRead: () => settingsRead,
+    settingsReady(ms) {
+      if (settingsRead) return Promise.resolve(true);
+      const cut = !navigator.onLine || status === 'asleep' || (V.desktop && settingsFailed && status === 'offline');
+      if (settingsFailed && !readingSettings && navigator.onLine) {
+        // A fresh try (after a sync that doesn't read the settings, when one is running): its failure ends the wait.
+        Promise.resolve(syncing).catch(() => {}).then(() => { if (!settingsRead && !readingSettings) sync(); });
+      }
+      if (cut) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        const done = (value) => { clearTimeout(timer); settingsWaiters.delete(done); resolve(value); };
+        const timer = setTimeout(() => done(false), ms);
+        settingsWaiters.add(done);
+      });
     },
     async insertClip(text) {
       const row = { id: V.uuid(), text, from_device: V.device, created_at: new Date().toISOString() };

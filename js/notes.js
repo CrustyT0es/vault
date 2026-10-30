@@ -3,8 +3,12 @@
    Archive, Trash), #tags, search with filters, and the list of notes as a list or a grid. Opening one hands it to
    V.editor: beside the list on a wide screen, over everything on a phone.
 
-   Picking several notes (a long press with a finger or the S Pen, or Ctrl/Shift+click on the PC) shows a bar to move,
-   pin, archive or delete them together; on the PC a card can also be dragged onto a folder. What those do, and what
+   Picking several notes (the Select button by the list's name on the PC, by the search box on a phone; a long press
+   with a finger or the S Pen; Ctrl/Shift+click on the PC) shows a round tick on every card and a bar to move, pin,
+   archive or delete them together (in the Trash: put back or delete for good); on the PC a card can also be dragged
+   onto a folder. The Select button starts with nothing picked and stays on until the X, Esc, Back or an action;
+   picking started any other way stops when the last one is unpicked, as before. "Pick all" takes every note in the
+   list, the ones folded away under "Past week" or "Older" too (their fold says how many). What those do, and what
    the search box understands, is in organise.js.
 
    Folders inside folders: the PC's side list shows them as a tree (each with a chevron to fold it away, remembered on
@@ -42,7 +46,9 @@ V.notes = (() => {
   let root = null;
   let parts = null;
   let picking = false;        // several notes being picked
+  let held = false;           // ...started with the Select button: it stays on with nothing picked
   const picked = new Set();
+  let listIds = [];           // every note in the list shown, in order (the ones folded away too)
   let anchor = null;          // where a Shift+click range starts
   let press = null;           // a finger on a card: {id, x, y, timer, fired}
 
@@ -171,6 +177,7 @@ V.notes = (() => {
   }
 
   function chooseTemplate() {
+    stopPicking();  // (as Ctrl+N does: a new note, or the note-taker, isn't picked behind)
     const here = V.data.folders.get(filter);
     const list = [...V.TEMPLATES].sort((a, b) => {
       const fit = (t) => (here && t.folder && t.folder.toLowerCase() === here.name.toLowerCase() ? 0 : 1);
@@ -227,7 +234,9 @@ V.notes = (() => {
 
   const cardEls = () => (parts ? [...parts.list.querySelectorAll('button.card[data-id]')] : []);
 
-  function startPicking() {
+  /* `hold`: the Select button's way, which stays on with nothing picked. */
+  function startPicking({ hold = false } = {}) {
+    if (hold) held = true;
     if (picking) return;
     picking = true;
     anchor = null;
@@ -238,6 +247,7 @@ V.notes = (() => {
   function stopPicking({ fromHistory = false } = {}) {
     if (!picking) return;
     picking = false;
+    held = false;
     picked.clear();
     anchor = null;
     if (!fromHistory && history.state && history.state.vault === 'select') {
@@ -263,13 +273,33 @@ V.notes = (() => {
     if (picked.has(id)) picked.delete(id);
     else picked.add(id);
     anchor = id;
-    if (!picked.size) stopPicking();
+    if (!picked.size && !held) stopPicking();
     else showPicked();
   }
 
-  /* Shift+click: every card from the last one picked (or the open note) to this one. */
+  /* The Select button: picking on (nothing picked yet), or off again. */
+  function selectPressed() {
+    if (picking) { stopPicking(); return; }
+    startPicking({ hold: true });
+    showPicked();
+  }
+
+  /* The list's notes in the order they're shown, the ones folded away in their fold's place (opened or not, ever):
+     so a Shift+click picks the same notes whichever folds were opened before. */
+  function listOrder() {
+    if (!parts) return [];
+    const order = [];
+    for (const el of parts.list.querySelectorAll('button.card[data-id], .list-fold')) {
+      if (el.classList.contains('list-fold')) order.push(...(foldIds.get(el) || []));
+      else if (!el.closest('.fold-notes')) order.push(el.dataset.id);
+    }
+    return order;
+  }
+
+  /* Shift+click: every note from the last one picked (or the open note) to this one, as the list shows them (the
+     ones folded away between them too: their fold says how many it has picked). */
   function pickRange(id) {
-    const order = cardEls().map((el) => el.dataset.id);
+    const order = listOrder();
     const open = V.editor.openId();
     const from = anchor && order.includes(anchor) ? anchor : open && order.includes(open) ? open : id;
     const [a, b] = [order.indexOf(from), order.indexOf(id)].sort((x, y) => x - y);
@@ -279,13 +309,34 @@ V.notes = (() => {
     showPicked();
   }
 
+  /* Every note in the list, the ones folded away too (they show picked when their fold is opened). */
   function pickAll() {
     startPicking();
-    for (const el of cardEls()) picked.add(el.dataset.id);
+    for (const id of listIds) picked.add(id);
     showPicked();
   }
 
-  /* The picked cards marked where they are (nothing redrawn, so a finger still on a card stays on it), and the bar. */
+  /* Nothing picked, still picking (as the Select button does). */
+  function pickNone() {
+    picked.clear();
+    anchor = null;
+    held = true;
+    showPicked();
+  }
+
+  /* The Select button's look: "Select", or "Cancel" while picking. */
+  function drawSelect() {
+    const button = parts && parts.select;
+    if (!button) return;
+    button.setAttribute('aria-pressed', String(picking));
+    button.setAttribute('aria-label', picking ? 'Cancel picking' : 'Select notes');
+    button.title = picking ? 'Stop picking (Esc)' : `Pick notes to ${filter === 'trash' ? 'put back or delete' : 'move or delete'} together`;
+    V.clear(button, V.icon(picking ? 'x' : 'select'), V.h('span.select-label', { text: picking ? 'Cancel' : 'Select' }));
+  }
+
+  /* The picked cards marked where they are (nothing redrawn, so a finger still on a card stays on it), the folds'
+     counts of what's picked inside them, the Select button and the bar. */
+  const foldIds = new WeakMap();  // a fold's head: the ids of the notes under it
   function showPicked() {
     if (!parts) return;
     parts.layout.classList.toggle('selecting', picking);
@@ -296,6 +347,15 @@ V.notes = (() => {
       if (picking) el.setAttribute('aria-pressed', String(picked.has(el.dataset.id)));
       else el.removeAttribute('aria-pressed');
     }
+    for (const head of parts.list.querySelectorAll('.list-fold')) {
+      const count = picking ? (foldIds.get(head) || []).filter((id) => picked.has(id)).length : 0;
+      const label = head.querySelector('.fold-picked');
+      if (label) {
+        label.textContent = count ? `${count} picked` : '';
+        label.hidden = !count;
+      }
+    }
+    drawSelect();
     drawPickBar();
   }
 
@@ -306,25 +366,66 @@ V.notes = (() => {
     const rows = ids.map((id) => V.data.notes.get(id)).filter(Boolean);
     const allPinned = rows.length > 0 && rows.every((n) => n.pinned);
     const allArchived = rows.length > 0 && rows.every(O.isArchived);
-    const everything = cardEls().every((el) => picked.has(el.dataset.id));
+    const everything = listIds.length > 0 && listIds.every((id) => picked.has(id));
+    // With nothing picked yet (the Select button), the bar says what to do and its buttons wait.
     const act = (icon, label, run, cls = '') => V.h('button.pick-action' + (cls ? '.' + cls : ''), {
-      type: 'button', onclick: () => run(ids).catch(V.problem),
+      type: 'button', disabled: !ids.length, onclick: () => run(ids).catch(V.problem),
     }, V.icon(icon), V.h('span', { text: label }));
     const done = (fn) => async (list) => { stopPicking(); await fn(list); };
+    const actions = filter === 'trash' ? [
+      act('restore', 'Put back', done((l) => O.restore(l))),
+      act('trash', 'Delete forever', deleteForever, 'danger'),
+    ] : [
+      act('folder-move', 'Move to', async (list) => {
+        const folder = await O.chooseFolder({ title: list.length === 1 ? 'Move to' : `Move ${list.length} notes to` });
+        if (folder) await done((l) => O.move(l, folder.id))(list);
+      }),
+      filter === 'archive' ? null : act(allPinned ? 'pin-on' : 'pin', allPinned ? 'Unpin' : 'Pin', done((l) => O.pin(l, !allPinned))),
+      act('archive', allArchived ? 'Unarchive' : 'Archive', done((l) => O.archive(l, !allArchived))),
+      act('trash', 'Delete', done((l) => O.trash(l)), 'danger'),
+    ];
     bar.hidden = false;
     V.clear(bar,
       V.h('div.pick-top', {},
         V.iconButton('x', 'Stop picking (Esc)', () => stopPicking(), 'quiet'),
-        V.h('span.pick-count', { text: `${ids.length} picked` }),
-        everything ? null : V.h('button.link-btn.pick-all', { type: 'button', onclick: pickAll, text: 'Pick all' })),
-      V.h('div.pick-actions', {},
-        act('folder-move', 'Move to', async (list) => {
-          const folder = await O.chooseFolder({ title: list.length === 1 ? 'Move to' : `Move ${list.length} notes to` });
-          if (folder) await done((l) => O.move(l, folder.id))(list);
-        }),
-        filter === 'archive' ? null : act(allPinned ? 'pin-on' : 'pin', allPinned ? 'Unpin' : 'Pin', done((l) => O.pin(l, !allPinned))),
-        act('archive', allArchived ? 'Unarchive' : 'Archive', done((l) => O.archive(l, !allArchived))),
-        act('trash', 'Delete', done((l) => O.trash(l)), 'danger')));
+        V.h('span.pick-count', { text: ids.length ? `${ids.length} picked` : 'Pick notes' }),
+        !listIds.length ? null : everything
+          ? V.h('button.link-btn.pick-all', { type: 'button', onclick: pickNone, text: 'Pick none' })
+          : V.h('button.link-btn.pick-all', { type: 'button', onclick: pickAll, text: 'Pick all' })),
+      V.h('div.pick-actions', {}, actions));
+  }
+
+  /* Notes in the Trash deleted for good, after asking (they can't come back from that). */
+  async function deleteForever(ids) {
+    const notes = ids.map((id) => V.data.notes.get(id)).filter((n) => n && n.deleted && !n._purge);
+    if (!notes.length) return;
+    const many = notes.length > 1;
+    const sure = await V.confirm(many ? `Delete ${notes.length} notes for good?` : 'Delete this note for good?',
+      many ? 'They can\'t be put back after this.' : 'It can\'t be put back after this.', { ok: 'Delete for good', danger: true });
+    if (!sure) return;
+    stopPicking();
+    saidGone(notes.length, await purgeTrashed(notes.map((n) => n.id)));
+  }
+
+  /* Deleted for good, each only if it's still in the Trash now: one put back while Vault asked (by the Undo on an
+     earlier toast, which sits above the question, or on the other device) is left alone. Returns how many were put
+     back like that. */
+  async function purgeTrashed(ids) {
+    let back = 0;
+    for (const id of ids) {
+      const note = V.data.notes.get(id);
+      if (!note || note._purge) continue;          // gone already (the other device)
+      if (!note.deleted) { back += 1; continue; }  // put back meanwhile: kept
+      await V.cloud.purgeNote(note);
+    }
+    return back;
+  }
+
+  function saidGone(asked, back) {
+    const gone = asked - back;
+    if (!gone) return V.toast(`Not deleted: ${back > 1 ? 'they\'re' : 'it\'s'} out of the Trash now`);
+    const words = gone > 1 ? `Deleted ${gone} notes for good` : asked > 1 ? 'Deleted 1 note for good' : 'Deleted for good';
+    V.toast(back ? `${words} · ${back} put back, so kept` : words);
   }
 
   window.addEventListener('popstate', () => {
@@ -335,7 +436,7 @@ V.notes = (() => {
   /* A finger or the S Pen held on a card picks it (the first one starts picking); a mouse uses Ctrl/Shift+click. */
   function pressStart(event, id) {
     press = null;
-    if (event.pointerType === 'mouse' || !event.isPrimary || filter === 'trash') return;
+    if (event.pointerType === 'mouse' || !event.isPrimary) return;
     const mine = { id, x: event.clientX, y: event.clientY, fired: false };
     mine.timer = setTimeout(() => {
       if (press !== mine) return;
@@ -365,15 +466,14 @@ V.notes = (() => {
       press = null;
       if (was === note.id) return;
     }
-    if (filter === 'trash') return trashMenu(note);
     if (event.shiftKey) return pickRange(note.id);
     if (picking || event.ctrlKey || event.metaKey) return toggle(note.id);
+    if (filter === 'trash') return trashMenu(note);
     open(note.id);
   }
 
   function cardContext(event, note) {
     event.preventDefault();
-    if (filter === 'trash') return;
     if (press && press.fired) return;  // the long press has picked it already
     if (event.pointerType === 'touch' || event.pointerType === 'pen') {
       // The phone's own long press came first: it's the one that picks (the timer doesn't as well).
@@ -382,6 +482,7 @@ V.notes = (() => {
       toggle(note.id);
       return;
     }
+    if (filter === 'trash') return;  // (a tap there says what can be done)
     // A right-click on the PC: what can be done with this note.
     const at = event.clientX || event.clientY  // (the keyboard's menu key: by the card itself)
       ? { getBoundingClientRect: () => ({ left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY }) }
@@ -639,7 +740,7 @@ V.notes = (() => {
       title: V.noteTitle(note),
       content: V.h('p', { text: 'This note is in the Trash. It\'s deleted for good 30 days after it was put there.' }),
       actions: [
-        { label: 'Delete forever', kind: 'danger', onClick: async () => { await V.cloud.purgeNote(note); V.toast('Deleted for good'); } },
+        { label: 'Delete forever', kind: 'danger', onClick: async () => saidGone(1, await purgeTrashed([note.id])) },
         { label: 'Put it back', kind: 'primary', onClick: async () => {
           await V.cloud.save('notes', { ...note, deleted: false, deleted_at: null });
           V.toast('Put back');
@@ -703,7 +804,9 @@ V.notes = (() => {
           setFold(key, now);
           showPicked();
         },
-      }, V.icon('next', 'fold-twist'), V.h('span', { text: title }), V.h('span.count', { text: String(list.length) }));
+      }, V.icon('next', 'fold-twist'), V.h('span', { text: title }), V.h('span.count', { text: String(list.length) }),
+      V.h('span.fold-picked', { hidden: true }));  // (while picking: how many under it are picked, showPicked)
+      foldIds.set(head, list.map((n) => n.id));
       return [head, box];
     })];
   }
@@ -732,17 +835,26 @@ V.notes = (() => {
       parts.headCount.textContent = due ? String(due) : '';
       parts.list.classList.remove('upcoming', 'grid');
       V.clear(parts.titleTools);
+      V.clear(parts.headTools);
+      parts.select = null;
+      listIds = [];
       V.clear(parts.list, V.review.page());
       if (picking) stopPicking();
       return;
     }
+    // Select: beside sort and grid on the PC; on a phone (where that row is full) beside the search box. Only when
+    // there's something to pick.
+    parts.select = list.length ? V.h('button.btn.select-btn', { type: 'button', onclick: selectPressed }) : null;
     V.clear(parts.titleTools,
       folder && !query ? V.iconButton('more', `${folder.name} options`, (event) => folderMenu(folder, event.currentTarget), 'folder-options') : null,
       V.iconButton('sort', 'Sort notes', (event) => sortMenu(event.currentTarget)),
       V.iconButton(grid ? 'rows' : 'grid', grid ? 'Show as a list' : 'Show as a grid', () => {
         O.setView(grid ? 'list' : 'grid');
         draw();
-      }));
+      }),
+      V.wide() ? parts.select : null);
+    V.clear(parts.headTools, V.wide() ? null : parts.select);
+    drawSelect();
     const empty = () => {
       const say = (text, ...more) => V.h('div.empty', {}, V.mark(40), V.h('p', { text }), more);
       if (query) {
@@ -759,7 +871,7 @@ V.notes = (() => {
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
       kind: 'danger-quiet', icon: 'trash', onClick: async () => {
         if (!(await V.confirm('Empty the Trash?', `${list.length} note${list.length > 1 ? 's' : ''} will be deleted for good.`, { ok: 'Delete them', danger: true }))) return;
-        for (const note of list) await V.cloud.purgeNote(note);
+        await purgeTrashed(list.map((n) => n.id));  // (not one put back while it asked)
       },
     })) : null;
     const look = { terms: O.terms(q), size: grid ? 280 : 160, drag: canDrag() && filter !== 'trash' };
@@ -790,10 +902,12 @@ V.notes = (() => {
     if (none && subRows) none.classList.add('small');  // under its folders, a quieter "nothing here"
     const tests = folder && !query && V.exams ? V.exams.banners(folder) : null;  // tests that cover this folder
     V.clear(parts.list, trashBar, tests, subRows, list.length ? byDay || sections(list, make) || folded(list, make) : none);
-    // Picked notes that have gone (deleted on the other device, or no longer in this list) aren't picked any more.
-    const here = new Set(list.map((n) => n.id));
+    // Picked notes that have gone (deleted on the other device, or no longer in this list) aren't picked any more; the
+    // Select button's picking stays on with none picked, until the list itself is empty.
+    listIds = list.map((n) => n.id);
+    const here = new Set(listIds);
     for (const id of picked) if (!here.has(id)) picked.delete(id);
-    if (picking && !picked.size) stopPicking();
+    if (picking && (!list.length || (!picked.size && !held))) stopPicking();
     else showPicked();
   }
 
@@ -882,6 +996,8 @@ V.notes = (() => {
       crumbs: V.h('nav.crumbs', { 'aria-label': 'The folders this one is in', hidden: true }),
       headCount: V.h('span.head-count'),
       titleTools: V.h('div.list-tools'),
+      headTools: V.h('div.head-tools'),  // (the phone's Select button: drawList)
+      select: null,
       list: V.h('div.list'),
       pane: V.h('section.pane'),
       pickBar: V.h('div.pick-bar', { role: 'toolbar', 'aria-label': 'Picked notes', hidden: true }),
@@ -890,6 +1006,7 @@ V.notes = (() => {
     const listColumn = V.h('section.list-column', {},
       V.h('div.list-head', {},
         V.h('div.search-box', {}, V.icon('search'), search, V.h('kbd.search-hint', { text: 'Ctrl F' })),
+        parts.headTools,
         V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: V.appShortcuts ? 'New note (Ctrl+N)' : 'New note' })),
       parts.help,
       parts.chips,
@@ -928,12 +1045,15 @@ V.notes = (() => {
   document.addEventListener('keydown', (event) => {
     if (!showing()) return;
     const ctrl = event.ctrlKey || event.metaKey;
-    if (picking && !V.editor.covering() && !document.querySelector('#layers > .layer:not(.leaving)')) {
+    // (never through a sheet or the note-taker over the list: Ctrl+A there selects its words, Delete deletes them)
+    if (picking && !V.editor.covering() && !document.querySelector('#layers > .layer:not(.leaving), #layers > .nt-layer.shown')) {
       if (event.key === 'Escape') { event.preventDefault(); stopPicking(); return; }
       if (ctrl && event.key.toLowerCase() === 'a' && !typing(event.target)) { event.preventDefault(); pickAll(); return; }
       if (event.key === 'Delete' && !typing(event.target)) {
         event.preventDefault();
         const ids = [...picked];
+        if (!ids.length) return;
+        if (filter === 'trash') { deleteForever(ids).catch(V.problem); return; }  // (it asks first)
         stopPicking();
         O.trash(ids).catch(V.problem);
         return;

@@ -1,8 +1,16 @@
-/* Vault: Claude, for the note-taker (js/notetaker.js) and the Chat tab (js/chat.js). For the note-taker, one request
-   turns a transcript into notes: Claude Haiku at low effort, the cheapest there is (about a third of a cent for an hour
-   of class). The chat streams its own requests, and shares the key, the prices and the monthly tally kept here.
+/* Vault: the AI, for the note-taker (js/notetaker.js) and the Chat tab (js/chat.js). Google's free Gemini does it all
+   by default (1.9: the owner asked for Gemini first, Claude optional). "Use Claude too" (Settings > AI) is one setting
+   for the whole account, kept in the settings row's extra.ai.claude (off unless switched on, existing accounts too):
+   only while it's on is Claude offered in Chat, used by the note-taker, and counted against the monthly limit. While
+   it's off nothing here ever uses a Claude key, Jarvis's included (`claudeOn`: getKey, the PC's makeNotes and every
+   brain choice check it). Even with Claude on, Gemini writes the note-taker's notes (the owner: "by default have
+   Gemini do the auto notes summary"), or Claude when there's no Gemini key; "Write notes with Claude" (extra.ai.
+   notes_claude, beside the switch, also for every device) hands them to Claude (`brain`). For the note-taker, one
+   request turns a transcript into notes: Gemini, or Claude Haiku at low effort, the cheapest there is (about a third
+   of a cent for an hour of class). The chat streams its own requests, and shares the keys, the prices and the monthly
+   tally kept here.
 
-   The key: the owner's own Claude key, kept in their private file storage at <owner>/private/claude.json, which only
+   The Claude key: the owner's own Claude key, kept in their private file storage at <owner>/private/claude.json, which only
    they can read. The PC puts Jarvis's key there itself (vault/notetaker.py: Python reads .env and uploads it, so it
    never passes through the page there); a phone or Chromebook can paste one instead. A phone or Chromebook fetches it
    when it makes notes and keeps it in memory only, never in this device's storage: a school Chromebook's storage
@@ -40,17 +48,20 @@ V.ai = (() => {
   const KEY_SHAPE = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
   const CONSOLE = 'https://console.anthropic.com/settings/keys';
 
-  // Gemini (Google), the free backup brain. The note-taker and the Chat tab fall back to it when there's no Claude
-  // key — a friend or classmate with no paid key. It's called the same way: straight from this device to Google with
+  // Gemini (Google), the free brain: Chat's and the note-taker's own unless Claude is switched on (and then still the
+  // note-taker's when there's no Claude key). It's called the same way as Claude: straight from this device to Google with
   // that person's own free key (aistudio.google.com/apikey), kept in their own private storage at
   // <owner>/private/gemini.json, in memory only on a phone or Chromebook, exactly like the Claude one and never shown.
   // Google's free tier costs nothing, so Gemini answers are never charged or counted against the monthly limit. It is
   // NOT a way past a school's content filter: like Claude, Google's API is blocked on a school network — use mobile
   // data, or let the note wait and go when you're home.
   const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+  // Google's ListModels (the models this key may use), on the same host: never anywhere else.
+  const GEMINI_LIST = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100';
   // Google retires numbered models (1.7's gemini-2.5-flash was due to be switched off on 16 Oct 2026), so Vault asks
   // for Google's own "latest" names: the newest Flash, then the newest Flash-Lite when Flash isn't offered to this key,
-  // its free quota is used up or it's overloaded.
+  // its free quota is used up or it's overloaded. Beside them, up to two numbered stable Flash models this key is offered
+  // (ListModels, `extras`), as fallbacks; and a chat asks first whichever has been quickest here (`ranked`, 1.9.1).
   const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
   const GEMINI_MODEL = GEMINI_MODELS[0];   // the Chat tab's Gemini model
   const GEMINI_KEY_FILE = 'gemini.json';
@@ -59,11 +70,14 @@ V.ai = (() => {
   // made of); Google's own answer is the real check (saveGeminiKey asks it before saving).
   const GEMINI_KEY_LOOKS = /^[A-Za-z0-9._~+/=-]{20,512}$/;
   // How long Gemini may take (ms). A chat (`use` 'chat') asks the first model and, if it hasn't started its answer
-  // after `head`, the next one too, side by side: whichever starts first answers and the other is let go. Each may
-  // take `first` to its first words (thinking included), then `idle` between two pieces. The note-taker ('notes',
-  // nobody watching the words come) gives each model longer: `notesHead`, `notesFirst`. A model that lost the race
-  // (or was too slow to start) is tried after the other for SLOW_FOR. (1.8.2 tried one model at a time, waiting up to a
-  // minute for each: on 5G, "hey" took 1-2 minutes.)
+  // after its head start, the next one too, side by side (AT_ONCE at most): whichever starts first answers and the
+  // other is let go. A chat's head start follows how quickly that model usually starts here (`headFor`: one and a half
+  // times its usual time, at least `headMin`, at most `head`; `head` for a model not timed here yet, and for a request
+  // with pictures or PDFs, HEAVY_BODY: never a second copy of that going up sooner). Each may take `first` to its first
+  // words (thinking included), then `idle` between two pieces. The note-taker ('notes', nobody watching the words come)
+  // gives each model longer: `notesHead`, `notesFirst`. A model that lost the race (or was too slow to start) is tried
+  // after the others for `slowFor`, for that use only. (1.8.2 tried one model at a time, waiting up to a minute for
+  // each: on 5G, "hey" took 1-2 minutes.) `list`: how long ListModels may take before it's left for another time.
   // `check`: how long the check on Save (and Settings' Check Gemini) waits for each model (a network can drop Google
   // without a word). `uplink`: the request has to go up before Google can say a word, so each model's first-words wait
   // also allows its size at this many bytes a ms (about 256 kbit/s, a poor mobile uplink): a chat with big pictures or
@@ -74,13 +88,21 @@ V.ai = (() => {
   // the cost up), each only a check, so it carries on without it; `ask` for the request with no sign of the answer
   // being written, after which it's "taking too long" (busy: the words are kept and the notes made later). An answer
   // still being written is never cut off (it's paid for). A PC's Python watches its own request the same way.
-  const waits = { head: 7000, first: 25000, notesHead: 20000, notesFirst: 60000, idle: 45000, check: 15000, uplink: 32,
-    headUpload: 3000, look: 15000, ask: 180000 };
-  const SLOW_FOR = 10 * 60 * 1000;
+  // `recheck`: while something is held back for the lack of a key, the keys are looked at again this often at most.
+  const waits = { head: 7000, headMin: 3000, first: 25000, notesHead: 20000, notesFirst: 60000, idle: 45000,
+    check: 15000, uplink: 32, headUpload: 3000, look: 15000, ask: 180000, list: 8000, slowFor: 10 * 60 * 1000,
+    recheck: 60000 };
   // A request this big (letters of JSON, about bytes) that Google hadn't even answered in time may be held up by the
   // connection (or the model may be slow: there's no telling which): no other model is asked because of it (it would
   // send it all again on the same network), though one already asked carries on.
   const BIG_BODY = 1000 * 1000;
+  // Requests to Gemini going at once for one message, at most: every request Google starts counts against the key's
+  // free daily limit (one let go part-way too), and each goes up whole.
+  const AT_ONCE = 2;
+  // A request this big (letters of JSON, about bytes: pictures or PDFs, about 3 s of a poor uplink) is sent as 1.8.3
+  // did: the next model only after the full head start (`head`), never a shorter one learned from quick small chats, so
+  // the same upload isn't sent again on a slow connection while the first is still going up.
+  const HEAVY_BODY = 100 * 1000;
   // Google's bare answer to a request it can't take, which says nothing of why.
   const GENERIC_400 = /^\s*request contains an invalid argument\.?\s*$/i;
   // How much a model may think before it answers, most wanted first. Google's newest models (Gemini 3 and later, which
@@ -92,6 +114,13 @@ V.ai = (() => {
     chat: [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }, { thinkingBudget: 0 }, null],
     notes: [{ thinkingLevel: 'low' }, { thinkingBudget: 1024 }, null],
   };
+  // A numbered Gemini 2.x (found by ListModels) takes a thinkingBudget: none for a chat (2.5 Flash and Flash-Lite allow
+  // 0), a little for notes. One that can't think at all (2.0, or ListModels saying thinking: false) turns the setting
+  // down, and is asked without it (the same step down as above).
+  const THINKING_2 = {
+    chat: [{ thinkingBudget: 0 }, null],
+    notes: [{ thinkingBudget: 1024 }, null],
+  };
   const GEMINI_CONSOLE = 'https://aistudio.google.com/apikey';
 
   let key = null;       // a phone's or Chromebook's copy of the key: in memory only
@@ -99,6 +128,8 @@ V.ai = (() => {
   let known = null;     // { cloud, pc, gemini }: where the keys are (never the key itself)
   let looking = null;
   let saving = false;
+  let mode = 0;         // counts "Use Claude too" changing: a look at the keys from before a change is let go
+  let seenOn = null;    // "Use Claude too" as the last look at the keys found it (null: none yet)
 
   class AiError extends Error {
     constructor(kind, message) {
@@ -123,6 +154,19 @@ V.ai = (() => {
   const ownKeys = () => !V.desktop || !!(V.pc && V.pc.standalone && V.pc.standalone());
   const month = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthName = () => new Date().toLocaleDateString([], { month: 'long' });
+  /* "Use Claude too" (Settings > AI), the same on every device: off unless the owner switched it on. A Vault 1.8 on
+     another device doesn't know it, and uses Claude as before until it updates; a Vault older than 1.9.1 that sends a
+     new PIN may also put it back to what it last saw (V.cloud.changeExtra says how). */
+  const claudeOn = () => ((((V.data.settings || {}).extra || {}).ai || {}).claude) === true;
+  /* "Write notes with Claude" (Settings > AI, shown under "Use Claude too" while it's on), the same on every device: off
+     unless switched on, so the free Gemini writes the note-taker's notes (brain). Meaningless while Claude is off. */
+  const notesClaude = () => ((((V.data.settings || {}).extra || {}).ai || {}).notes_claude) === true;
+  /* Whether claudeOn() is the cloud's word on it: the settings row read since this page started (js/cloud.js). Before
+     that, a new or wiped device has no settings at all, and "nothing" must never be taken for "off" (a waiting Claude
+     message sent with Gemini, say), nor an old copy on this device for the cloud's newest. `modeReady(ms)` waits for
+     it (false if it didn't come in time: then this device's copy is all there is, as offline). */
+  const modeKnown = () => !V.cloud.settingsRead || V.cloud.settingsRead();
+  const modeReady = (ms) => (modeKnown() ? Promise.resolve(true) : V.cloud.settingsReady(ms));
 
   /* -- what it costs */
 
@@ -170,21 +214,10 @@ V.ai = (() => {
       limit: typeof ai.limit === 'number' && ai.limit >= 0 ? ai.limit : LIMIT };
   }
 
-  /* The settings row's extra.ai changed: read the cloud's newest extra first (another device may have spent since),
-     then an upsert of extra alone. */
+  /* The settings row's extra.ai changed: merged into the cloud's newest extra (another device may have spent since),
+     then an upsert of extra alone (V.cloud.changeExtra). */
   async function writeAi(change) {
-    let extra = (V.data.settings || {}).extra || {};
-    try {
-      const { data, error } = await V.cloud.sb.from('settings').select('extra').maybeSingle();
-      if (error) throw error;
-      if (data && data.extra) extra = data.extra;
-    } catch (error) { /* this device's copy, then */ }
-    const merged = { ...extra, ai: change({ ...(extra.ai || {}) }) };
-    const { error } = await V.cloud.sb.from('settings').upsert({ extra: merged });
-    if (error) throw error;
-    V.data.settings = { ...V.data.settings, extra: merged };
-    await V.db.meta('settings', V.data.settings);
-    V.emit('data', 'settings');
+    await V.cloud.changeExtra((extra) => ({ ...extra, ai: change({ ...(extra.ai || {}) }) }));
   }
 
   /* `cost` added to this month's tally (every device's), as one more request. */
@@ -207,23 +240,82 @@ V.ai = (() => {
     await writeAi((ai) => ({ ...ai, limit: dollars }));
   }
 
+  /* "Use Claude too" switched on or off for every device: merged into extra.ai like the tally (this month's spending,
+     the limit and everything else in extra stay as the cloud has them). The settings row changing does the rest
+     (followMode). */
+  async function setClaude(on) {
+    await writeAi((ai) => ({ ...ai, claude: !!on }));
+  }
+
+  /* "Write notes with Claude" switched on or off for every device, the same way. */
+  async function setNotesClaude(on) {
+    await writeAi((ai) => ({ ...ai, notes_claude: !!on }));
+  }
+
+  /* The settings row changed (here, or synced from another device): when "Use Claude too" is now otherwise than the
+     last look at the keys found it, that look is let go (on the PC it differs: Jarvis's key is asked about only while
+     Claude is on), a copy of the Claude key in memory is forgotten when it's off, and the pages are told ('ai'). A
+     change to "Write notes with Claude" is told too (the note-taker names who writes). */
+  let seenNotes = null;
+  function followMode() {
+    const notes = notesClaude();
+    if (seenNotes !== null && seenNotes !== notes) V.emit('ai', 'notes');
+    seenNotes = notes;
+    const on = claudeOn();
+    if (seenOn === on) return;
+    const was = seenOn;
+    seenOn = on;
+    if (!on) key = null;
+    if (was === null) return;  // (nothing looked at yet: the first look follows the setting as it is)
+    mode += 1;
+    known = null;
+    looking = null;
+    V.emit('ai', 'claude');
+    check().catch(() => {});
+  }
+  V.on('data', (table) => { if (table === 'settings') followMode(); });
+
   /* -- the key */
 
-  /* Where the key is: { cloud: in the owner's storage, pc: Jarvis has one (on the PC) }. */
+  /* Where the keys are: { cloud: Claude's in the owner's storage, pc: Jarvis has one (on the PC), gemini: the free
+     Google key in the owner's storage }. While Claude is off, Jarvis isn't asked about his (nothing would use it). */
+  let looks = 0;            // counts the looks at the keys (a late answer from an older one says nothing new)
+  let lateListing = null;   // the cloud's listing for the Gemini key, still awaited after its look gave up on it
   async function lookUp() {
+    seenOn = claudeOn();
+    const look = ++looks;
+    const asked = mode;
     const listed = async () => {
       const { data, error } = await V.cloud.sb.storage.from('vault').list(folder(), { limit: 100 });
       if (error) throw error;
       return data || [];
     };
     const has = (files, name) => files.some((f) => f.name === name && f.id);
-    if (!ownKeys()) {
+    if (!ownKeys() && seenOn) {
       // The paid Claude key stays with Jarvis; the free Gemini key is used here like on a phone (1.8.2). Both asked at
-      // once, and a cloud that doesn't answer about Gemini in time just means no Gemini here for now.
-      const gemini = within(listed(), waits.look, new AiError('busy', 'No answer from the cloud.'))
-        .then((files) => has(files, GEMINI_KEY_FILE), () => false);
+      // once, and a cloud that doesn't answer about Gemini in time says nothing about it: what was known before, else
+      // not known (null: never taken for "no Gemini key", which would hold Gemini's messages back). Its answer is
+      // still taken when it comes (the pages are told: a new chat that started on Claude for want of it moves to
+      // Gemini when the key is there), unless a newer look has said since.
+      const before = known && !known.failed && typeof known.gemini === 'boolean' ? known.gemini : null;
+      const found = {};
+      let late;
+      const listing = listed();
+      const gemini = within(listing, waits.look, new AiError('busy', 'No answer from the cloud.'))
+        .then((files) => has(files, GEMINI_KEY_FILE), () => {
+          const waiting = listing.then((files) => {
+            if (look !== looks || asked !== mode) return;
+            late = has(files, GEMINI_KEY_FILE);
+            if (!('gemini' in found)) return;  // (the look hasn't answered yet: it takes it below)
+            found.gemini = late;
+            if (known === found) V.emit('ai', 'key');
+          }, () => {}).finally(() => { if (lateListing === waiting) lateListing = null; });
+          lateListing = waiting;
+          return before;
+        });
       const pc = V.pc.can('aiKeyState') ? await V.pc.call('aiKeyState') : { cloud: false, pc: false, old: true };
-      return { ...pc, gemini: await gemini };
+      const said = await gemini;
+      return Object.assign(found, pc, { gemini: late === undefined ? said : late });
     }
     const files = await listed();
     return { cloud: has(files, KEY_FILE), gemini: has(files, GEMINI_KEY_FILE) };
@@ -233,24 +325,51 @@ V.ai = (() => {
      (`failed`), never a wait for ever (each ask waits for it). It's only "not known yet": the answer, when it comes
      after all, is still taken (unless something else has said where the keys are since), a failed check is asked
      again by the next request, and a check that fails never forgets what an earlier one found. */
+  let triedAt = 0;  // when the last look at the keys started (recheck)
   function check() {
     if (!looking) {
+      const asked = mode;  // (a look from before "Use Claude too" changed tells nothing about now)
+      triedAt = Date.now();
       const finding = lookUp();
       const failed = { failed: true };
       finding.then((found) => {
-        if (known !== failed) return;
+        if (asked !== mode || known !== failed) return;
         known = found;
         V.emit('ai', 'key');
       }, () => {});
-      looking = within(finding, waits.look + 1000, new AiError('busy', 'The key check is taking too long.'))
-        .then((found) => { known = found; return found; })
-        .catch((error) => { if (!known || known.failed) known = failed; throw error; })
-        .finally(() => { looking = null; V.emit('ai', 'key'); });
+      const mine = within(finding, waits.look + 1000, new AiError('busy', 'The key check is taking too long.'))
+        .then((found) => { if (asked === mode) known = found; return found; })
+        .catch((error) => { if (asked === mode && (!known || known.failed)) known = failed; throw error; })
+        .finally(() => { if (looking === mine) looking = null; V.emit('ai', 'key'); });
+      looking = mine;
     }
     return looking;
   }
 
+  /* Whether the last look at the keys found no Gemini key (an answer, not a look that failed or couldn't tell). */
+  const lacksGemini = () => !!known && !known.failed && known.gemini === false;
+  /* Whether the last look at the keys could say either way about the Gemini key (on the PC its listing can come too
+     late for the look: then it's not known, which is neither "set up" nor "missing"). */
+  const geminiKnown = () => has('gemini') || lacksGemini();
+
+  /* The look at the keys under way (and a Gemini listing that came too late for its look) given up to `ms` to answer;
+     then what's known, whatever it is. Never rejects. */
+  function keysSettled(ms) {
+    const pending = [looking, lateListing].filter(Boolean).map((p) => p.catch(() => {}));
+    if (!pending.length) return Promise.resolve(known);
+    return within(Promise.all(pending), ms, null).then(() => known, () => known);
+  }
+
+  /* The keys looked at again when the last look started over `maxAge` ms ago (waits.recheck by default): a key set up
+     on another device since is then seen here, without opening anything again. Asked before a message or a note is
+     held back for the lack of a key, and when Vault comes back to the front with one missing. Never rejects. */
+  function recheck(maxAge = waits.recheck) {
+    if (!looking && Date.now() - triedAt < maxAge) return Promise.resolve(known);
+    return check().catch(() => known);
+  }
+
   async function getKey() {
+    if (!claudeOn()) { key = null; throw new AiError('off', WORDS.off); }  // (never fetched while Claude is off)
     if (key) return key;
     const { data, error } = await V.cloud.sb.storage.from('vault').download(keyPath());
     if (error || !data) {
@@ -272,14 +391,16 @@ V.ai = (() => {
     await V.cloud.upload(keyPath(), new Blob([JSON.stringify(record)], { type: 'application/json' }), { mime: 'application/json' });
     key = clean;
     known = { ...(known || {}), cloud: true };
+    V.emit('ai', 'key');
   }
 
   /* Python's answer about the Claude key ({ cloud, pc }) taken as the page's `known`, keeping what only the page knows:
      whether the free Gemini key is set up (read after the await, so a Gemini Save or Remove meanwhile counts). */
-  const fromPc = (pc) => { known = { ...(pc || {}), gemini: !!(known && known.gemini) }; };
+  const fromPc = (pc) => { known = { ...(pc || {}), gemini: known && typeof known.gemini === 'boolean' ? known.gemini : null }; };
 
   async function shareFromPc() {
     fromPc(await V.pc.call('aiKeyShare'));
+    V.emit('ai', 'key');
   }
 
   async function removeKey() {
@@ -289,6 +410,7 @@ V.ai = (() => {
       known = { ...(known || {}), cloud: false };
     }
     key = null;
+    V.emit('ai', 'key');
   }
 
   /* -- the Gemini key (a phone's or Chromebook's, in the same private place, in memory only) */
@@ -303,7 +425,11 @@ V.ai = (() => {
   /* What's wrong with `text` as a Gemini key, in plain words ('' when it could be one). */
   function geminiKeyProblem(text) {
     if (!text) return 'Paste the key from aistudio.google.com/apikey first.';
-    if (/^sk-ant-/i.test(text)) return 'That\'s a Claude key: paste it in the Claude key row instead.';
+    if (/^sk-ant-/i.test(text)) {
+      return claudeOn() ? 'That\'s a Claude key: paste it in the Claude key row instead.'  // (shown only while it's on)
+        : 'That\'s a Claude key, not a Google one. To use Claude, switch on "Use Claude too" below, then paste it in the '
+          + 'Claude key row.';
+    }
     if (NOT_GOOGLE.test(text)) return 'That\'s another service\'s key, not a Google one. Copy the key from aistudio.google.com/apikey.';
     if (!GEMINI_KEY_LOOKS.test(text)) {
       return 'That doesn\'t look like a Google key (it\'s one long piece with no spaces). Copy it again from aistudio.google.com/apikey.';
@@ -314,17 +440,42 @@ V.ai = (() => {
   /* A pasted key without the space or quotes copied round it. */
   const tidyKey = (text) => String(text || '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
 
+  /* What the last look found about the Gemini key, from fetching it: the pages that wait on it are told ('ai') when
+     that's news. */
+  function geminiFound(there) {
+    const was = known ? known.gemini : undefined;
+    if (there && (!known || known.failed)) return;  // (no look yet: the next one says where the other keys are too)
+    known = { ...(known || {}), gemini: there };
+    if (was !== there) V.emit('ai', 'key');
+  }
+
+  /* Storage's own "there's no such file" (a missing object comes back as a 400 saying 404, or a 404): only that is "no
+     key". Anything else (no answer, the cloud's own trouble) says nothing about the key. */
+  const notThere = (error) => !!error && error.name === 'StorageApiError'
+    && (Number(error.status) === 404 || String(error.statusCode) === '404' || /not.?found/i.test(error.message || ''));
+
   async function getGeminiKey() {
     if (geminiKey) return geminiKey;
-    const { data, error } = await V.cloud.sb.storage.from('vault').download(geminiPath());
+    let got;
+    try {
+      got = await V.cloud.sb.storage.from('vault').download(geminiPath());
+    } catch (error) {
+      got = { data: null, error };
+    }
+    const { data, error } = got;
+    if (error && !notThere(error)) {  // the cloud didn't answer: the message or the notes wait, never "set up Gemini"
+      throw navigator.onLine ? Object.assign(new AiError('offline', WORDS.cloudOut), { cloud: true })
+        : new AiError('offline', WORDS.away);
+    }
     if (error || !data) {
-      known = { ...(known || {}), gemini: false };
-      throw new AiError('nokey', 'Add a free Google key first: Settings > AI.');
+      geminiFound(false);
+      throw new AiError('nokey', WORDS.geminiNokey);
     }
     let found = '';
     try { found = String(JSON.parse(await data.text()).key || '').trim(); } catch (e) { /* not a key file */ }
     if (geminiKeyProblem(found)) throw new AiError('nokey', 'The Gemini key saved in your cloud isn\'t a Google key. Set it up again in Settings > AI.');
     geminiKey = found;
+    geminiFound(true);
     return geminiKey;
   }
 
@@ -352,6 +503,8 @@ V.ai = (() => {
     await V.cloud.upload(geminiPath(), new Blob([JSON.stringify(record)], { type: 'application/json' }), { mime: 'application/json' });
     geminiKey = clean;
     known = { ...(known || {}), gemini: true };
+    V.emit('ai', 'key');  // (a message held for the lack of it goes, the Chat tab's line goes)
+    forgetList();  // (a new key may be offered other models: listed again with it)
     return { checked: !why, why, said };
   }
 
@@ -359,11 +512,15 @@ V.ai = (() => {
     await V.cloud.remove([geminiPath()]);
     known = { ...(known || {}), gemini: false };
     geminiKey = null;
+    V.emit('ai', 'key');
+    forgetList();
   }
 
   /* -- asking Claude */
 
   const WORDS = {
+    off: 'Claude is switched off. To use it, switch on "Use Claude too" in Settings > AI.',
+    geminiNokey: 'Set up the free Gemini first (Settings > AI). It only takes a minute.',
     key: 'Claude didn\'t accept the key. Set it up again in Settings > AI.',
     geminiOffline: 'Gemini can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     geminiBusy: 'Gemini is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
@@ -372,6 +529,7 @@ V.ai = (() => {
     busy: 'Claude is busy right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     slow: 'Claude is taking too long right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
     cloudSlow: 'Your cloud is taking too long to answer right now. Your words are saved, and the notes will be made by themselves in a little while (or tap Make notes).',
+    cloudOut: 'Your cloud can\'t be reached right now. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     away: 'You\'re offline. Your words are saved, and the notes will be made by themselves when you\'re back online.',
     old: 'This PC\'s Vault needs an update to make notes (open Jarvis and click Update). Or make them on your phone.',
@@ -539,8 +697,382 @@ V.ai = (() => {
     return `Google didn't accept the Gemini key${why.message ? ` (${why.message})` : ''}. ${again}`;
   }
 
-  const slowUntil = new Map();  // model -> until when it's tried last (it was too slow to start)
-  const thinkingStep = new Map();  // "<model> <use>" -> how far down THINKING[use] that model had to go
+  // Marks kept only while the page is open go by the time that has really gone by (performance.now(), which a clock
+  // put right doesn't move), never by the date.
+  // A slow mark is for the use it was made in: a chat's head start is learned and short, the note-taker's long, so a
+  // model that lost a chat's race (or whose chat answer stopped part-way) still keeps its place for notes, and the
+  // other way round.
+  const slowUntil = new Map();  // "<model> <use>" -> until when (performance.now()) it's tried last for that use
+  const thinkingStep = new Map();  // "<model> <use>" -> how far down its THINKING list that model had to go
+  const slowKey = (model, use) => `${model} ${use === 'notes' ? 'notes' : 'chat'}`;
+  const markSlow = (model, use) => slowUntil.set(slowKey(model, use), performance.now() + (Number(waits.slowFor) || 0));
+  const isSlow = (model, use) => slowUntil.get(slowKey(model, use)) > performance.now();
+
+  /* Whose doing an answer cut short was. One that stops coming because of this device (its connection dropped: the
+     phone lost signal or changed networks, or the browser put the page away and cut it off, as Android does with a page
+     left in the background) says nothing about the model, so it's never held against it. `unsettledAt` is when this
+     device last did any of that (performance.now()); `unsettledSince(began)`: whether it may have, since `began`. */
+  let unsettledAt = -Infinity;
+  const unsettle = () => { unsettledAt = performance.now(); };
+  try {
+    document.addEventListener('visibilitychange', () => { if (document.hidden) unsettle(); });
+    document.addEventListener('freeze', unsettle);  // (Chrome's page lifecycle: a page put to sleep)
+    window.addEventListener('pagehide', unsettle);
+    window.addEventListener('offline', unsettle);
+    window.addEventListener('online', unsettle);
+    // Chrome's Network Information: a change of network. Its 'change' also fires when Chrome's speed estimates move,
+    // which isn't this device's doing, so only a new kind of connection counts.
+    const net = navigator.connection;
+    if (net && net.addEventListener) {
+      let was = `${net.type || ''} ${net.effectiveType || ''}`;
+      net.addEventListener('change', () => {
+        const now = `${net.type || ''} ${net.effectiveType || ''}`;
+        if (now !== was) unsettle();
+        was = now;
+      });
+    }
+  } catch (error) { /* only the state at the time is looked at, then */ }
+  const unsettledSince = (began) => !!document.hidden || !navigator.onLine || unsettledAt >= began;
+
+  /* -- which Gemini model first: how quickly each starts answering on this device (1.9.1)
+
+     The owner's Check Gemini on his PC: Flash no words after 15 s, Flash-Lite 10.6 s, so every chat waited Flash's
+     7 s head start before Flash-Lite was even asked. Each device now remembers, per model, how long its recent answers
+     took to their first words (from chats, notes and Check Gemini), and its failures, in localStorage
+     'vault-gemini-speed' (never the key, never what was said; a device's own network decides this, so it isn't
+     synced). A chat asks the quickest first (a model not timed here yet after the ones known to start within the usual
+     head start, a model found by ListModels only once it has been timed, a failing one after those, one that lost a race
+     a moment ago last, as before), and gives it a head start that fits it (`headFor`). The note-taker keeps Flash first
+     (its notes are better) unless Flash keeps failing or kept losing its races here. Storage that can't be used (a
+     private window, a locked-down Chromebook) only means the record lasts until the page closes. Two pages of Vault
+     open on one device (the installed app and a Chrome tab) share the record: each reads what's kept before using or
+     changing it, so neither writes its older copy over what the other learned. Everything kept is dated, and expires
+     by its age; one dated later than now (kept while this device's clock was ahead) counts as expired. */
+  const SPEED_KEY = 'vault-gemini-speed';
+  const SPEED_KEEP = 2 * 24 * 3600 * 1000;  // older timings are forgotten (networks and Google's models change)
+  const SPEED_SAMPLES = 6;                  // timings kept per model and use (chat, notes)
+  const FAIL_AFTER = 2;                     // failures in a row (each within FAIL_FOR of the one before) that put a
+  const FAIL_FOR = 60 * 60 * 1000;          // model after the others, until it answers again or this long goes by
+  const CLOCK_SLACK = 60 * 1000;            // a date at most this far ahead is the clock being set right, not wrong
+  const MODEL_NAME = /^gemini-[a-z0-9][a-z0-9.-]{0,60}$/;
+
+  /* Whether something dated `at` (Date.now() when it was kept) is less than `keep` old: never when its date is later
+     than now (the clock was ahead when it was kept, and has been put right since). */
+  const lately = (at, keep) => {
+    const age = Date.now() - at;
+    return Number.isFinite(age) && age >= -CLOCK_SLACK && age < keep;
+  };
+
+  /* What localStorage holds under `name` (null when nothing, or it can't be read). */
+  function stored(name) {
+    try { return JSON.parse(localStorage.getItem(name) || 'null'); } catch (error) { return null; }
+  }
+  /* `value` kept under `name` (null: removed). Storage that can't be used is simply not kept. */
+  function store(name, value) {
+    try {
+      if (value === null) localStorage.removeItem(name);
+      else localStorage.setItem(name, JSON.stringify(value));
+    } catch (error) { /* a private window, or storage switched off: in memory only */ }
+  }
+
+  let speed = null;       // { models: { <model>: { chat: [[ms, at, ok]], notes: [...], fails, failAt, version } } }
+  let speedText;          // the text in storage `speed` was read from or written as (undefined: none read yet)
+
+  /* Timings as kept: [ms to the first words (or, when not ok, how long it had gone without any), when, 1 = it answered]. */
+  const samplesOf = (list) => (Array.isArray(list) ? list : [])
+    .filter((s) => Array.isArray(s) && Number.isFinite(s[0]) && s[0] >= 0 && Number.isFinite(s[1]))
+    .map((s) => [Math.round(s[0]), s[1], s[2] ? 1 : 0]).slice(-SPEED_SAMPLES);
+
+  /* A record from the text kept in storage (anything unreadable in it is left out). */
+  function readRecord(text) {
+    let raw = null;
+    try { raw = JSON.parse(text || 'null'); } catch (error) { /* not a record */ }
+    const models = raw && typeof raw === 'object' && raw.models && typeof raw.models === 'object' ? raw.models : {};
+    const out = { models: {} };
+    for (const [model, e] of Object.entries(models)) {
+      if (!MODEL_NAME.test(model) || !e || typeof e !== 'object') continue;
+      out.models[model] = { chat: samplesOf(e.chat), notes: samplesOf(e.notes),
+        fails: Number.isFinite(e.fails) && e.fails > 0 ? Math.min(99, Math.floor(e.fails)) : 0,
+        failAt: Number.isFinite(e.failAt) ? e.failAt : 0,
+        version: typeof e.version === 'string' && MODEL_NAME.test(e.version) ? e.version : '' };
+    }
+    return out;
+  }
+
+  /* This device's record as kept now (another page of Vault may have changed it since this one last looked); the one
+     in memory when storage can't be read. */
+  function record() {
+    let text;
+    try { text = localStorage.getItem(SPEED_KEY); } catch (error) { return speed || (speed = { models: {} }); }
+    if (!speed || text !== speedText) {
+      speed = readRecord(text);
+      speedText = text;
+    }
+    return speed;
+  }
+  /* `change(models)` made to the record as kept now, then kept (in memory only when storage can't be used). */
+  function changeRecord(change) {
+    const now = record();
+    change(now.models);
+    const text = JSON.stringify({ v: 1, models: now.models });
+    try {
+      localStorage.setItem(SPEED_KEY, text);
+      speedText = text;
+    } catch (error) { /* a private window, or storage switched off: in memory only */ }
+  }
+  const entryIn = (models, model) => {
+    if (!models[model]) models[model] = { chat: [], notes: [], fails: 0, failAt: 0, version: '' };
+    return models[model];
+  };
+  /* A model's timings for `use` from the last SPEED_KEEP. */
+  const recent = (model, use) => {
+    const e = record().models[model];
+    return e ? (e[use] || []).filter((s) => lately(s[1], SPEED_KEEP)) : [];
+  };
+  /* How long `model` usually takes here to its first words (the median of its recent timings; one that didn't answer
+     counts as the time it went without), or null when it hasn't been timed here lately. */
+  function typical(model, use = 'chat') {
+    const times = recent(model, use).map((s) => s[0]).sort((a, b) => a - b);
+    if (!times.length) return null;
+    const mid = Math.floor(times.length / 2);
+    return times.length % 2 ? times[mid] : Math.round((times[mid - 1] + times[mid]) / 2);
+  }
+  /* typical(), once there are two timings to go on (one quick answer could be luck); null before that. */
+  const settled = (model) => (recent(model, 'chat').length >= 2 ? typical(model, 'chat') : null);
+  /* `model` (for `use`) started its answer after `ms` (`ok`), or went `ms` without starting it (lost a race, too slow). */
+  function timed(model, use, ms, ok) {
+    if (!MODEL_NAME.test(model) || !Number.isFinite(ms)) return;
+    const kind = use === 'notes' ? 'notes' : 'chat';
+    changeRecord((models) => {
+      const e = entryIn(models, model);
+      e[kind] = [...(e[kind] || []).filter((s) => lately(s[1], SPEED_KEEP)),
+        [Math.max(0, Math.round(ms)), Date.now(), ok ? 1 : 0]].slice(-SPEED_SAMPLES);
+      if (ok) { e.fails = 0; e.failAt = 0; }
+    });
+  }
+  /* `model` failed: busy, its free quota used up, not offered to this key, it refused the key, or its answer stopped
+     coming part-way. Failures only add up while each comes within FAIL_FOR of the one before: one long ago and one now
+     aren't "in a row". */
+  function failedHere(model) {
+    if (!MODEL_NAME.test(model)) return;
+    changeRecord((models) => {
+      const e = entryIn(models, model);
+      e.fails = e.fails > 0 && lately(e.failAt, FAIL_FOR) ? Math.min(99, e.fails + 1) : 1;
+      e.failAt = Date.now();
+    });
+  }
+  const failing = (model) => {
+    const e = record().models[model];
+    return !!e && e.fails >= FAIL_AFTER && lately(e.failAt, FAIL_FOR);
+  };
+  /* The note-taker's own "very slow": its last two notes here both went without starting (lost, or too slow). */
+  const verySlow = (model) => {
+    const last = recent(model, 'notes').slice(-2);
+    return last.length === 2 && last.every((s) => !s[2]);
+  };
+  /* The numbered model a "latest" name pointed to when it last answered here (Google's modelVersion). */
+  const versionOf = (model) => (record().models[model] || {}).version || '';
+  function pointsTo(model, version) {
+    const v = String(version || '').replace(/^models\//, '');
+    if (!GEMINI_MODELS.includes(model) || v === model || !MODEL_NAME.test(v) || versionOf(model) === v) return;
+    changeRecord((models) => { entryIn(models, model).version = v; });
+  }
+
+  /* -- the other models this key may use (ListModels), kept a day
+
+     Conservative: stable text Flash and Flash-Lite models only (gemini-<n>[.<n>]-flash[-lite], none of the previews,
+     experiments, speech, image, live or "-latest" names), that generate text; then at most two of them (`extras`): the
+     newest Flash and the newest Flash-Lite that aren't what a "latest" name points to anyway. Kept in localStorage
+     'vault-gemini-models' with the owner's id (never the key) for LIST_FOR, and forgotten when they sign out; a listing
+     that fails (no answer, one that stops coming, or something that isn't Google's list) leaves the two "latest" names
+     as they were, and is tried again after LIST_RETRY. */
+  const MODELS_KEY = 'vault-gemini-models';
+  const LIST_FOR = 24 * 3600 * 1000;
+  const LIST_RETRY = 10 * 60 * 1000;
+  const EXTRAS = 2;
+  const STABLE_FLASH = /^models\/gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/;
+  const NOT_STABLE = /preview|exp|tts|image|live|thinking|native-audio|audio|latest/;
+  let listed = null;      // { owner, at, models: [{ id, thinks? }] }: newest first
+  let listing = null;     // the ListModels request on its way (in the background)
+  let listFailedAt = -Infinity;  // (performance.now(): only while the page is open)
+  let listGen = 0;        // counts forgetList: a listing asked for before it (another key, another person) is let go
+
+  /* The stable Flash models in a ListModels answer, newest first (Flash before Flash-Lite of the same number). */
+  function stableFlash(found) {
+    const out = [];
+    for (const m of Array.isArray(found) ? found : []) {
+      const name = String((m && m.name) || '');
+      const hit = STABLE_FLASH.exec(name);
+      if (!hit || NOT_STABLE.test(name)) continue;
+      const methods = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+      if (!methods.includes('generateContent') && !methods.includes('streamGenerateContent')) continue;
+      const id = name.slice('models/'.length);
+      if (out.some((o) => o.id === id)) continue;
+      out.push({ id, major: Number(hit[1]), minor: Number(hit[2] || 0), lite: !!hit[3],
+        thinks: typeof m.thinking === 'boolean' ? m.thinking : undefined });
+    }
+    return out.sort((a, b) => b.major - a.major || b.minor - a.minor || Number(a.lite) - Number(b.lite))
+      .map(({ id, thinks }) => (thinks === undefined ? { id } : { id, thinks }));
+  }
+
+  /* This owner's listing (kept on this device), or null. */
+  function listedNow() {
+    if (!listed) {
+      const raw = stored(MODELS_KEY);
+      if (raw && typeof raw === 'object' && typeof raw.owner === 'string' && Number.isFinite(raw.at) && Array.isArray(raw.models)) {
+        listed = { owner: raw.owner, at: raw.at, models: raw.models
+          .filter((m) => m && typeof m.id === 'string' && STABLE_FLASH.test(`models/${m.id}`))
+          .map((m) => (typeof m.thinks === 'boolean' ? { id: m.id, thinks: m.thinks } : { id: m.id })) };
+      }
+    }
+    return listed && listed.owner === owner() ? listed : null;
+  }
+  function keepList(models) {
+    listed = { owner: owner(), at: Date.now(), models: models || [] };
+    store(MODELS_KEY, listed);
+  }
+  function forgetList() {
+    listGen += 1;
+    listed = null;
+    listing = null;
+    listFailedAt = -Infinity;
+    store(MODELS_KEY, null);
+  }
+
+  /* Google's list of the models `sending` may use: { ok, status, ms (to Google's answer: the round trip to Google with
+     the key, no model at work), models (stableFlash's), trouble (geminiTrouble's kinds, 'slow': no whole answer in
+     time, one that started and stopped coming included, 'offline', or 'garbled': an answer that isn't Google's list,
+     like a network filter's page), said }. Only ever to generativelanguage.googleapis.com. */
+  async function listModels(sending, limit = waits.list) {
+    const out = { ok: false, status: 0, ms: null, models: null, trouble: '', said: '' };
+    const own = new AbortController();
+    let late = false;
+    const timer = setTimeout(() => { late = true; own.abort(); }, Math.max(1, Number(limit) || 1));
+    const began = performance.now();
+    try {
+      const found = [];
+      let page = '';
+      for (let n = 0; n < 3; n++) {  // (one page as a rule: Google offers fewer than 100 models)
+        const response = await fetch(page ? `${GEMINI_LIST}&pageToken=${encodeURIComponent(page)}` : GEMINI_LIST, {
+          method: 'GET', signal: own.signal, cache: 'no-store', headers: { 'x-goog-api-key': sending } });
+        if (out.ms === null) out.ms = Math.round(performance.now() - began);
+        out.status = response.status;
+        let data = null;
+        let readable = true;
+        try {
+          data = await response.json();
+        } catch (error) {
+          // An answer that stopped coming (out of time, or the connection went) is no answer; one that came whole but
+          // isn't JSON isn't Google's list (an error's words are only a bonus).
+          if (response.ok && !(error instanceof SyntaxError)) throw error;
+          readable = false;
+        }
+        if (!response.ok) {
+          const said = googleError(data, sending);
+          out.trouble = geminiTrouble(response.status, said);
+          out.said = said.message;
+          return out;
+        }
+        if (!readable || !data || typeof data !== 'object' || Array.isArray(data)
+          || (data.models !== undefined && !Array.isArray(data.models))) {
+          out.trouble = 'garbled';
+          return out;
+        }
+        found.push(...(data.models || []));
+        page = typeof data.nextPageToken === 'string' ? data.nextPageToken : '';
+        if (!page) break;
+      }
+      out.ok = true;
+      out.models = stableFlash(found);
+    } catch (error) {
+      out.trouble = late ? 'slow' : 'offline';
+    } finally {
+      clearTimeout(timer);
+    }
+    return out;
+  }
+
+  /* This key's other models, asked for in the background when the listing kept here is a day old (or there's none, or
+     it's dated later than now): never waited for by a request that has a model to ask. Returns the listing on its way
+     (or null). */
+  function discover(sending) {
+    const have = listedNow();
+    if (listing || (have && lately(have.at, LIST_FOR)) || performance.now() - listFailedAt < LIST_RETRY) return listing;
+    const gen = listGen;
+    const mine = listModels(sending).then((got) => {
+      if (gen !== listGen) return;  // (signed out, or the key changed, meanwhile)
+      if (got.ok) keepList(got.models);
+      else listFailedAt = performance.now();
+    }, () => { if (gen === listGen) listFailedAt = performance.now(); }).finally(() => { if (listing === mine) listing = null; });
+    listing = mine;
+    return listing;
+  }
+
+  /* Up to EXTRAS numbered models to ask besides the "latest" names: the newest Flash and the newest Flash-Lite this key
+     is offered, leaving out what a "latest" name was seen to point to (the same model again), newest first. */
+  function extras() {
+    const have = listedNow();
+    if (!have) return [];
+    const same = new Set(GEMINI_MODELS.map(versionOf).filter(Boolean));
+    const free = have.models.map((m) => m.id).filter((id) => !GEMINI_MODELS.includes(id) && !same.has(id));
+    const pick = [false, true].map((lite) => free.find((id) => /-lite$/.test(id) === lite)).filter(Boolean);
+    for (const id of free) if (pick.length < EXTRAS && !pick.includes(id)) pick.push(id);
+    return free.filter((id) => pick.slice(0, EXTRAS).includes(id));
+  }
+
+  /* How much `model` may think for `use`, most wanted first: the "latest" names and Gemini 3 and later take THINKING,
+     a numbered 2.x THINKING_2, and one ListModels says can't think nothing at all. */
+  function levelsFor(model, use) {
+    const have = listedNow();
+    const found = have && have.models.find((m) => m.id === model);
+    if (found && found.thinks === false) return [null];
+    const number = /^gemini-(\d+)/.exec(model);
+    const table = number && Number(number[1]) < 3 ? THINKING_2 : THINKING;
+    return table[use] || table.chat;
+  }
+
+  /* The models to ask, in order, for `use` ('chat' or 'notes'; `wait`: the check on Save, the "latest" names only).
+     A chat: the quickest here first, then models found by ListModels and not timed here yet, then failing ones, then
+     any that lost a race for this use a moment ago (slowUntil), each group in Vault's own order otherwise. "Quickest"
+     goes by the usual time once a model has two timings here; until then a model counts as starting within the usual
+     head start (waits.head), or as its one timing when that was slower: one slow start moves a model down at once,
+     but only a second quick one moves it up. The note-taker: Vault's own order (Flash first), a model that keeps
+     failing or kept losing its races here moved after the rest, one that lost a moment ago last. */
+  function ranked(use = 'chat', { wait = false } = {}) {
+    const base = wait ? [...GEMINI_MODELS] : [...GEMINI_MODELS, ...extras()];
+    const unknown = Math.max(0, Number(waits.head) || 0);
+    const rank = (model) => {
+      if (isSlow(model, use)) return [3, 0];
+      if (wait) return [0, 0];
+      if (failing(model)) return [2, 0];
+      if (use === 'notes') return [verySlow(model) ? 2 : 0, 0];
+      const timings = recent(model, 'chat').length;
+      if (!timings && !GEMINI_MODELS.includes(model)) return [1, 0];  // (found, not timed: a fallback until it is)
+      const usual = settled(model);
+      return [0, usual !== null ? usual : timings ? Math.max(typical(model, 'chat'), unknown) : unknown];
+    };
+    return base.map((model, at) => ({ model, at, rank: rank(model) }))
+      .sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.at - b.at).map((m) => m.model);
+  }
+
+  /* A chat's head start for `model` (ms): one and a half times its usual time here, at least waits.headMin (a quick
+     model gets a moment's grace: a normal slow moment never sends a second copy of the request, which counts against
+     the free daily limit like any other) and at most waits.head; waits.head until it has two timings here. */
+  function headFor(model) {
+    const most = Math.max(0, Number(waits.head) || 0);
+    const usual = settled(model);
+    if (usual === null) return most;
+    const least = Math.min(Math.max(0, Number(waits.headMin) || 0), most);
+    return Math.min(most, Math.max(least, Math.round(usual * 1.5)));
+  }
+
+  /* Everything learned about the models forgotten (tests; and a fresh start). */
+  function forgetSpeed() {
+    speed = { models: {} };
+    speedText = null;
+    store(SPEED_KEY, null);
+    slowUntil.clear();
+  }
 
   /* The pieces of a streamed answer (server-sent events, "data: {json}" each) in `buffer`, as parsed objects, and
      what's left over (a piece not complete yet). */
@@ -558,23 +1090,30 @@ V.ai = (() => {
   }
 
   /* One model, streamed (streamGenerateContent, alt=sse): its words go to `onText` as they come. Returns { answer:
-     { text, finish, usage, model, version, cut, blocked } } (version: the model Google says answered, its modelVersion;
-     cut: the answer stopped part-way; blocked: Google turned the prompt itself down, its promptFeedback.blockReason),
-     { trouble, why } when the model didn't answer (geminiTrouble's kinds, 'slow': no first words within `first` ms
-     plus the time the request takes to go up, or 'uplink' with its size: a big request Google hadn't even answered by
-     then), or throws an AiError 'stopped' (and no words yet) or 'offline' (no answer at all). `use` picks how much it
-     may think (THINKING; `step`: a setting further down that list, tried once without being remembered unless it's
-     taken). `timing`, when given, is filled in: ms to Google's answer (`answered`, with its `status`) and to the first
-     words (`words`), and the `version` that answered. */
+     { text, finish, usage, model, version, cut, blocked, here } } (version: the model Google says answered, its
+     modelVersion; cut: the answer stopped part-way; blocked: Google turned the prompt itself down, its
+     promptFeedback.blockReason; here: it was cut off at this end, see below), { trouble, why, here } when the model
+     didn't answer (geminiTrouble's kinds, 'slow': no first words within `first` ms plus the time the request takes to
+     go up, or 'uplink' with its size: a big request Google hadn't even answered by then), or throws an AiError
+     'stopped' (and no words yet) or 'offline' (no answer at all). `here`: what went wrong may well have been this
+     device's doing, not the model's (the connection dropped part-way, or the page was out of sight, offline or
+     changed networks while it waited: `unsettledSince`), so it's never held against the model; an error piece from
+     Google, an answer Google ended unfinished, an HTTP error, or no words (or no more words) in time with the page in
+     sight and online all along are the model's. `use` picks how much it may think (levelsFor; `step`: a setting
+     further down that list, tried once without being remembered unless it's taken). `timing`, when given, is filled
+     in: ms to Google's answer (`answered`, with its `status`) and to the first words (`words`), the `version` that
+     answered, the `thinking` setting sent (null: none) and, when Google says, how many tokens it thought for
+     (`thoughts`). */
   async function geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first, use = 'chat', timing = null,
     step = null }) {
     const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
-    const levels = THINKING[use] || THINKING.chat;
+    const levels = levelsFor(model, use);
     const stepKey = `${model} ${use}`;
     const at = step === null ? Math.min(thinkingStep.get(stepKey) || 0, levels.length - 1) : step;
     const thinking = levels[at];
     if (thinking) body.generationConfig.thinkingConfig = { ...thinking };
+    if (timing) timing.thinking = thinking ? { ...thinking } : null;
     const payload = JSON.stringify(body);
     const own = new AbortController();
     const follow = () => own.abort();
@@ -609,9 +1148,13 @@ V.ai = (() => {
       }
     };
     const stopped = () => signal && signal.aborted;
-    const answer = (cut) => {
-      if (timing) timing.version = version;
-      return { answer: { text, finish: stopped() ? 'STOPPED' : finish, usage, model, version, cut, blocked } };
+    const answer = (cut, here = false) => {
+      if (timing) {
+        timing.version = version;
+        const thoughts = Number(usage && usage.thoughtsTokenCount);
+        if (Number.isFinite(thoughts) && thoughts >= 0) timing.thoughts = thoughts;
+      }
+      return { answer: { text, finish: stopped() ? 'STOPPED' : finish, usage, model, version, cut, blocked, here } };
     };
     try {
       let response;
@@ -624,7 +1167,10 @@ V.ai = (() => {
       } catch (error) {
         if (stopped()) throw new AiError('stopped', 'Stopped.');
         // Out of time before Google even answered: with a big request, it was still going up (the connection's fault).
-        if (why === 'slow') return payload.length > BIG_BODY ? { trouble: 'uplink', size: payload.length } : { trouble: 'slow' };
+        if (why === 'slow') {
+          return payload.length > BIG_BODY ? { trouble: 'uplink', size: payload.length }
+            : { trouble: 'slow', here: unsettledSince(began) };
+        }
         throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
       }
       if (timing) { timing.answered = since(); timing.status = response.status; }
@@ -675,9 +1221,13 @@ V.ai = (() => {
           if (text) return answer(false);
           throw new AiError('stopped', 'Stopped.');
         }
-        if (text) return answer(true);
-        if (why === 'slow') return { trouble: 'slow' };
-        return { trouble: 'busy' };
+        // Our own wait running out (no words, or no more words, in time) with the page in sight and online all along is
+        // the model's doing; a read that failed by itself (the connection went), or anything while this device was
+        // unsettled, is this end's.
+        const here = !why || unsettledSince(began);
+        if (text) return answer(true, here);
+        if (why === 'slow') return { trouble: 'slow', here };
+        return { trouble: 'busy', here };
       }
       if (!pieces && buffer.trim()) {  // a plain JSON answer (a list of pieces) rather than events
         try { [].concat(JSON.parse(buffer)).forEach(take); } catch (error) { /* not JSON */ }
@@ -691,20 +1241,30 @@ V.ai = (() => {
     }
   }
 
-  /* One request with `sending` as the key, to GEMINI_MODELS (one that was slow lately, last). The first model is asked
-     at once; if it hasn't started its answer after its head start (`head`, plus a little for the request going up), or
-     it fails, the next one is asked too. The first to start answering wins and the other is stopped (and, if it was
-     asked first, tried last for a while). One Google doesn't offer this key, whose free quota is used up, that's
-     overloaded or too slow to start, or that turns the key down gives way to the next. One that turns the request down,
-     or answers with nothing (empty, or the prompt blocked), says so for itself only while another model may still
-     answer: that one carries on, and nothing new is asked because of it (a request Google turns down isn't sent again).
+  /* One request with `sending` as the key, to the models `ranked` puts first (for a chat, the quickest here; one that
+     was slow lately, last). The first model is asked at once; if it hasn't started its answer after its head start
+     (`headFor` for a chat, waits.head for one with pictures or PDFs (HEAVY_BODY), waits.notesHead for notes, plus a
+     little for the request going up), the next one is asked too, and when it fails, the next at once (AT_ONCE at most
+     at once). The first to start answering wins and the others are stopped (and one asked before it, tried last for a
+     while). One Google doesn't offer this key, whose free quota is used up, that's overloaded or too slow to start, or
+     that turns the key down gives way to the next; models ListModels found are asked after the "latest" names (unless
+     timed here as quicker), and when none is left to ask while that listing is still on its way, it's waited for
+     (waits.list at most). A "latest" name that turns the request down, or answers with nothing (empty, or the prompt
+     blocked), says so for itself only while another model may still answer: that one carries on, and nothing new is
+     asked because of it (a request Google turns down isn't sent again). A model ListModels found that does so only
+     speaks for itself: the others are still asked, and its "no" is only the answer when none of them could (never
+     outweighing a busy or used-up Gemini, which waits and goes again by itself, but outweighing any word about the key:
+     it took the key). What each model did is remembered on this device (`timed`, `failedHere`; an answer that stopped
+     coming part-way on Google's side counts as a failure, never as a quick start; nothing that may have been this
+     device's doing, geminiTry's `here`, counts against a model), except for the check on Save.
      `wait` (ms): how long the check on Save waits for each; otherwise `waits` by `use`. Returns geminiTry's answer, or
      throws an AiError: 'stopped', 'bad' (Google turned this request down, or this message's own files are too big to
      go up on this connection), or, when no model answered: 'quota' (Google took the key, its free quota is used up),
-     'key' (a model refused the key itself: why, in plain words), 'busy' (Google's own trouble, or too slow: `why`
-     'busy', 'slow', or 'uplink': a chat whose earlier pictures and files go with every message, slow to go up), 'key'
-     again for a refusal that may have been one model's (none took the key), 'offline' (no answer: no internet, a
-     network that blocks Google), else 'bad' (none offered). */
+     'key' (a model refused the key itself: why, in plain words; never when a found model took it), 'busy' (Google's
+     own trouble, or too slow: `why` 'busy', 'slow', or 'uplink': a chat whose earlier pictures and files go with every
+     message, slow to go up), 'bad' (a found model's own "no"), 'key' again for a refusal that may have been one
+     model's (none took the key), 'offline' (no answer: no internet, a network that blocks Google), else 'bad' (none
+     offered). */
   async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0, onText = null,
     use = 'chat' } = {}) {
     if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
@@ -713,44 +1273,70 @@ V.ai = (() => {
     const list = contents || [];
     const size = JSON.stringify(list).length + String(system || '').length;
     // The head start allows a little for the request going up, never much: each model's own first-words wait allows
-    // all of it (geminiTry), but a slow model must still give way within seconds on a good connection.
+    // all of it (geminiTry), but a slow model must still give way within seconds on a good connection. A big request
+    // (pictures, PDFs) never gets a learned shorter one: a second copy only goes up after the full head start.
     const upload = Math.ceil(size / Math.max(1, Number(waits.uplink) || 1));
-    const head = (notes ? waits.notesHead : waits.head) + Math.min(Math.max(0, Number(waits.headUpload) || 0), upload);
+    const going = Math.min(Math.max(0, Number(waits.headUpload) || 0), upload);
+    const heavy = size > HEAVY_BODY;
+    const headOf = (model) => (notes ? waits.notesHead : heavy ? waits.head : headFor(model)) + going;
     const own = JSON.stringify(list[list.length - 1] || '').length;  // this message's part (the rest: the chat so far)
-    const now = Date.now();
-    const order = [...GEMINI_MODELS.filter((m) => !(slowUntil.get(m) > now)), ...GEMINI_MODELS.filter((m) => slowUntil.get(m) > now)];
+    const learn = !wait;  // (the check on Save never decides which model real requests try first)
+    const clock = () => performance.now();  // (the time that has really gone by: a clock being put right doesn't move it)
+    const found = (model) => !GEMINI_MODELS.includes(model);  // (one ListModels found)
+    if (learn) discover(sending);  // (in the background: this key's other stable Flash models, kept a day)
+    const order = [];
+    const refill = () => ranked(use, { wait }).forEach((m) => { if (!order.includes(m)) order.push(m); });
+    refill();
     const failed = [];
-    const runs = [];     // { model, at, ctl, done, seen, lost, result | error }
+    const runs = [];     // { model, at, ctl, done, seen, lost, wordsAt, result | error }
     let winner = null;   // the first to start its answer
     let held = null;     // the first "no" of its own (turned down, empty, blocked) while another model might still answer
+    let aside = null;    // the first "no" of a model ListModels found: the answer only when no other model can give one
     let next = 0;
     let more = true;     // others may still be asked (not after no answer at all: the next is on the same network)
     let wake = null;
     const drop = (run) => { run.lost = true; run.ctl.abort(); };
     const letGo = () => runs.filter((r) => !r.done).forEach(drop);
     const launch = () => {
-      const run = { model: order[next++], at: Date.now(), ctl: new AbortController(), done: false, seen: false, lost: false };
+      const run = { model: order[next++], at: clock(), ctl: new AbortController(), done: false, seen: false, lost: false,
+        wordsAt: 0 };
       geminiTry(sending, run.model, { system, contents, maxTokens, signal: run.ctl.signal, first, use, onText: (text) => {
+        if (!run.wordsAt) run.wordsAt = clock();
         if (!winner) {
           winner = run;
           runs.filter((r) => r !== run && !r.done).forEach(drop);
         }
         if (winner === run && onText) onText(text);
-      } }).then((result) => { run.result = result; }, (error) => { run.error = error; })
+      }, timing: (run.timing = {}) }).then((result) => { run.result = result; }, (error) => { run.error = error; })
         .finally(() => { run.done = true; if (wake) wake(); });
       runs.push(run);
     };
     // The answer that's used: any model whose big request hadn't even been answered in time, while this one got
-    // through, was the slow one (not the connection), so it's tried last for a while.
+    // through, was the slow one (not the connection), so it's tried last for a while. How long this one took to start,
+    // and how long the ones asked before it went without starting, are remembered. One whose answer then stopped coming
+    // part-way on Google's side isn't a quick model to ask first: it's a failure, and tried last for this use a while
+    // (a Retry asks another). One cut off at this end (the connection dropped, the page put away: `here`) did nothing
+    // wrong: only how quickly it started is remembered.
     const taken = (run, answer) => {
       letGo();
-      if (!wait) {
+      if (learn) {
         runs.filter((r) => r !== run && r.result && r.result.trouble === 'uplink')
-          .forEach((r) => slowUntil.set(r.model, Date.now() + SLOW_FOR));
+          .forEach((r) => markSlow(r.model, use));
+        if (run.wordsAt) {
+          if (answer.cut && answer.finish !== 'STOPPED' && !answer.here) {
+            failedHere(run.model);
+            markSlow(run.model, use);
+          } else if (!(answer.cut && answer.here)) {
+            // (an answer this device cut off counts neither way: it neither forgives the model's failures nor adds one)
+            timed(run.model, use, run.wordsAt - run.at, true);
+          }
+          runs.filter((r) => r !== run && r.lost && r.at < run.at).forEach((r) => timed(r.model, use, run.wordsAt - r.at, false));
+        }
+        if (run.timing && run.timing.version) pointsTo(run.model, run.timing.version);
       }
       return answer;
     };
-    const stopAll = () => runs.forEach((r) => r.ctl.abort());
+    const stopAll = () => { runs.forEach((r) => r.ctl.abort()); if (wake) wake(); };
     if (signal) signal.addEventListener('abort', stopAll, { once: true });
     try {
       launch();
@@ -759,9 +1345,8 @@ V.ai = (() => {
           if (!run.done || run.seen) continue;
           run.seen = true;
           if (run.lost) {
-            // (asked before the one that won and still silent: slow right now. Not for the check on Save, which never
-            // decides which model real requests try first.)
-            if (!wait && winner && run.at < winner.at) slowUntil.set(run.model, Date.now() + SLOW_FOR);
+            // (asked before the one that won and still silent: slow right now. Not for the check on Save.)
+            if (learn && winner && run.at < winner.at) markSlow(run.model, use);
             continue;
           }
           // One that ended before the winner's words came (what it said is beside the point now): the winner answers.
@@ -777,9 +1362,16 @@ V.ai = (() => {
           if (answer && (answer.text || answer.finish === 'STOPPED')) return taken(run, answer);
           // Turned down, or an answer with nothing in it (empty, or the prompt blocked): this model's own "no". Another
           // one still working on it (asked because this one was slow, so it has had the request all along) carries on,
-          // and gives the answer if it has one; nothing new is asked because of it (`held` stops that).
+          // and gives the answer if it has one; nothing new is asked because of it (`held` stops that). A model
+          // ListModels found speaks only for itself (Google's numbered models differ in what they take): the rest are
+          // still asked, and its "no" is kept aside, the answer only if none of them can do better.
           if (answer || tried.trouble === 'bad') {
-            held = held || tried;
+            if (found(run.model)) {
+              if (learn && !answer) failedHere(run.model);
+              aside = aside || tried;
+            } else {
+              held = held || tried;
+            }
             continue;
           }
           if (tried.trouble === 'uplink') {
@@ -789,19 +1381,33 @@ V.ai = (() => {
             failed.push(tried);
             continue;
           }
-          if (tried.trouble === 'slow' && !wait) slowUntil.set(run.model, Date.now() + SLOW_FOR);
+          // (never held against it when it may have been this device's doing: `here`)
+          if (learn && tried.trouble === 'slow' && !tried.here) {
+            markSlow(run.model, use);
+            timed(run.model, use, clock() - run.at, false);
+          }
+          const failure = ['busy', 'quota', 'missing', 'refused'].includes(tried.trouble);
+          if (learn && !tried.here && failure) failedHere(run.model);
           failed.push(tried);
         }
+        if (learn && !winner) refill();  // (models ListModels found meanwhile, after the rest)
         const live = runs.filter((r) => !r.done);
-        const canStart = !winner && !held && more && next < order.length && !(signal && signal.aborted);
-        // The next model: at once when none is still trying, else once the newest one's head start has run out.
-        const due = !canStart ? Infinity : live.length ? runs[runs.length - 1].at + head - Date.now() : 0;
+        const canStart = !winner && !held && more && next < order.length && live.length < AT_ONCE
+          && !(signal && signal.aborted);
+        // The next model: at once when none is still trying or the newest one asked has already failed, else once the
+        // newest one's head start has run out.
+        const newest = runs[runs.length - 1];
+        const due = !canStart ? Infinity : !live.length || newest.done ? 0 : newest.at + headOf(newest.model) - clock();
         if (due <= 0) { launch(); continue; }
-        if (!live.length) break;
+        // Nothing left to ask and nothing still trying, while this key's other models are being listed: wait for them.
+        const listingNow = learn && !winner && !held && more && !live.length && next >= order.length
+          && !(signal && signal.aborted) ? listing : null;
+        if (!live.length && !listingNow) break;
         let timer = null;
         await new Promise((resolve) => {
           wake = resolve;
           if (Number.isFinite(due)) timer = setTimeout(resolve, due);
+          if (listingNow) listingNow.then(resolve, resolve);
         });
         clearTimeout(timer);
         wake = null;
@@ -810,16 +1416,21 @@ V.ai = (() => {
       if (signal) signal.removeEventListener('abort', stopAll);
     }
     if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
-    if (held) {  // no model answered after all: the "no" stands (Google turned it down, or answered with nothing)
-      if (held.answer) return held.answer;
-      throw new AiError('bad', `Gemini couldn't answer this${held.why && held.why.message ? ` (${held.why.message})` : ''}.`);
-    }
+    const couldNot = (no) => {  // a model's own "no" stands (Google turned it down, or answered with nothing)
+      if (no.answer) return no.answer;
+      throw new AiError('bad', `Gemini couldn't answer this${no.why && no.why.message ? ` (${no.why.message})` : ''}.`);
+    };
+    if (held) return couldNot(held);  // (no model answered after all)
     const firstOf = (...troubles) => failed.find((f) => troubles.includes(f.trouble));
     if (firstOf('quota')) throw Object.assign(new AiError('quota', WORDS.geminiQuota), { why: 'quota' });  // (a model took the key)
-    if (firstOf('key')) throw new AiError('key', keyWords(firstOf('key').why, sending));
+    // A found model that turned this request down (or answered with nothing) took the key: whatever the others said,
+    // the key is never what's wrong then (no "make a new key" for a key that works).
+    if (!aside && firstOf('key')) throw new AiError('key', keyWords(firstOf('key').why, sending));
     if (firstOf('busy')) throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });  // (likewise)
     if (firstOf('slow')) throw Object.assign(new AiError('busy', WORDS.geminiSlow), { slow: true, why: 'slow' });
     if (firstOf('uplink')) throw uplinkError(firstOf('uplink').size, own);
+    // (the "latest" names refused the key, weren't offered to it or couldn't be reached: the found model's "no" stands)
+    if (aside) return couldNot(aside);
     if (firstOf('refused')) throw new AiError('key', keyWords(firstOf('refused').why, sending));
     if (firstOf('offline')) throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
     const said = failed[0] && failed[0].why && failed[0].why.message;
@@ -898,6 +1509,7 @@ V.ai = (() => {
      tally, and so is an answer that comes after it was stopped (on an older PC, which can't be told to stop): both cost
      money, and neither is ever written. */
   async function viaPc(system, text, signal = null, onProgress = null) {
+    if (!claudeOn()) throw new AiError('off', WORDS.off);  // (Jarvis's key is never used while Claude is off)
     if (!V.pc.can('makeNotes')) throw new AiError('old', WORDS.old);
     const ref = V.pc.can('makeNotesStop') ? `notes-${Date.now().toString(36)}-${++refs}` : '';
     if (ref && onProgress) progressFor.set(ref, onProgress);
@@ -1010,16 +1622,24 @@ V.ai = (() => {
     }
   }
 
-  /* Settings' "Check Gemini": one tiny request to each Gemini model in turn (free: it's Google's free key, and a few
-     words each), timed, so a slow Gemini can be told apart from a slow network. For each: { model, version (what the
-     "latest" name points to now, as Google says), ok, trouble (geminiTrouble's kinds, 'slow', 'offline'), status (the
-     HTTP status), answered (ms to Google's answer), words (ms to the first words), finish, said (Google's words, never
-     the key) }. Only ever to generativelanguage.googleapis.com, like every Gemini request. */
+  /* Settings' "Check Gemini" (free: it's Google's free key, and a few words each), timed, so a slow Gemini can be told
+     apart from a slow network. First Google's list of models (the round trip to Google with the key, no model at work:
+     `network`, { ok, ms, status, trouble, said }, and the listing kept for a day), then one tiny request to each model
+     in turn, the "latest" names first, then the numbered ones ListModels offers (`extras`). For each: { model, version
+     (what a "latest" name points to now, as Google says), ok, trouble (geminiTrouble's kinds, 'slow', 'offline'),
+     status (the HTTP status), answered (ms to Google's answer), words (ms to the first words), thinking (the setting
+     sent, null: none), thoughts (tokens it thought for, when Google says), finish, said (Google's words, never the
+     key) }. Each is remembered like a chat's (`timed`), so `first` is the model a chat asks first now, and `usual` how
+     long it usually takes here. Only ever to generativelanguage.googleapis.com, like every Gemini request. */
   async function checkGemini() {
     const sending = await getGeminiKey();
+    const offered = await listModels(sending, waits.check);
+    if (offered.ok) keepList(offered.models);
+    const network = { ok: offered.ok, ms: offered.ms, status: offered.status, trouble: offered.trouble, said: offered.said };
     const out = [];
-    for (const model of GEMINI_MODELS) {
+    const one = async (model) => {
       const timing = {};
+      const began = performance.now();
       let tried;
       try {
         tried = await geminiTry(sending, model, { contents: [{ role: 'user', parts: [{ text: 'Say hi in two words.' }] }],
@@ -1028,22 +1648,58 @@ V.ai = (() => {
         tried = { trouble: error.kind === 'offline' ? 'offline' : 'bad', why: { message: error.message } };
       }
       const answer = tried.answer || null;
+      if (answer && answer.cut && !answer.here) failedHere(model);  // (Google stopped it part-way: as in a chat)
+      else if (answer && answer.cut) { /* (cut off at this end: nothing held either way) */ }
+      else if (answer && typeof timing.words === 'number') timed(model, 'chat', timing.words, true);
+      else if (tried.here) { /* (this device's doing, maybe: nothing held against the model) */ }
+      else if (tried.trouble === 'slow') timed(model, 'chat', performance.now() - began, false);
+      else if (['busy', 'quota', 'missing', 'refused'].includes(tried.trouble)) failedHere(model);
+      if (answer && timing.version) pointsTo(model, timing.version);
       out.push({ model, version: timing.version || (answer && answer.version) || '', ok: !!answer, trouble: tried.trouble || '',
-        status: timing.status || 0, answered: timing.answered, words: timing.words, finish: answer ? answer.finish : '',
-        said: (tried.why && tried.why.message) || '' });
-    }
-    return out;
+        status: timing.status || 0, answered: timing.answered, words: timing.words,
+        thinking: timing.thinking === undefined ? null : timing.thinking,
+        ...(typeof timing.thoughts === 'number' ? { thoughts: timing.thoughts } : {}),
+        finish: answer ? answer.finish : '', said: (tried.why && tried.why.message) || '' });
+    };
+    for (const model of GEMINI_MODELS) await one(model);
+    for (const model of extras()) await one(model);  // (after the "latest" names: what they point to isn't asked twice)
+    const lead = ranked('chat')[0] || GEMINI_MODELS[0];
+    return { network, models: out, first: lead, usual: typical(lead, 'chat') };
   }
 
-  /* One line of the Check Gemini result, in plain words. */
+  const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+
+  /* The thinking setting a check sent, in a few words. */
+  function thinkingWords(thinking) {
+    if (!thinking) return 'no thinking setting';
+    if (thinking.thinkingLevel) return `thinking ${thinking.thinkingLevel}`;
+    if (typeof thinking.thinkingBudget === 'number') return `thinking budget ${thinking.thinkingBudget}`;
+    return 'thinking setting sent';
+  }
+
+  /* The Check Gemini network line, in plain words. */
+  function networkLine(n) {
+    const took = typeof n.ms === 'number' ? `Google answered in ${secs(n.ms)}` : '';
+    if (n.ok) return `Network: ${took} (its list of models: no model at work)`;
+    if (n.trouble === 'offline') return 'Network: Google can\'t be reached from this network';
+    if (n.trouble === 'slow') return `Network: no answer from Google after ${secs(waits.check)}`;
+    // (a 200 that isn't Google's list of models: a network filter's page, say)
+    if (n.trouble === 'garbled') return `Network: something answered in ${secs(n.ms || 0)}, but not with Google's list of models`;
+    if (n.trouble === 'key' || n.trouble === 'refused') return `Network: ${took}, but refused the key (${n.status})`;
+    return `Network: ${took} (${n.status}${n.said ? `: ${n.said}` : ''})`;
+  }
+
+  /* One line of the Check Gemini result, in plain words: what happened, then (when it answered) the thinking setting
+     sent and how long it thought, when Google says. */
   function timingLine(r) {
-    const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
     const name = r.version && r.version !== r.model ? `${r.model} (${r.version})` : r.model;
     const http = r.status ? ` (${r.status})` : '';
     const answered = typeof r.answered === 'number' ? `Google answered in ${secs(r.answered)}` : '';
     if (r.ok) {
       const words = typeof r.words === 'number' ? `first words in ${secs(r.words)}` : `no words (${r.finish || 'empty'})`;
-      return `${name}: OK — ${[answered, words].filter(Boolean).join(', ')}`;
+      const how = [thinkingWords(r.thinking), typeof r.thoughts === 'number' ? `thought for ${r.thoughts} tokens` : '']
+        .filter(Boolean).join(' · ');
+      return `${name}: OK — ${[answered, words].filter(Boolean).join(', ')} · ${how}`;
     }
     const what = {
       slow: `no words after ${secs(waits.check)}`,
@@ -1057,17 +1713,47 @@ V.ai = (() => {
     return `${name}: ${what}${answered && r.trouble !== 'slow' ? ` — ${answered}` : ''}`;
   }
 
-  /* Whether Claude or the free Gemini can be used here: Claude from the cloud (a phone, a Chromebook, a Vault on its
-     own) or with Jarvis's key (the PC); Gemini with its key in the cloud, on any device. */
-  function has(who) {
-    if (who === 'gemini') return !!(known && known.gemini);
-    return !!(known && (known.cloud || (V.desktop && known.pc)));
+  /* Which model a chat asks first now, in plain words (after Check Gemini). */
+  function firstLine(found) {
+    const usual = typeof found.usual === 'number' ? ` (about ${secs(found.usual)} to its first words here)` : '';
+    return `Chat asks ${found.first} first now${usual}.`;
   }
 
-  /* Which brain `ask` uses here, as far as the key check (check()) knows: Claude when it can be used here (Jarvis's
-     key on the PC, else a key in the cloud; a PC's Claude goes through Python, Vault on its own too), otherwise the
-     free Gemini key. */
-  const brain = () => (!has('claude') && has('gemini') ? 'gemini' : 'claude');
+  /* Whether Claude or the free Gemini can be used here: Claude only while it's switched on, from the cloud (a phone, a
+     Chromebook, a Vault on its own) or with Jarvis's key (the PC); Gemini with its key in the cloud, on any device. */
+  function has(who) {
+    if (who === 'gemini') return !!(known && known.gemini);
+    return claudeOn() && !!(known && (known.cloud || (V.desktop && known.pc)));
+  }
+
+  /* Which brain `ask` uses here for the note-taker, as far as the key check (check()) knows: the free Gemini while
+     Claude is off. With Claude on, still Gemini when its key is set up, unless "Write notes with Claude" is on;
+     otherwise Claude when it can be used here (Jarvis's key on the PC, else a key in the cloud; a PC's Claude goes
+     through Python, Vault on its own too), so an account with only a Claude key still gets its notes. With neither key
+     it's Gemini, whose setup is what's offered (Gemini first). Only a check that couldn't tell (none yet, or it failed)
+     leaves it to Claude, as 1.8 did: on the PC, Python knows about Jarvis's key without the cloud. A Gemini key the
+     check couldn't tell about (the PC's listing came too late) isn't known to be there: Claude for now, and `ask`
+     looks for it before it decides (pick). */
+  function brain() {
+    if (!claudeOn()) return 'gemini';
+    if (!notesClaude() && has('gemini')) return 'gemini';
+    if (has('claude')) return 'claude';
+    return has('gemini') || (known && !known.failed) ? 'gemini' : 'claude';
+  }
+
+  /* The brain for one request of the note-taker: brain(), except that with Claude on and the notes left to Gemini (the
+     default), a Gemini key the key check couldn't tell about is looked for first (fetched, as its request would: in
+     memory only), so a Gemini that's set up is never passed over for the paid Claude because a listing was slow. Not
+     found, or the cloud not saying in time: brain(), as it now knows. */
+  async function pick() {
+    if (!claudeOn() || notesClaude() || geminiKnown()) return brain();
+    try {
+      await within(getGeminiKey(), waits.look, cloudSlow());
+      return 'gemini';
+    } catch (error) {
+      return brain();
+    }
+  }
 
   /* One request: { text, stopReason, usage, cost }, or an AiError whose message is ready to show. The monthly limit
      only stops Claude: the free Gemini is never counted against it. `use` 'gemini' asks Gemini whatever brain() says
@@ -1075,14 +1761,20 @@ V.ai = (() => {
      `onProgress(words)` how many words of the notes have come so far; `signal` stops it ('stopped'). Nothing on the way
      waits for ever: each check has waits.look (and carries on without it), the request waits.ask with no sign of the
      answer being written (then 'busy', slow), except on an older PC that can't be told to stop. A key check that
-     couldn't tell where the keys are is asked again; still not known on a device that keeps its own keys, it's
-     'busy' (the cloud is slow: the notes are made by themselves later), never a guess at the brain. */
+     couldn't tell where the keys are is asked again; still not known where the page keeps the key itself (a device
+     that keeps its own keys, or any device while Claude is off: then it's Gemini's, from the cloud), it's 'busy' (the
+     cloud is slow: the notes are made by themselves later), never a guess at the brain or a "no key". While Claude is
+     off it's always Gemini, whatever `use` says; whether it is waits (up to waits.look) for the settings row to be read
+     from the cloud on a device that hasn't yet (modeReady). With Claude on, Gemini still writes them when its key is
+     set up, unless "Write notes with Claude" is on (brain, pick). */
   async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null }) {
+    await modeReady(waits.look);  // ("Use Claude too" as the cloud has it: a new device reads it with its first sync)
     if (!known || known.failed) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
-    if (!use && known && known.failed && ownKeys()) {
+    const off = !claudeOn();
+    if (!use && known && known.failed && (ownKeys() || off)) {
       throw navigator.onLine ? cloudSlow() : new AiError('offline', WORDS.away);
     }
-    const useGemini = use ? use === 'gemini' : brain() === 'gemini';
+    const useGemini = off || (use ? use === 'gemini' : (await pick()) === 'gemini');
     if (onBrain) onBrain(useGemini ? 'gemini' : 'claude');
     if (!useGemini) {
       const over = await within(overLimit(), waits.look, null).catch(() => null);  // (only a check)
@@ -1164,20 +1856,35 @@ V.ai = (() => {
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
 
-  /* The free Gemini key row: paste a free Google key, on any device (on the PC with Jarvis too, 1.8.2: only Claude's
-     paid key stays with Jarvis). */
+  /* The free Gemini key row, the AI card's first: paste a free Google key, on any device (on the PC with Jarvis too,
+     1.8.2: only Claude's paid key stays with Jarvis). Every state has .ai-gemini-row (setUp finds it there). */
   function geminiKeyLine(ui) {
-    if (!known) return ui.line('Gemini key (free)', 'Checking...', null);  // (its box would be drawn again under the typing)
+    const row = (el) => { el.classList.add('ai-gemini-row'); return el; };
+    if (!known) {
+      if (!looking) check().catch(() => {});  // Settings is drawn again when it knows ('ai')
+      return row(ui.line('Gemini key (free)', 'Checking...', null));  // (its box would be drawn again under the typing)
+    }
+    if ((known.failed && !known.gemini) || known.gemini === null) {  // (null: the cloud didn't say in time)
+      return row(ui.line('Gemini key (free)', 'Couldn\'t check just now (are you online?).', V.button('Check again', {
+        onClick: () => { known = null; ui.draw(); } })));
+    }
+    // No key, as the last look found: looked at again now and then (a key set up on another device since shows).
+    if (!known.gemini) recheck();  // (its answer draws Settings again: the 'ai' event)
     if (known.gemini) {
       const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
       const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
-        const sure = await V.confirm('Remove the Gemini key?', 'This device stops using Google\'s free Gemini.', { ok: 'Remove', danger: true });
+        const sure = await V.confirm('Remove the Gemini key?', 'Chat and the note-taker stop working on all your devices until '
+          + 'it\'s set up again.', { ok: 'Remove', danger: true });
         if (!sure) return;
         try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
         ui.draw();
       } });
-      return ui.line('Gemini key (free)', 'Google\'s free model: pick Gemini in the Chat tab to chat for free. The note-taker uses it '
-        + 'when there\'s no Claude key.', V.h('div.setting-buttons', {}, ready, remove));
+      return row(ui.line('Gemini key (free)', claudeOn()
+        ? (notesClaude()
+          ? 'Kept in your own cloud, never shown. New chats start on Gemini; Claude writes your notes.'
+          : 'Kept in your own cloud, never shown. New chats start on Gemini, and it writes your notes, for free.')
+        : 'Kept in your own cloud, never shown. Chat and the note-taker use it, for free.',
+      V.h('div.setting-buttons', {}, ready, remove)));
     }
     const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
     const save = V.button('Save', { kind: 'primary', onClick: async () => {
@@ -1202,10 +1909,71 @@ V.ai = (() => {
     } });
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
     const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
-    return V.h('div.ai-key.ai-key-gemini', {},
-      ui.line('Gemini key (free)', 'No Claude key? Google\'s Gemini is free. Get a key at aistudio.google.com/apikey (new ones start with AQ.) and paste it here: Vault checks it with Google, then keeps it in your own cloud, never shown. (Like Claude, it won\'t work on school wifi — use mobile data.)', null),
+    return row(V.h('div.ai-key.ai-key-gemini', {},
+      ui.line('Gemini key (free)', 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google '
+        + '(new ones start with AQ.): Vault checks it with Google, then keeps it in your own cloud, never shown.', null),
+      V.h('ol.steps.ai-steps', {},
+        V.h('li', { text: 'Tap "Get a free key" and sign in with your Google account.' }),
+        V.h('li', { text: 'Tap "Create API key", then copy the key.' }),
+        V.h('li', { text: 'Paste it here and tap Save.' })),
       V.h('div.ai-key-row', {}, box, save),
-      V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }));
+      V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }),
+      V.h('p.hint.ai-school', { text: 'Like any AI, it won\'t work on school wifi: use mobile data, or let your messages '
+        + 'wait and go when you\'re home.' })));
+  }
+
+  /* One of the AI card's switches for every device (`name` its label, `cls` its row's class): `set(want)` writes it
+     (V.cloud.changeExtra, given a time limit there); while that's under way the switch waits, and if it can't be
+     written it goes back and says so. */
+  function accountSwitch(ui, { name, hint, cls, on, set, said }) {
+    const box = V.h('input.switch', { type: 'checkbox', checked: on, 'aria-label': name, onchange: async () => {
+      const want = box.checked;
+      box.disabled = true;
+      try {
+        await set(want);
+        V.toast(said(want), { ms: 5000 });
+      } catch (error) {
+        box.checked = !want;
+        V.problem(error);
+      } finally {
+        box.disabled = false;
+      }
+      ui.draw();
+    } });
+    const line = ui.line(name, hint, box);
+    line.classList.add(cls);
+    return line;
+  }
+
+  /* "Use Claude too": the switch (for every device), with what it means. */
+  function claudeSwitch(ui) {
+    return accountSwitch(ui, { name: 'Use Claude too', cls: 'ai-claude-switch', on: claudeOn(), set: setClaude,
+      hint: 'Paid, with your own Claude key. When it\'s off, Gemini does everything.',
+      said: (want) => (!want ? 'Claude is off. Gemini does everything now.'
+        : notesClaude() ? 'Claude is on: pick it in Chat. It writes your notes too, when its key is set up.'
+          : has('gemini') ? 'Claude is on: pick it in Chat. Gemini still writes your notes (free).'
+            : 'Claude is on: pick it in Chat. It writes your notes too until the free Gemini is set up.') });
+  }
+
+  /* "Write notes with Claude", under "Use Claude too" while it's on (for every device too). */
+  function notesSwitch(ui) {
+    return accountSwitch(ui, { name: 'Write notes with Claude', cls: 'ai-notes-switch', on: notesClaude(),
+      set: setNotesClaude,
+      hint: 'The note-taker\'s notes. When it\'s off, Gemini writes them for free (Claude only when there\'s no Gemini key).',
+      said: (want) => (want ? 'Claude writes your notes now, when its key is set up.'
+        : 'Gemini writes your notes now, for free.') });
+  }
+
+  /* "Set up free Gemini" (the Chat tab, the note-taker): Settings > AI, at the Gemini key's row (its box ready for the
+     key where there's a keyboard), or (`what` 'claude') at "Use Claude too". */
+  function setUp(what = 'gemini') {
+    V.go('settings');
+    const card = [...document.querySelectorAll('.settings-card')].find((c) => (c.querySelector('h2') || {}).textContent === 'AI');
+    if (!card) return;
+    const spot = card.querySelector(what === 'claude' ? '.ai-claude-switch' : '.ai-gemini-row') || card;
+    spot.scrollIntoView({ block: 'center' });
+    const box = what === 'gemini' ? spot.querySelector('input[type=password]') : null;
+    if (box && V.device !== 'phone') box.focus({ preventScroll: true });
   }
 
   function card(ui) {
@@ -1241,19 +2009,28 @@ V.ai = (() => {
     let geminiRow = null;
     if (has('gemini')) {
       const hint = V.h('span.ai-check.ai-gemini-hint', { role: 'status', text: 'See how fast Gemini answers here (free).' });
+      const net = V.h('p.ai-gemini-net', { hidden: true });
       const times = V.h('ul.ai-gemini-times', { hidden: true });
+      const lead = V.h('p.ai-gemini-first', { hidden: true });
       const timeBtn = V.button('Check Gemini', { onClick: async () => {
         timeBtn.disabled = true;
         hint.dataset.state = '';
         hint.textContent = 'Checking… (a few seconds)';
+        net.hidden = true;
         times.hidden = true;
+        lead.hidden = true;
         try {
           const found = await checkGemini();
-          const fine = found.some((r) => r.ok);
+          const fine = found.models.some((r) => r.ok);
           hint.dataset.state = fine ? 'reachable' : 'blocked';
           hint.textContent = fine ? 'Gemini works ✓' : 'Gemini didn\'t answer from here.';
-          V.clear(times, found.map((r) => V.h('li', { dataset: { ok: r.ok ? 'yes' : 'no' }, text: timingLine(r) })));
+          net.dataset.ok = found.network.ok ? 'yes' : 'no';
+          net.textContent = networkLine(found.network);
+          V.clear(times, found.models.map((r) => V.h('li', { dataset: { ok: r.ok ? 'yes' : 'no' }, text: timingLine(r) })));
+          lead.textContent = firstLine(found);
+          net.hidden = false;
           times.hidden = false;
+          lead.hidden = !fine;
         } catch (error) {
           hint.dataset.state = 'blocked';
           hint.textContent = error.message || String(error);
@@ -1262,26 +2039,45 @@ V.ai = (() => {
         }
       } });
       geminiRow = V.h('div.ai-gemini-check', {},
-        V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Gemini speed' }), hint), timeBtn), times);
+        V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Gemini speed' }), hint), timeBtn), net, times,
+        lead);
     }
+    // Gemini first (the main thing), then "Use Claude too"; Claude's key, its check and the month's spending (the
+    // monthly limit is Claude's alone) only while it's on.
+    const on = claudeOn();
     return ui.card('AI',
-      keyLine(ui),
       geminiKeyLine(ui),
-      V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn),
       geminiRow,
-      ui.line(`This month (${monthName()})`, spent, limit),
-      V.h('p.hint.ai-privacy', { text: 'Claude (by Anthropic), and Gemini (by Google) when you use it, only read what you send: '
-        + 'a transcript when you make notes, and your messages in the Chat tab. Neither hears the sound itself. Gemini is '
-        + 'free, so it isn\'t counted here.' }));
+      claudeSwitch(ui),
+      on ? notesSwitch(ui) : null,
+      on ? keyLine(ui) : null,
+      on ? V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn) : null,
+      on ? ui.line(`This month (${monthName()})`, spent, limit) : null,
+      V.h('p.hint.ai-privacy', { text: on
+        ? 'Gemini (by Google) and Claude (by Anthropic) only read what you send them: a transcript when you make notes, and '
+          + 'your messages in the Chat tab. Neither hears the sound itself. Gemini is free, so it isn\'t counted here.'
+        : 'Gemini (by Google) only reads what you send it: a transcript when you make notes, and your messages in the Chat '
+          + 'tab. It never hears the sound itself, and it\'s free.' }));
   }
 
   // Both keys go with the person: the next one to sign in on this device (a friend, say) never uses them.
-  V.on('signed-out', () => { key = null; geminiKey = null; known = null; });
+  // (and this person's list of Gemini models: the next one's key may be offered others; the timings are this device's)
+  // 'signing-out': Settings' Sign out (V.cloud.signOut, then a reload); 'signed-out': the cloud said the sign-in ended.
+  const forgetPerson = () => {
+    key = null; geminiKey = null; known = null; seenOn = null; seenNotes = null; mode += 1; triedAt = 0; lateListing = null;
+    forgetList();
+  };
+  V.on('signing-out', forgetPerson);
+  V.on('signed-out', forgetPerson);
 
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
-    removeKey, callGemini, checkGemini, timingLine, getGeminiKey, saveGeminiKey, removeGeminiKey, forgetGeminiKey, AiError,
-    WORDS, PRICES, THINKING,
-    state: () => known, ready: () => !!(known && (known.cloud || (V.desktop && known.pc) || known.gemini)),
-    has, brain,
+    removeKey, callGemini, checkGemini, timingLine, networkLine, getGeminiKey, saveGeminiKey, removeGeminiKey,
+    forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2,
+    // How quickly each Gemini model starts answering here, and the others this key may use (tests, Settings).
+    speed: { order: (use = 'chat') => ranked(use), headFor, typical, extras, failing, forget: forgetSpeed,
+      record: () => JSON.parse(JSON.stringify(record())), forgetList },
+    state: () => known, ready: () => has(brain()),  // (the brain the note-taker would use is set up here)
+    has, brain, claudeOn, notesClaude, modeKnown, modeReady, setClaude, setNotesClaude, setUp, recheck, lacksGemini,
+    geminiKnown, keysSettled,
     MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS, waits };  // (waits: tests shorten them)
 })();

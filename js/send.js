@@ -81,12 +81,9 @@ V.send = (() => {
     const extra = (V.data.settings && V.data.settings.extra) || {};
     const label = V.deviceLabel('web');
     if (extra.devices && extra.devices.web && extra.devices.web.label === label) return;
-    const merged = { ...extra, devices: { ...(extra.devices || {}), web: { label, seen: new Date().toISOString() } } };
-    try {
-      const { error } = await V.cloud.sb.from('settings').upsert({ extra: merged });
-      if (error) throw error;
-      V.data.settings = { ...V.data.settings, extra: merged };
-      await V.db.meta('settings', V.data.settings);
+    try {  // (merged into the cloud's newest extra: "Use Claude too", say, may have changed since this device looked)
+      await V.cloud.changeExtra((now) => ({ ...now,
+        devices: { ...(now.devices || {}), web: { label, seen: new Date().toISOString() } } }));
     } catch (error) { /* tried again next time Vault starts */ }
   }
 

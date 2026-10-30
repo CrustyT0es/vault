@@ -1133,7 +1133,27 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
 .pick-action:hover { background: var(--surface-2); color: var(--text); }
 .pick-action.danger { color: var(--danger); }
 .pick-action.danger:hover { background: var(--danger-soft); }
+.pick-action:disabled, .pick-action:disabled:hover { opacity: .4; background: transparent; cursor: default; }  /* nothing picked yet */
 .notes-layout.selecting .list-column { padding-bottom: calc(150px + var(--safe-bottom)); }
+/* how many picked notes are folded away under "Past week" / "Older" (Pick all takes them too) */
+.fold-picked { color: var(--accent-ink); font-weight: 600; margin-left: 8px; }
+.fold-picked[hidden] { display: none; }
+
+/* the Select button: by the search box on a phone (the title's row is full there), by sort and grid on the PC */
+.head-tools { display: contents; }
+.select-btn {
+  flex: none; height: 44px; min-height: 44px; gap: 6px; padding: 0 13px 0 11px; border-radius: 12px;
+  background: var(--surface-2); border-color: transparent; color: var(--text-2); font: 500 14px/1 var(--font); white-space: nowrap;
+}
+.select-btn:hover { background: var(--surface-2); color: var(--text); }
+.select-btn[aria-pressed="true"], .select-btn[aria-pressed="true"]:hover { background: var(--accent-soft); color: var(--accent-ink); }
+@media (max-width: 339px) { .select-btn .select-label { display: none; } .select-btn { width: 44px; padding: 0; } }  /* the icon alone (its aria-label says it) */
+@media (min-width: 900px) {
+  /* the word alone: with a folder's ⋯, sort and grid beside it, the folder's name needs the room */
+  .select-btn { height: 34px; min-height: 34px; padding: 0 10px; margin-left: 2px; border-radius: var(--r-md); background: transparent; font-size: 13.5px; }
+  .select-btn .icon { display: none; }
+  .select-btn:hover { background: var(--surface-2); }
+}
 
 /* a card dragged over a folder (the PC) */
 .nav-item.drop-on, .chip.drop-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -1712,6 +1732,9 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .up-when:hover { border-color: var(--line-strong); color: var(--text); }
 .up-when.late { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
 .up-row.done .up-when { color: var(--muted); }
+/* picking (the Select button, a long press): only each card's round pick, so a tap on a row can only pick it */
+.list.picking .up-row { grid-template-columns: minmax(0, 1fr); }
+.list.picking .up-tick, .list.picking .up-when { display: none; }
 
 /* flash cards */
 .study-top { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; }
@@ -2145,11 +2168,21 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .ai-key-row .btn { min-height: 48px; }
 .ai-key > .setting-buttons { padding-top: 0; }
 .ai-console { justify-self: start; padding: 6px 0 12px; }
+.ai-steps { margin: 0 0 10px; font: 400 14px/20px var(--font); }
+.ai-school { margin: 0 0 10px; }
+.nt-setup { display: grid; }
+.nt-setup > .btn { margin-top: 8px; justify-self: start; }
 .ai-check[data-state=reachable] { color: var(--ok); }
 .ai-check[data-state=blocked] { color: var(--warn); }
 .ai-gemini-times { margin: -4px 0 0; padding: 0 0 12px 18px; color: var(--text-2); font: 400 13px/19px var(--font); overflow-wrap: anywhere; }
 .ai-gemini-times > li[data-ok=no] { color: var(--warn); }
+.ai-gemini-net, .ai-gemini-first { margin: -4px 0 8px; color: var(--text-2); font: 400 13px/19px var(--font); overflow-wrap: anywhere; }
+.ai-gemini-net[data-ok=no] { color: var(--warn); }
+.ai-gemini-first { margin-top: -6px; padding-bottom: 12px; color: var(--text); }
 .settings-card > .ai-privacy { margin: 0; padding: 10px 0 14px; border-top: 1px solid var(--line-soft); }
+/* "Write notes with Claude" belongs to "Use Claude too": set in under it, with no line between them. */
+.settings-card > .ai-claude-switch + .ai-notes-switch { border-top: none; padding-top: 0; }
+.ai-notes-switch > .setting-text { padding-left: 14px; border-left: 2px solid var(--line); }
 
 /* -- Chat ------------------------------------------------------------ the Chat tab (js/chat.js): the chats on the
    left (or alone on a phone), the open chat with its box at the bottom; answers on the page, your words in a bubble */
@@ -2267,6 +2300,10 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .chat-trouble > .icon { color: var(--warn); }
 .chat-trouble > span { flex: 1; min-width: 180px; }
 .chat-trouble .btn { min-height: 32px; padding: 0 12px; font-size: 13px; }
+/* no Gemini key yet: an invitation, not a warning */
+.chat-trouble[data-kind=setup] { background: var(--accent-wash); }
+.chat-trouble[data-kind=setup] > .icon { color: var(--accent-ink); }
+.chat-claude-off .link-btn { display: inline; padding: 0; font: inherit; }
 .chat-box {
   display: grid; gap: 4px; max-width: 760px; margin: 0 auto; padding: 6px 8px 8px; border: 1px solid var(--line-strong);
   border-radius: 20px; background: var(--field); transition: border-color var(--d-1), box-shadow var(--d-1);
