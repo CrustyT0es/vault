@@ -131,7 +131,9 @@ V.notes = (() => {
     await V.cloud.save('notes', blankNote({
       folder_id: home && home.id, pinned: true, title: 'Welcome to Vault',
       body: 'Your notes, on your PC and your phone.\n\n- [ ] Open Vault on your phone (Settings > Connect your phone, on the PC)\n'
-        + '- [ ] Send a photo from your phone to the PC (Share > Vault)\n- [ ] Press Ctrl+Alt+N on the PC for a quick note\n'
+        // (An iPhone can't share into a web app: there it's the Send tab.)
+        + `- [ ] Send a photo from your phone to the PC (${V.deviceKind.ios ? 'the Send tab' : 'Share > Vault'})\n`
+        + '- [ ] Press Ctrl+Alt+N on the PC for a quick note\n'
         // Only the PC with Jarvis knows he's there (a phone, or Vault on its own, has no Jarvis to ask).
         + (V.desktop && !V.pc.standalone() ? '- [ ] Say "Jarvis, make a note that..."\n' : '')
         + '\nTick these off as you go, then delete this note.',

@@ -1219,6 +1219,12 @@ V.editor = (() => {
     }
     stopPlaying();
     const audio = new Audio();
+    // An iPhone only lets a sound start in the tap itself, before anything is waited for: a moment of silence is
+    // started now, so the memo can follow on the same player once it's loaded.
+    if (V.deviceKind.ios) {
+      audio.src = silence();
+      audio.play().catch(() => {});
+    }
     const now = { path: a.path, audio, url: '', ui, seconds: a.seconds || 0, a };
     playing = now;
     ui.play.classList.add('loading');
@@ -1238,11 +1244,32 @@ V.editor = (() => {
     } catch (error) {
       if (playing === now) {
         stopPlaying();
-        V.toast('That didn\'t play. Check your internet and try again.', { kind: 'err' });
+        // A memo made on another kind of device that this one can't play (an older iPhone and Android's WebM, the
+        // PC app and an iPhone's M4A) says so, instead of blaming the internet.
+        const type = a.mime || ({ m4a: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg' })[String(a.name || '').split('.').pop()] || '';
+        V.toast(type && !audio.canPlayType(type) ? 'This device can\'t play that kind of recording. Play it on the device that made it.'
+          : 'That didn\'t play. Check your internet and try again.', { kind: 'err' });
       }
     } finally {
       ui.play.classList.remove('loading');
     }
+  }
+
+  /* A tenth of a second of silence (a WAV of its own, as the page may only play blob: and its own files). */
+  let quiet = '';
+  function silence() {
+    if (quiet) return quiet;
+    const rate = 8000;
+    const samples = rate / 10;
+    const bytes = new DataView(new ArrayBuffer(44 + samples));
+    const text = (at, words) => { for (let i = 0; i < words.length; i++) bytes.setUint8(at + i, words.charCodeAt(i)); };
+    text(0, 'RIFF'); bytes.setUint32(4, 36 + samples, true); text(8, 'WAVEfmt ');
+    bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, 1, true);
+    bytes.setUint32(24, rate, true); bytes.setUint32(28, rate, true); bytes.setUint16(32, 1, true); bytes.setUint16(34, 8, true);
+    text(36, 'data'); bytes.setUint32(40, samples, true);
+    for (let i = 0; i < samples; i++) bytes.setUint8(44 + i, 128);
+    quiet = URL.createObjectURL(new Blob([bytes.buffer], { type: 'audio/wav' }));
+    return quiet;
   }
 
   function showPlaying() {

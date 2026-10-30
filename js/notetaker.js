@@ -85,8 +85,9 @@ V.notetaker = (() => {
 
   const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
   // Chrome on Android, kept listening, hands each finished phrase over again with every phrase before it glued on (a
-  // known Chrome bug), so there it hears one phrase at a time and starts again after each.
-  const ANDROID = /Android/i.test(navigator.userAgent);
+  // known Chrome bug), so there it hears one phrase at a time and starts again after each. Safari on an iPhone or iPad
+  // is no better kept listening (it hangs, or repeats words), so it hears a phrase at a time too.
+  const ANDROID = /Android/i.test(navigator.userAgent) || !!(V.deviceKind && V.deviceKind.ios);
   // Everywhere else (a Chromebook, Chrome on a computer) it's kept listening, but one long session hears worse and
   // worse (the owner: "after about 50 words it picks up terribly"), so a session is swapped for a fresh one in a real
   // pause, once it's `age` ms old or has heard `words` words: `quiet` ms after a finished phrase with nothing more
@@ -118,8 +119,24 @@ V.notetaker = (() => {
       return V.pc && V.pc.can('listenStart') ? { kind: 'pc' }
         : { kind: null, why: 'Use your phone or Chromebook for the note-taker (this PC\'s Vault needs an update for it: open Jarvis and click Update).' };
     }
+    const ios = iosWhyNot();
+    if (ios) return { kind: null, why: ios };
     return Recognition() ? { kind: 'web' }
       : { kind: null, why: 'This browser can\'t turn speech into words. Use Chrome on your phone or Chromebook.' };
+  }
+
+  /* On an iPhone or iPad, speech turns into words in Safari itself (with Siri or Dictation on). The other browsers
+     there say they can but don't, and a home screen icon isn't allowed to: why not here, or '' where it can. */
+  function iosWhyNot() {
+    const kind = V.deviceKind || {};
+    if (!kind.ios) return '';
+    if (kind.iosBrowser && kind.iosBrowser !== 'safari') {
+      return `On an ${kind.model}, this works in Safari: open Vault in Safari to use it.`;
+    }
+    if (!Recognition()) {
+      return `On an ${kind.model}, open Vault in Safari (not from the home screen icon) for this, with Siri or Dictation turned on in Settings.`;
+    }
+    return '';
   }
 
   /* The browser's speech recognition, started again whenever it stops by itself (after a silence, now and then
@@ -212,7 +229,9 @@ V.notetaker = (() => {
         const what = event.error || '';
         if (what === 'not-allowed' || what === 'service-not-allowed') {
           wanted = false;
-          on.fail('Vault can\'t use the microphone. Allow it for Vault in the browser\'s site settings, then try again.');
+          on.fail(V.deviceKind && V.deviceKind.ios
+            ? `Vault can't use speech here. On your ${V.deviceKind.model}: Settings > Apps > Safari > Microphone (Allow), and turn on Siri or Dictation (Settings > General > Keyboard > Enable Dictation). Then try again in Safari.`
+            : 'Vault can\'t use the microphone. Allow it for Vault in the browser\'s site settings, then try again.');
         } else if (what === 'audio-capture') {
           wanted = false;
           on.fail('No microphone was found.');
@@ -1045,7 +1064,8 @@ V.notetaker = (() => {
           V.h('span', { text: 'To make notes, set up Claude in Settings > AI. Listening works without it.' })),
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
-        how.kind === 'web' ? V.h('li', { text: 'Keep Vault open while it listens: the screen stays on by itself.' }) : null,
+        how.kind === 'web' ? V.h('li', { text: navigator.wakeLock ? 'Keep Vault open while it listens: the screen stays on by itself.'
+          : 'Keep Vault open while it listens, with the screen on.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Vault on your PC.' }) : null,
@@ -1274,5 +1294,5 @@ V.notetaker = (() => {
 
   // webHearing is dictation's too (js/dictation.js): the same Android handling (newPart/taken/last), kept in one place.
   return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session,
-    webHearing, rotate, slowness };  // (rotate, slowness: tests shorten them)
+    webHearing, rotate, slowness, iosWhyNot };  // (rotate, slowness: tests shorten them)
 })();

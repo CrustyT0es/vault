@@ -231,6 +231,8 @@ V.dictation = (() => {
       return V.pc && V.pc.can('dictateStart') ? { kind: 'pc' }
         : { kind: null, why: 'Update Jarvis to dictate on this PC: open Jarvis and click Update. You can dictate on your phone or Chromebook now.' };
     }
+    const ios = V.notetaker && V.notetaker.iosWhyNot ? V.notetaker.iosWhyNot() : '';  // an iPhone: Safari only
+    if (ios) return { kind: null, why: ios };
     return Recognition() ? { kind: 'web' }
       : { kind: null, why: 'This browser can\'t turn speech into words. Dictate in Chrome on your phone or Chromebook, or in Vault on your PC.' };
   }

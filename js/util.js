@@ -4,46 +4,85 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.9.1';
+V.VERSION = '1.10.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.
 V.appShortcuts = V.desktop || (() => { try { return window.matchMedia('(display-mode: standalone)').matches; } catch (e) { return false; } })();
 
-/* Which device this is: 'pc' (the PC app), 'phone' (the owner's Android phone: Vault installed there, or a tab of its
-   Chrome) or 'web' (any other browser: a school Chromebook, a laptop). Each device only takes in what was sent to it,
-   so a Chromebook never marks the phone's files as received. A wrong guess (Chrome on the phone set to ask for desktop
-   sites leaves "Android" out) is put right in Settings, which keeps the answer in localStorage 'vault-device'. */
+/* Which device this is: 'pc' (the PC app), 'phone' (a phone: Android, or an iPhone or iPad, with Vault installed or in
+   a browser tab) or 'web' (any other browser: a school Chromebook, a laptop). Each device only takes in what was sent
+   to it, so a Chromebook never marks the phone's files as received. A wrong guess (Chrome on the phone set to ask for
+   desktop sites leaves "Android" out) is put right in Settings, which keeps the answer in localStorage 'vault-device'.
+
+   An iPad asks for desktop sites by itself, so it says it's a Mac: a "Mac" with a touch screen is taken for an iPad
+   (no Mac has one). Every browser on an iPhone runs Safari's engine, but some things only work in Safari itself
+   (`iosBrowser`). `kind` is what each Vault records about itself for the owner's Stats (js/access.js): what the
+   hardware says where it can tell (a Chromebook, a Windows PC or a Mac set to "It's my phone" stays what it is).
+
+   `inApp`: an app's own built-in browser (Instagram, Snapchat, Facebook, TikTok, LINE, or any Android WebView), as
+   when an invite is tapped in a chat there. Its storage is its own, it can't put Vault on the home screen, and Google
+   won't sign anyone in there: js/start.js offers Chrome or Safari first. On an iPhone, a page without "Safari/" in
+   what it says it is is one too, unless it's Vault's own home screen icon (which leaves "Safari/" out as well). */
 V.DEVICES = ['pc', 'phone', 'web'];
 V.deviceKind = (() => {
   const agent = navigator.userAgent || '';
   const hints = navigator.userAgentData || {};
   const chromebook = /\bCrOS\b/.test(agent) || /^chrome ?os$/i.test(hints.platform || '');
-  if (V.desktop) return { id: 'pc', chromebook: false };
+  const iphone = /\biP(hone|od)\b/.test(agent);
+  const ipad = /\biPad\b/.test(agent) || (/\bMacintosh\b/.test(agent) && navigator.maxTouchPoints > 1);
+  const ios = !V.desktop && (iphone || ipad);
+  const android = !V.desktop && (/Android/i.test(agent) || hints.platform === 'Android');
+  let standalone = false;
+  try { standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { /* old */ }
+  const iosBrowser = !ios ? '' : /\bCriOS\//.test(agent) ? 'chrome' : /\bEdgiOS\//.test(agent) ? 'edge'
+    : /\bFxiOS\//.test(agent) ? 'firefox' : /\bOPiOS\/|\bOPT\//.test(agent) ? 'opera' : 'safari';
+  const model = ios ? (ipad ? 'iPad' : 'iPhone') : '';
+  const inApp = !V.desktop && (/\b(Instagram|FBAN|FBAV|FB_IAB|Snapchat|Line\/|TikTok|musical_ly|BytedanceWebview)\b/.test(agent)
+    || (android && /; wv\)/.test(agent)) || (ios && !/Safari\//.test(agent) && navigator.standalone !== true && !standalone));
+  const about = { ios, iphone: ios && !ipad, ipad: ios && ipad, android, iosBrowser, standalone, model, inApp };
+  if (V.desktop) return { ...about, id: 'pc', chromebook: false, kind: 'pc', standalone: false };
   let chosen = '';
   try { chosen = localStorage.getItem('vault-device') || ''; } catch (error) { /* private browsing */ }
-  if (chosen === 'phone' || chosen === 'web') return { id: chosen, chromebook };
-  const android = /Android/i.test(agent) || hints.platform === 'Android';
   // Installed, on a touch screen that isn't a Chromebook, Windows or a Mac: the phone, even asking for desktop sites.
-  const installed = window.matchMedia('(display-mode: standalone)').matches && navigator.maxTouchPoints > 0
-    && !/Windows|Macintosh|iPhone|iPad/.test(agent);
-  return { id: !chromebook && (android || installed) ? 'phone' : 'web', chromebook };
+  const installed = standalone && navigator.maxTouchPoints > 0 && !/Windows|Macintosh/.test(agent);
+  const id = chosen === 'phone' || chosen === 'web' ? chosen : !chromebook && (android || ios || installed) ? 'phone' : 'web';
+  // (An Android phone asking for desktop sites says Linux, not Android: set to "phone", it's still one.)
+  const kind = chromebook ? 'chromebook' : ios ? (ipad ? 'ipad' : 'iphone')
+    : android || (id === 'phone' && !/Windows|Macintosh/.test(agent)) ? 'android' : 'browser';
+  return { ...about, id, chromebook, kind };
 })();
 V.device = V.deviceKind.id;
 V.other = V.device === 'pc' ? 'phone' : 'pc';
 V.otherName = V.device === 'pc' ? 'your phone' : 'your PC';
-/* 'PC', 'Phone', and for 'web' what that browser said it is ('Chromebook' or 'Browser', kept in the settings row's
-   extra.devices by js/send.js). */
+/* What the owner's phone is, by the phones among the devices' own records (js/access.js) seen in the last 30 days:
+   'iPhone' or 'iPad' when that's the only kind there, else 'Phone' (an Android phone, several kinds, or none). Never
+   just the newest record: with an Android phone and an iPad, the label would follow whichever wrote last, not the
+   device something came from or goes to. On the phone itself, what it is. */
+V.phoneModel = () => {
+  if (V.device === 'phone') return V.deviceKind.ios ? V.deviceKind.model : 'Phone';
+  const since = Date.now() - 30 * 86400000;
+  const own = V.deviceLog && V.deviceLog.installId ? V.deviceLog.installId() : '';
+  // Only the devices that took the phone slot (an iPad told it's a browser is 'web': never the phone's name), and
+  // never this device's own record.
+  const kinds = new Set(Object.entries((V.data && V.data.settings && V.data.settings.extra && V.data.settings.extra.devices) || {})
+    .filter(([key, r]) => key !== own && r && typeof r === 'object' && ['android', 'iphone', 'ipad'].includes(r.kind)
+      && (r.device || 'phone') === 'phone' && Date.parse(r.seen) >= since)
+    .map(([, r]) => r.kind));
+  return kinds.size === 1 && !kinds.has('android') ? { iphone: 'iPhone', ipad: 'iPad' }[[...kinds][0]] : 'Phone';
+};
+/* 'PC', 'Phone' ('iPhone' or 'iPad' for one), and for 'web' what that browser said it is ('Chromebook' or 'Browser',
+   kept in the settings row's extra.devices by js/send.js). */
 V.deviceLabel = (id) => {
   if (id === 'pc') return 'PC';
-  if (id === 'phone') return 'Phone';
+  if (id === 'phone') return V.phoneModel();
   if (id !== 'web') return 'Another device';
   if (V.device === 'web') return V.deviceKind.chromebook ? 'Chromebook' : 'Browser';
   const seen = V.data && V.data.settings && V.data.settings.extra && V.data.settings.extra.devices;
   return seen && seen.web && seen.web.label === 'Browser' ? 'Browser' : 'Chromebook';
 };
-V.deviceName = (id) => ({ PC: 'your PC', Phone: 'your phone', Chromebook: 'your Chromebook', Browser: 'your web browser' })[
-  V.deviceLabel(id)] || 'another device';
+V.deviceName = (id) => ({ PC: 'your PC', Phone: 'your phone', iPhone: 'your iPhone', iPad: 'your iPad',
+  Chromebook: 'your Chromebook', Browser: 'your web browser' })[V.deviceLabel(id)] || 'another device';
 V.deviceIcon = (id) => (id === 'pc' ? 'pc' : id === 'phone' ? 'phone' : 'laptop');
 V.setDevice = (id) => {
   if (V.desktop || id === V.device || !['phone', 'web'].includes(id)) return;
@@ -110,12 +149,42 @@ V.bus = new EventTarget();
 V.on = (type, fn) => V.bus.addEventListener(type, (event) => fn(event.detail));
 V.emit = (type, detail) => V.bus.dispatchEvent(new CustomEvent(type, { detail }));
 
+/* Putting Vault on the home screen. Chrome (Android, a Chromebook, a computer) offers it once with an event that has
+   to be caught early, so it's kept here for Settings and the welcome steps (js/welcome.js): 'install' goes out with
+   'ready' when it can be asked, and 'done' once it's installed. iPhones and iPads never offer it: Safari's Share >
+   Add to Home Screen is the way there (V.welcome.howToInstall says so). */
+V.install = (() => {
+  let offer = null;
+  window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); offer = event; V.emit('install', 'ready'); });
+  window.addEventListener('appinstalled', () => { offer = null; V.emit('install', 'done'); });
+  return {
+    ready: () => !!offer,
+    installed: () => {
+      try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; }
+    },
+    /* Chrome's own "Install Vault?" (only from a tap): 'accepted', 'dismissed' or 'none' when it can't be asked. */
+    async ask() {
+      if (!offer) return 'none';
+      const asking = offer;
+      offer = null;
+      try {
+        await asking.prompt();
+        const choice = await asking.userChoice;
+        return (choice && choice.outcome) || 'dismissed';
+      } catch (error) {
+        return 'none';
+      }
+    },
+  };
+})();
+
 /* Out of sight: the phone's app in the background, or the PC's window hidden in the tray or minimised. The PC app
    keeps its page "visible" even then (a hidden page stops its timers and Realtime), so it says so itself (pc:window).
    'away' and 'back' go out when that changes, with <html class="away"> stopping the animations meanwhile. */
 V.pcShown = true;
 V.away = () => document.hidden || (V.desktop && !V.pcShown);
-let wasAway = false;
+let wasAway = !!document.hidden;  // (a page opened out of sight says 'back' once it's shown)
+document.documentElement.classList.toggle('away', wasAway);
 const awayChanged = () => {
   const now = V.away();
   if (now === wasAway) return;

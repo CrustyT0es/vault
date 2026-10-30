@@ -56,7 +56,10 @@ V.clips = (() => {
   const LOOKED = 'vault-clip-looked';
   const stored = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
   const store = (key, value) => { try { localStorage.setItem(key, value); } catch (error) { /* a private window */ } };
-  const canStep = () => !V.desktop && !!(navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText);
+  // Never on an iPhone or iPad: Safari only lets a page read the clipboard during a tap (and asks with its own Paste
+  // button even then), so it could never read it by itself on coming back. There the Clipboard tab's buttons do it.
+  const canStep = () => !V.desktop && !V.deviceKind.ios
+    && !!(navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText);
   const stepping = () => canStep() && stored(AUTO) === 'on';
   const inFront = () => !V.away() && document.hasFocus();
 

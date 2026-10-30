@@ -1006,6 +1006,8 @@ V.send = (() => {
     const entries = together(mine());
     V.clear(parts.list, entries.length ? entries.map((list) => (list.length > 1 ? groupRow(list) : row(list[0])))
       : V.h('div.empty.small', {}, V.mark(36), V.h('p', { text: V.desktop ? 'Nothing sent yet. Drop a file here and it goes to your phone.'
+        // (iPhones and iPads have no "share to Vault": Safari's pages can't be share targets there.)
+        : V.deviceKind.ios ? 'Nothing sent yet. Pick files or photos above.'
         : V.device === 'phone' ? 'Nothing sent yet. Share a photo to Vault, or pick files above.'
           : 'Nothing sent yet. Pick files above, or drop them anywhere in Vault.' })));
     // "More" only where the words didn't fit in their four lines.
@@ -1084,8 +1086,9 @@ V.send = (() => {
   function deviceSetting() {
     if (V.desktop) return null;
     const phone = V.device === 'phone';
-    const label = phone ? 'This is your phone' : V.deviceKind.chromebook ? 'This is your Chromebook' : 'This is a web browser';
-    const said = phone ? 'What\'s sent to your phone shows up here.'
+    const model = V.deviceKind.ios ? V.deviceKind.model : 'phone';
+    const label = phone ? `This is your ${model}` : V.deviceKind.chromebook ? 'This is your Chromebook' : 'This is a web browser';
+    const said = phone ? `What's sent to your ${model} shows up here.`
       : `What's sent to ${V.deviceName('web')} shows up here. What's sent to your phone waits for the phone.`;
     const change = V.button('Change', { onClick: (event) => V.menu(event.currentTarget, [
       { label: 'It\'s my phone', icon: 'phone', onClick: () => V.setDevice('phone') },

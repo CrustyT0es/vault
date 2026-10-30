@@ -28,6 +28,7 @@
     show.render(shell.view);
     shell.view.scrollTop = 0;
     badge();
+    V.emit('tab', tab);
   };
 
   function badge() {
@@ -143,10 +144,10 @@
       passBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
       screen(V.h('h1', { text: 'Sign in' }),
         V.h('p.muted', { text: V.desktop ? 'Vault on this PC got signed out. Sign in again with your Vault e-mail and password.'
-          : 'Use the e-mail and password you picked when you set Vault up on your PC.' }),
+          : 'Use your Vault e-mail and password.' }),
         emailRow, passRow, problem, go,
-        V.desktop ? null : V.h('p.hint', { text: 'Forgot your password? On your PC, open Vault > Settings > Change password, then sign in here with the new one.' }),
-        V.desktop ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different PC', onclick: () => {
+        V.desktop ? null : V.h('p.hint', { text: 'Forgot your password? Change it in Vault on a device that\'s still signed in (Settings > Change password), then sign in here with the new one.' }),
+        V.desktop ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different cloud', onclick: () => {
           localStorage.removeItem('vault-config'); location.reload();
         } }));
       hello();
@@ -154,25 +155,53 @@
     });
   }
 
+  /* Nothing set up in this browser yet. The link that sets it up (an invite, or #connect= from the PC's QR code or an
+     iPhone's "Copy the sign-in link") is opened, or pasted here: on an iPhone or iPad, a new home screen icon starts
+     with nothing of Safari's, so this is where it lands. */
   function connectScreen() {
+    const [linkRow, linkBox] = field('Or paste it here', { type: 'url', placeholder: 'https://...#invite=... or #connect=...',
+      autocomplete: 'off', spellcheck: 'false' });
+    const problem = V.h('p.error-text', { role: 'alert' });
+    const use = (text) => {
+      const found = /#(invite|connect)=([A-Za-z0-9_-]+)/.exec(String(text || ''));
+      if (!found) {
+        problem.textContent = 'That isn\'t a Vault link. Copy the whole link (it has #invite= or #connect= in it) and try again.';
+        return;
+      }
+      history.replaceState(null, '', `${location.pathname}${location.search}#${found[1]}=${found[2]}`);
+      location.reload();
+    };
+    const paste = V.button('Paste the link', { kind: 'primary wide-btn', icon: 'clip', onClick: () => {
+      problem.textContent = '';
+      let reading;  // (read in this very tap: only a tap lets a page read the clipboard)
+      try { reading = navigator.clipboard.readText(); } catch (error) { reading = Promise.reject(error); }
+      Promise.resolve(reading).then(use, () => {
+        problem.textContent = 'Vault couldn\'t read what you copied. Paste the link in the box instead (press and hold, then Paste).';
+        linkBox.focus();
+      });
+    } });
+    linkBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') use(linkBox.value); });
     const [urlRow, urlBox] = field('Cloud address', { type: 'url', placeholder: 'https://....supabase.co' });
     const [keyRow, keyBox] = field('Cloud key', { type: 'text', placeholder: 'sb_publishable_...', autocomplete: 'off' });
-    const problem = V.h('p.error-text');
-    const manual = V.h('details.manual', {}, V.h('summary', { text: 'Type it in instead' }), urlRow, keyRow, problem,
+    const typed = V.h('p.error-text');
+    const manual = V.h('details.manual', {}, V.h('summary', { text: 'Type the cloud\'s address and key instead' }), urlRow, keyRow, typed,
       V.button('Connect', { kind: 'primary', onClick: () => {
         const url = urlBox.value.trim().replace(/\/+$/, '');
         if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) || keyBox.value.trim().length < 20) {
-          problem.textContent = 'That doesn\'t look right. Both are on the PC: Vault > Settings > Connect your phone > Copy the link.';
+          typed.textContent = 'That doesn\'t look right. Both are on the PC: Vault > Settings > Connect your phone > Copy the link.';
           return;
         }
         localStorage.setItem('vault-config', JSON.stringify({ url, key: keyBox.value.trim() }));
         location.reload();
       } }));
-    screen(V.h('h1', { text: 'Connect to your PC' }),
-      V.h('ol.steps', {},
-        V.h('li', { text: 'On your PC, open Vault and go to Settings > Connect your phone.' }),
-        V.h('li', { text: 'Point this phone\'s camera at the QR code and tap the link it shows.' })),
-      V.h('p.muted', { text: 'Vault keeps everything in your own free cloud, which your PC set up. This connects the phone to it.' }),
+    screen(V.h('h1', { text: 'Connect Vault' }),
+      V.h('p.muted', { text: 'Open the link you were sent (an invite from a friend, or the link from Vault on your PC). Or copy it, then tap Paste the link.' }),
+      paste, linkRow, V.button('Connect', { kind: 'wide-btn', onClick: () => use(linkBox.value) }), problem,
+      V.h('p.hint', { text: V.deviceKind.ios && V.install.installed()
+        // (A scanned code opens in Safari, never in this icon: the link comes from Safari's Vault instead.)
+        ? `In Safari's Vault, open Settings > This ${V.deviceKind.model} > Copy the sign-in link, then come back and tap Paste the link. `
+          + 'Or on the PC: Vault > Settings > Connect your phone > Copy the link, and send it to this phone.'
+        : 'Setting up your own phone? In Vault on your PC, open Settings > Connect your phone and point this phone\'s camera at the code.' }),
       manual);
   }
 
@@ -260,7 +289,9 @@
       console.warn('Vault: that invite link was damaged');
       return;
     }
-    invite = { url: found.u, key: String(found.k), email, code: V.inviteCode(found.c), name: String(found.n || '').slice(0, 60) };
+    invite = { url: found.u, key: String(found.k), email, code: V.inviteCode(found.c), name: String(found.n || '').slice(0, 60),
+      // The link itself (code and all), in memory only: inAppScreen's "Copy the invite link" hands it to Chrome or Safari.
+      link: `${location.origin}${location.pathname}${location.search}#invite=${match[1]}` };
     // Someone already signed in to Vault in this browser stays signed in: an invite never swaps them out.
     let saved = null;
     let who = null;
@@ -273,6 +304,38 @@
       if (!same) { invite.busy = (who && who.email) || 'someone else'; return; }
     }
     localStorage.setItem('vault-config', JSON.stringify({ url: invite.url, key: invite.key, email }));
+  }
+
+  /* The invite was opened inside an app's own browser (tapped in Instagram, Snapchat...: V.deviceKind.inApp). Vault
+     works there, but only there: that browser keeps its own storage, can't put Vault on the home screen, and Google
+     won't sign anyone in inside it (the free AI key). So Chrome (Android) or Safari (iPhone) is offered first: the code
+     still works there until a password is chosen, so the whole invite can start again in the real browser. The invite
+     link only reaches the clipboard from a tap here, never the address bar. Chrome's own button can't carry it (an
+     intent:// link uses the part after # itself), so it's copied first and pasted on Chrome's "Connect Vault". */
+  function inAppScreen() {
+    return new Promise((resolve) => {
+      const ios = V.deviceKind.ios;
+      const browser = ios ? 'Safari' : 'Chrome';
+      const page = new URL(location.origin + location.pathname);
+      const chrome = `intent://${page.host}${page.pathname}#Intent;scheme=https;package=com.android.chrome;`
+        + `S.browser_fallback_url=${encodeURIComponent(page.href)};end`;
+      screen(V.h('h1', { text: `Open your invite in ${browser}` }),
+        V.h('p.muted', { text: `This page opened inside an app's own browser. Vault only stays here, can't go on your home `
+          + `screen, and Google won't let you sign in here for the free AI. In ${browser} it all works.` }),
+        V.h('ol.steps.in-app-how', {},
+          V.h('li', { text: 'Tap Copy the invite link.' }),
+          V.h('li', { text: ios ? 'Tap ••• (or the compass) and choose Open in Safari (or Open in external browser).'
+            : 'Tap Open in Chrome below, or ⋮ at the top and Open in Chrome (or Open in browser).' }),
+          V.h('li', { text: `In ${browser}, tap Paste the link (or paste it into the address bar and go).` })),
+        V.button('Copy the invite link', { kind: 'primary wide-btn', icon: 'copy', onClick: async () => {
+          await V.copy(invite.link, { cloud: true });  // (never shared to other devices: it holds the code)
+          V.toast(`Copied. Now open ${browser} and paste it there.`, { ms: 6000 });
+        } }),
+        ios ? null : V.h('a.btn.wide-btn.in-app-chrome', { href: chrome, rel: 'noopener' }, V.icon('open'),
+          V.h('span', { text: 'Open in Chrome' })),
+        V.h('p.hint', { text: 'Carrying on here works, but Vault stays inside this app.' }),
+        V.h('button.link-btn.welcome-skip', { type: 'button', text: 'Continue here anyway', onclick: () => resolve() }));
+    });
   }
 
   /* This browser's Vault is someone else's: the invite waits until they've signed out. */
@@ -315,10 +378,11 @@
         }
       } });
       againBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
-      screen(V.h('h1', { text: 'Choose your own password' }),
+      screen(V.welcome.dots('password'), V.h('h1', { text: 'Choose your own password' }),
         V.h('p.muted', { text: `${name ? `Welcome, ${name}! ` : ''}Your invite code only works once. Pick a password only you know: it's what you'll sign in with on your other devices.` }),
         passRow, againRow, problem, go,
         V.h('p.hint', { text: 'Your notes are only yours: nobody else using Vault can see them. Whoever runs the cloud can see what\'s stored in it, so keep secrets in a locked note (it\'s scrambled with your own PIN).' }),
+        V.h('p.hint.choose-stats', { text: V.welcome.STATS_WORDS }),
         V.h('button.link-btn', { type: 'button', text: 'Sign out', onclick: async () => {
           await V.cloud.signOut().catch(() => {});
           location.reload();
@@ -328,11 +392,12 @@
     });
   }
 
-  /* The gate, whenever the signed-in account is still on its invite code. */
+  /* The gate, whenever the signed-in account is still on its invite code. True once they chose a password here. */
   async function mustChoose() {
-    if (!(await V.cloud.mustChange())) return;
+    if (!(await V.cloud.mustChange())) return false;
     const user = V.data.user || {};
     await chooseScreen({ name: (invite && invite.name) || user.name || '', code: invite && invite.code });
+    return true;
   }
 
   /* A PC whose Vault isn't set up: joining a friend's cloud with the invite link (vault/invites.py's join). A
@@ -434,7 +499,12 @@
     if (asked === '#new') V.notes.chooseTemplate();
     if (['#new', '#send', '#clip', '#chat', '#claude'].includes(asked)) history.replaceState(null, '', location.pathname + location.search);
     dropAnywhere();
+    // Safari may clear a site's storage after a week unused (not an installed icon's): asked to keep it.
+    if (V.deviceKind.ios && !V.install.installed() && navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
     firstSync.then(async () => {
+      if (V.deviceLog) V.deviceLog.start();  // this device's line in the owner's Stats (js/access.js), now and then
       if (V.cloud.status === 'synced' || V.cloud.status === 'held') await V.notes.ensureStarterFolders();
       V.send.checkIncoming();
       V.send.runQueue();
@@ -492,6 +562,7 @@
         if (await V.update.atBoot()) return;
         takeInviteLink();
         if (invite && invite.busy) await busyScreen();
+        else if (invite && V.deviceKind.inApp) await inAppScreen();
         const saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
         if (!saved) return connectScreen();
         V.config = { ...saved, phoneUrl: location.origin + location.pathname };
@@ -514,7 +585,13 @@
         }
         V.data.user = user;
       }
-      await mustChoose();  // a friend still on their one-time invite code chooses their own password first
+      // A friend still on their one-time invite code chooses their own password first, then the welcome steps
+      // (js/welcome.js: their free AI key, Vault on the home screen), picked up where they were if Vault was closed.
+      if (await mustChoose()) V.welcome.remember(V.data.user.id);
+      if (V.welcome.pending(V.data.user && V.data.user.id)) {
+        hello();  // (a gate screen like the others: this version started, whether or not the steps get finished now)
+        await V.welcome.run({ screen, user: V.data.user, name: (invite && invite.name) || V.data.user.name || '' });
+      }
       await main();
       hello();
     } catch (error) {

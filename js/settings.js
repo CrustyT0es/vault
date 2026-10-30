@@ -6,10 +6,14 @@
 
 V.settings = (() => {
   let root = null;
-  let installPrompt = null;
 
-  window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); installPrompt = event; draw(); });
-  window.addEventListener('appinstalled', () => { installPrompt = null; V.toast('Vault is on your home screen.'); draw(); });
+  // Chrome's install offer is kept by util.js (V.install), so the welcome steps can use it too.
+  V.on('install', (what) => { if (what === 'done') V.toast('Vault is on your home screen.'); draw(); });
+
+  // On an iPhone or iPad not yet on the home screen, the address carries #connect= while Settings shows (as in the
+  // welcome's home screen step), so an icon added from here opens connected; taken out again on leaving Settings.
+  let unmark = null;
+  V.on('tab', (tab) => { if (tab !== 'settings' && unmark) { unmark(); unmark = null; } });
 
   const b64url = (text) => btoa(unescape(encodeURIComponent(text))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -116,13 +120,27 @@ V.settings = (() => {
   function phoneCard() {
     if (!V.desktop) {
       const phone = V.device === 'phone';
-      return card(phone ? 'This phone' : V.deviceKind.chromebook ? 'This Chromebook' : 'This browser',
+      const how = V.welcome.howToInstall();
+      let install;
+      if (V.install.installed()) {
+        install = line(phone ? 'On your home screen' : 'Installed as an app', 'Vault is installed.', null);
+      } else if (V.install.ready()) {
+        install = line('Install Vault', V.deviceKind.android ? 'Puts it on your home screen like any app, and lets you share to it.'
+          : 'Puts it with your other apps, so it opens in its own window.',
+        V.button('Install', { kind: 'primary', icon: 'download', onClick: async () => { await V.install.ask(); draw(); } }));
+      } else {
+        const ios = how.kind === 'ios';
+        if (ios && !unmark) unmark = V.welcome.markConnect();
+        install = V.h('div.setting.install-how', {}, V.h('div.setting-text', {},
+          V.h('strong', { text: phone ? 'Put it on your home screen' : 'Install as an app' }),
+          V.h('ol.steps', {}, how.steps.map((step) => V.h('li', { text: step }))),
+          how.note ? V.h('span', { text: how.note }) : null,
+          // (Its icon starts with nothing of Safari's: the link it connects with, as the welcome's step offers it.)
+          ios ? V.welcome.iosIcon((V.data.user || {}).email || 'your e-mail') : null));
+      }
+      return card(phone ? `This ${V.deviceKind.ios ? V.deviceKind.model : 'phone'}` : V.deviceKind.chromebook ? 'This Chromebook' : 'This browser',
         V.send.deviceSetting(),  // which device this is (js/send.js)
-        installPrompt ? line('Install Vault', 'Puts it on your home screen like any app, and lets you share to it.',
-          V.button('Install', { kind: 'primary', icon: 'download', onClick: async () => { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; draw(); } }))
-          : line(phone ? 'On your home screen' : 'Install as an app', window.matchMedia('(display-mode: standalone)').matches ? 'Vault is installed.'
-            : phone ? 'In Chrome: the ⋮ menu > Add to Home screen > Install.'
-              : 'In Chrome: the ⋮ menu > Cast, save and share > Install page as app (if your school allows it).', null),
+        install,
         line('Connected to', (V.config || {}).url ? new URL(V.config.url).host : '', null));
     }
     const link = V.connectLink();
@@ -130,9 +148,9 @@ V.settings = (() => {
       V.h('div.connect', {},
         V.qr(link),
         V.h('ol.steps', {},
-          V.h('li', { text: 'Point your Android phone\'s camera at the code and tap the link (or open the Google Lens app).' }),
-          V.h('li', { text: 'Vault opens in Chrome. Sign in with your e-mail and your Vault password.' }),
-          V.h('li', { text: 'Tap Install (or Chrome\'s ⋮ menu > Add to Home screen). Now photos can be shared straight to your PC.' }))),
+          V.h('li', { text: 'Point your phone\'s camera at the code and tap the link it shows (on Android, Google Lens reads it too).' }),
+          V.h('li', { text: 'Vault opens (in Chrome on Android, Safari on an iPhone). Sign in with your e-mail and your Vault password.' }),
+          V.h('li', { text: 'Put it on the home screen: on Android, Install (or Chrome\'s ⋮ menu > Add to Home screen), and then photos can be shared straight to your PC; on an iPhone, in Safari\'s Vault, Settings > This iPhone > Copy the sign-in link, add Vault to the Home Screen, then open the icon, tap Paste the link and sign in once.' }))),
       V.h('div.setting-buttons', {},
         V.button('Copy the link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Copied. E-mail it to yourself and open it on the phone.'); } })));
   }
@@ -210,6 +228,7 @@ V.settings = (() => {
     // The view is shared by every tab: drawing while another tab shows put Settings over it ("it keeps going back to
     // Settings").
     if (!root || !root.isConnected || root.dataset.tab !== 'settings') return;
+    const kept = keepTyping();
     const user = V.data.user || {};
     const status = { synced: 'Up to date', syncing: 'Syncing...', offline: 'Offline: changes wait on this device',
       error: 'Having trouble reaching the cloud', asleep: 'Your free cloud is asleep (tap the red dot at the top)',
@@ -219,6 +238,8 @@ V.settings = (() => {
       card('Your account',
         line(user.email || 'Signed in', user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Vault can see them.'
           : 'Your notes, files and clipboard are only in your own cloud.', null),
+        // (Always here for a friend, so those who joined before the owner's Stats existed are told too.)
+        user.invited ? V.h('p.hint.account-stats', { text: `Whoever runs this Vault's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
         V.h('div.setting-buttons', {},
           V.button('Change password', { onClick: changePassword }),
           V.button('Sign out', { kind: 'danger-quiet', onClick: signOut }))),
@@ -237,8 +258,36 @@ V.settings = (() => {
       V.attachSearch ? V.attachSearch.card({ card, line, toggle, draw }) : null,  // js/attachsearch.js
       V.ai ? V.ai.card({ card, line, toggle, draw }) : null,  // js/ai.js
       V.invites ? V.invites.card({ card, line, toggle, draw }) : null,  // js/access.js
+      V.invites ? V.invites.statsCard({ card, line, toggle, draw }) : null,  // js/access.js: the owner's Stats
       V.feedback ? V.feedback.card({ card, line, toggle, draw }) : null,  // js/access.js
       aboutCard()));
+    kept();
+  }
+
+  /* Settings is drawn again whenever its data changes (another device's switch, this device noting itself for the
+     owner's Stats a few seconds after opening), so what's being typed in a box (a Gemini key, a name) would lose its
+     words and its caret: kept and put back, by the box's label. Returns the putting back. */
+  function keepTyping() {
+    const label = (el) => el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+    const boxes = [...root.querySelectorAll('input:not([type=checkbox]):not([type=radio]), textarea')]
+      .filter((el) => label(el) && el.value).map((el) => ({ name: label(el), value: el.value }));
+    const now = document.activeElement;
+    const focused = now && root.contains(now) && /^(INPUT|TEXTAREA)$/.test(now.tagName) && label(now)
+      ? { name: label(now), start: now.selectionStart, end: now.selectionEnd } : null;
+    const scroll = root.scrollTop;
+    return () => {
+      const find = (name) => [...root.querySelectorAll('input, textarea')].find((el) => label(el) === name);
+      for (const box of boxes) {
+        const el = find(box.name);
+        if (el && !el.value) el.value = box.value;
+      }
+      root.scrollTop = scroll;
+      if (!focused) return;
+      const el = find(focused.name);
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      try { el.setSelectionRange(focused.start, focused.end); } catch (error) { /* (a box that has no caret) */ }
+    };
   }
 
   V.on('status', () => draw());

@@ -2429,3 +2429,37 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .feedback-kinds { margin: 6px 0 10px; }
 .feedback-text { min-height: 140px; }
 .feedback-count { display: block; text-align: right; color: var(--muted); font-size: 12.5px; min-height: 18px; font-variant-numeric: tabular-nums; }
+
+/* Joining (1.10, js/welcome.js): one step a screen, dots for how far along */
+.welcome-dots { display: flex; justify-content: center; gap: 8px; margin: 2px 0 6px; }
+.welcome-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); transition: background var(--d-2, .2s) var(--ease-out), width var(--d-2, .2s) var(--ease-out); }
+.welcome-dots span[data-state=done] { background: var(--accent-line); }
+.welcome-dots span[data-state=now] { width: 22px; border-radius: var(--r-full); background: var(--accent); }
+.welcome-manual { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 6px; }
+.welcome-manual[hidden] { display: none; }
+.welcome-status { color: var(--text-2); text-align: center; margin: 6px 0 0; min-height: 1em; }
+.welcome-status:empty { display: none; }
+.welcome-age { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--warn-soft); color: var(--text); font-size: 13.5px; line-height: 20px; }
+.welcome-age .icon { flex: none; width: 18px; height: 18px; color: var(--warn); margin-top: 1px; }
+.welcome-kept { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: var(--r-md); color: var(--text-2); font-size: 13.5px; line-height: 20px; }
+.welcome-kept .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+a.btn { text-decoration: none; }  /* (start.js's "Open in Chrome": a link, for Android's intent://) */
+.welcome-ios { display: grid; gap: 8px; justify-items: start; margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.welcome-ios p { margin: 0; color: var(--text-2); }
+.welcome-summary { list-style: none; padding: 0; margin: 10px 0 4px; display: grid; gap: 10px; }
+.welcome-summary li { display: flex; gap: 10px; align-items: center; }
+.welcome-summary li .icon { flex: none; width: 20px; height: 20px; }
+.welcome-summary li[data-ok=yes] .icon { color: var(--ok); }
+.welcome-summary li[data-ok=no] { color: var(--muted); }
+.gate-box .link-btn.welcome-skip { margin-top: 4px; min-height: 44px; }
+.setting.install-how .steps { margin: 6px 0 2px; }
+
+/* The owner's Stats (1.10, js/access.js) */
+.stats-people { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 1px; border-top: 1px solid var(--line-soft); }
+.stats-people li { display: grid; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.stats-people li strong { font-weight: 600; }
+.stats-people li span { color: var(--muted); font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; }
+.stats-privacy { margin: 10px 0 0; }
+.setting-buttons.stats-foot { justify-content: space-between; align-items: center; }

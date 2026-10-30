@@ -63,10 +63,10 @@ V.files = (() => {
   const refusal = (text) => Object.assign(new Error(text), { refused: true });
   const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* private */ } };
   const recall = (key) => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (error) { return null; } };
-  const deviceLabel = () => (/CrOS/.test(navigator.userAgent) ? 'Chromebook' : /Android|iPhone|iPad/.test(navigator.userAgent)
-    ? 'Phone' : 'Browser');
-  const hereLabel = () => (/Android|iPhone|iPad/.test(navigator.userAgent) || V.device === 'phone' && !/CrOS/.test(navigator.userAgent)
-    ? 'This phone' : 'This device');
+  const deviceLabel = () => (V.deviceKind.chromebook ? 'Chromebook' : V.deviceKind.ios ? V.deviceKind.model
+    : V.deviceKind.android ? 'Phone' : 'Browser');
+  const hereLabel = () => (V.deviceKind.ios ? `This ${V.deviceKind.model}` : V.deviceKind.android
+    || (V.device === 'phone' && !V.deviceKind.chromebook) ? 'This phone' : 'This device');
 
   /* ---------------------------------------------------------------- asking another device */
 
@@ -937,6 +937,12 @@ V.files = (() => {
   }
 
   function phoneTip() {
+    const apple = V.phoneModel();  // (the owner's phone, from its own records: 'iPhone', 'iPad' or 'Phone')
+    if (apple !== 'Phone') {
+      return V.h('div.files-tip', {},
+        empty('phone', `See your ${apple}'s files here`, `An ${apple} doesn't let a PC browse its files. Send them from Vault on `
+          + `the ${apple}, or put them in Vault Drive: both come here.`));
+    }
     return V.h('div.files-tip', {},
       empty('phone', 'See your phone\'s files here', 'Windows 11 can show your phone in File Explorer by itself, over Wi-Fi, with nothing open on the phone:'),
       V.h('ol.steps', {},
@@ -1115,6 +1121,12 @@ V.files = (() => {
 
   function drawHere() {
     const main = parts.main;
+    if (!canShareHere && V.deviceKind.ios) {  // (Windows' "Mobile devices" is for Android phones only)
+      return V.clear(main, V.h('div.files-tip', {},
+        empty('phone', `Your PC can't browse this ${V.deviceKind.model}`, 'iPhones and iPads don\'t let the PC look at their '
+          + 'files. Send them, or put them in Vault Drive.'),
+        V.button('Open Vault Drive', { icon: 'cloud', onClick: () => show('drive') })));
+    }
     if (!canShareHere) {
       return V.clear(main, V.h('div.files-tip', {},
         empty('phone', 'Browse this phone from your PC', 'Phone browsers can\'t share folders with Vault, but Windows 11 can see this phone by itself, over Wi-Fi:'),

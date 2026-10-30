@@ -152,6 +152,12 @@ V.ai = (() => {
   // Whether this device's page keeps the AI keys itself: a phone or Chromebook, or Vault on its own on a PC. The PC
   // with Jarvis keeps Jarvis's key in Python instead (aiKeyState/aiKeyShare/aiKeyRemove).
   const ownKeys = () => !V.desktop || !!(V.pc && V.pc.standalone && V.pc.standalone());
+  // A friend's private storage is in the cloud of the person who invited them, who holds that cloud's secret key and so
+  // could read a key kept there: said so wherever a key is saved (js/welcome.js too), never "your own cloud".
+  const invited = () => !!(V.data.user && V.data.user.invited);
+  const KEPT_THEIRS = 'kept in your private storage in the Vault cloud of the person who invited you (they could read it), '
+    + 'and never shown here';
+  const kept = () => (invited() ? KEPT_THEIRS : 'kept in your own cloud, never shown');
   const month = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthName = () => new Date().toLocaleDateString([], { month: 'long' });
   /* "Use Claude too" (Settings > AI), the same on every device: off unless the owner switched it on. A Vault 1.8 on
@@ -1811,8 +1817,8 @@ V.ai = (() => {
     }
     const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
     const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
-      const sure = await V.confirm('Remove the Claude key?', V.desktop && ownKeys()
-        ? 'This PC, your phone and your Chromebook stop using Claude until it\'s set up again.'
+      const sure = await V.confirm('Remove the Claude key?', invited() ? 'Your devices stop using Claude until a key is added again.'
+        : V.desktop && ownKeys() ? 'This PC, your phone and your Chromebook stop using Claude until it\'s set up again.'
         : 'Your phone and Chromebook stop using Claude until it\'s set up again. Jarvis keeps his own.',
         { ok: 'Remove', danger: true });
       if (!sure) return;
@@ -1821,7 +1827,9 @@ V.ai = (() => {
     } });
     if (known.cloud) {
       return ui.line('Claude key', !ownKeys() ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
-        : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
+        : invited() ? 'In your private storage in the Vault cloud of the person who invited you (they could read it), never '
+          + 'shown here. Claude can be used here. Remove it any time.'
+          : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
     }
     if (!ownKeys()) {
       if (known.old) return ui.line('Claude key', 'Open Jarvis and click Update to set this up.', null);
@@ -1850,8 +1858,9 @@ V.ai = (() => {
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
     const open = () => window.open(CONSOLE, '_blank', 'noopener');
     return V.h('div.ai-key.ai-key-claude', {},
-      ui.line('Claude key', V.desktop ? 'Paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown, and your phone and Chromebook can use it too.'
-        : 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
+      ui.line('Claude key', invited() ? `Paste a key from console.anthropic.com here: it's ${kept()}.`
+        : V.desktop ? 'Paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown, and your phone and Chromebook can use it too.'
+          : 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
@@ -1879,11 +1888,13 @@ V.ai = (() => {
         try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
         ui.draw();
       } });
-      return row(ui.line('Gemini key (free)', claudeOn()
+      return row(ui.line('Gemini key (free)', (invited() ? 'In your private storage in the Vault cloud of the person who '
+          + 'invited you, so they could read it: remove it here any time, or delete the key in Google AI Studio. '
+        : 'Kept in your own cloud, never shown. ') + (claudeOn()
         ? (notesClaude()
-          ? 'Kept in your own cloud, never shown. New chats start on Gemini; Claude writes your notes.'
-          : 'Kept in your own cloud, never shown. New chats start on Gemini, and it writes your notes, for free.')
-        : 'Kept in your own cloud, never shown. Chat and the note-taker use it, for free.',
+          ? 'New chats start on Gemini; Claude writes your notes.'
+          : 'New chats start on Gemini, and it writes your notes, for free.')
+        : 'Chat and the note-taker use it, for free.'),
       V.h('div.setting-buttons', {}, ready, remove)));
     }
     const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
@@ -1911,7 +1922,7 @@ V.ai = (() => {
     const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
     return row(V.h('div.ai-key.ai-key-gemini', {},
       ui.line('Gemini key (free)', 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google '
-        + '(new ones start with AQ.): Vault checks it with Google, then keeps it in your own cloud, never shown.', null),
+        + `(new ones start with AQ.): Vault checks it with Google, then it's ${kept()}.`, null),
       V.h('ol.steps.ai-steps', {},
         V.h('li', { text: 'Tap "Get a free key" and sign in with your Google account.' }),
         V.h('li', { text: 'Tap "Create API key", then copy the key.' }),
@@ -2072,7 +2083,7 @@ V.ai = (() => {
 
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, checkGemini, timingLine, networkLine, getGeminiKey, saveGeminiKey, removeGeminiKey,
-    forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2,
+    forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2, invited, KEPT_THEIRS,
     // How quickly each Gemini model starts answering here, and the others this key may use (tests, Settings).
     speed: { order: (use = 'chat') => ranked(use), headFor, typical, extras, failing, forget: forgetSpeed,
       record: () => JSON.parse(JSON.stringify(record())), forgetList },
