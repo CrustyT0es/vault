@@ -155,17 +155,17 @@
     });
   }
 
-  /* Nothing set up in this browser yet. The link that sets it up (an invite, or #connect= from the PC's QR code or an
-     iPhone's "Copy the sign-in link") is opened, or pasted here: on an iPhone or iPad, a new home screen icon starts
-     with nothing of Safari's, so this is where it lands. */
+  /* Nothing set up in this browser yet. The link that sets it up (an invite, a join QR code's link, or #connect= from
+     the PC's QR code or an iPhone's "Copy the sign-in link") is opened, or pasted here: on an iPhone or iPad, a new
+     home screen icon starts with nothing of Safari's, so this is where it lands. */
   function connectScreen() {
-    const [linkRow, linkBox] = field('Or paste it here', { type: 'url', placeholder: 'https://...#invite=... or #connect=...',
+    const [linkRow, linkBox] = field('Or paste it here', { type: 'url', placeholder: 'https://...#invite=..., #join=... or #connect=...',
       autocomplete: 'off', spellcheck: 'false' });
     const problem = V.h('p.error-text', { role: 'alert' });
     const use = (text) => {
-      const found = /#(invite|connect)=([A-Za-z0-9_-]+)/.exec(String(text || ''));
+      const found = /#(invite|join|connect)=([A-Za-z0-9_-]+)/.exec(String(text || ''));
       if (!found) {
-        problem.textContent = 'That isn\'t a Vault link. Copy the whole link (it has #invite= or #connect= in it) and try again.';
+        problem.textContent = 'That isn\'t a Vault link. Copy the whole link (an invite, a join code\'s link, or #connect=) and try again.';
         return;
       }
       history.replaceState(null, '', `${location.pathname}${location.search}#${found[1]}=${found[2]}`);
@@ -195,7 +195,7 @@
         location.reload();
       } }));
     screen(V.h('h1', { text: 'Connect Vault' }),
-      V.h('p.muted', { text: 'Open the link you were sent (an invite from a friend, or the link from Vault on your PC). Or copy it, then tap Paste the link.' }),
+      V.h('p.muted', { text: 'Open the link you were sent (an invite or a join code\'s link from a friend, or the link from Vault on your PC). Or copy it, then tap Paste the link.' }),
       paste, linkRow, V.button('Connect', { kind: 'wide-btn', onClick: () => use(linkBox.value) }), problem,
       V.h('p.hint', { text: V.deviceKind.ios && V.install.installed()
         // (A scanned code opens in Safari, never in this icon: the link comes from Safari's Vault instead.)
@@ -306,29 +306,65 @@
     localStorage.setItem('vault-config', JSON.stringify({ url: invite.url, key: invite.key, email }));
   }
 
-  /* The invite was opened inside an app's own browser (tapped in Instagram, Snapchat...: V.deviceKind.inApp). Vault
-     works there, but only there: that browser keeps its own storage, can't put Vault on the home screen, and Google
-     won't sign anyone in inside it (the free AI key). So Chrome (Android) or Safari (iPhone) is offered first: the code
-     still works there until a password is chosen, so the whole invite can start again in the real browser. The invite
-     link only reaches the clipboard from a tap here, never the address bar. Chrome's own button can't carry it (an
-     intent:// link uses the part after # itself), so it's copied first and pasted on Chrome's "Connect Vault". */
+  /* A join QR code's link (js/access.js's joinLinkFor): #join= with the owner's cloud and a join code that anyone may
+     use for a while to make their own account there (joinCodeScreen). Like an invite's, the code is taken out of the
+     address bar at once and kept in memory only: never saved, logged or put back in the address. */
+  const JOIN_TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;  // the helper's payload.signature (vault/invites.py's check)
+  let join = null;
+  function takeJoinLink() {
+    const match = /#join=([A-Za-z0-9_-]+)/.exec(location.hash);
+    if (!match) return;
+    history.replaceState(null, '', location.pathname + location.search);  // the code never stays in the address bar
+    let found = null;
+    try { found = readLink(match[1]); } catch (error) { /* said below */ }
+    const token = found && typeof found.t === 'string' ? found.t : '';
+    if (!found || !CLOUD.test(found.u || '') || !found.k || token.length > 600 || !JOIN_TOKEN.test(token)) {
+      console.warn('Vault: that join link was damaged');
+      return;
+    }
+    join = { url: found.u, key: String(found.k), token, name: String(found.n || '').trim().slice(0, 60),
+      // (in memory only: inAppScreen's "Copy the link" hands it to Chrome or Safari)
+      link: `${location.origin}${location.pathname}${location.search}#join=${match[1]}` };
+    // Someone already signed in to Vault in this browser stays signed in: a join code never swaps them out.
+    let saved = null;
+    let who = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
+      who = JSON.parse(localStorage.getItem('vault-user') || 'null');
+    } catch (error) { /* nothing usable kept */ }
+    if (saved && localStorage.getItem('vault-auth')) {
+      join.busy = (who && who.email) || 'someone else';
+      return;
+    }
+    localStorage.setItem('vault-config', JSON.stringify({ url: join.url, key: join.key }));
+  }
+
+  /* The invite (or a join code's link) was opened inside an app's own browser (tapped in Instagram, Snapchat...:
+     V.deviceKind.inApp). Vault works there, but only there: that browser keeps its own storage, can't put Vault on
+     the home screen, and Google won't sign anyone in inside it (the free AI key). So Chrome (Android) or Safari
+     (iPhone) is offered first: the code still works there until a password is chosen (or the join code runs out), so
+     the whole thing can start again in the real browser. The link only reaches the clipboard from a tap here, never
+     the address bar. Chrome's own button can't carry it (an intent:// link uses the part after # itself), so it's
+     copied first and pasted on Chrome's "Connect Vault". */
   function inAppScreen() {
     return new Promise((resolve) => {
       const ios = V.deviceKind.ios;
       const browser = ios ? 'Safari' : 'Chrome';
+      const joining = !invite && !!join;
+      const copy = joining ? 'Copy the link' : 'Copy the invite link';
       const page = new URL(location.origin + location.pathname);
       const chrome = `intent://${page.host}${page.pathname}#Intent;scheme=https;package=com.android.chrome;`
         + `S.browser_fallback_url=${encodeURIComponent(page.href)};end`;
-      screen(V.h('h1', { text: `Open your invite in ${browser}` }),
+      screen(V.h('h1', { text: joining ? `Open this link in ${browser}` : `Open your invite in ${browser}` }),
         V.h('p.muted', { text: `This page opened inside an app's own browser. Vault only stays here, can't go on your home `
           + `screen, and Google won't let you sign in here for the free AI. In ${browser} it all works.` }),
         V.h('ol.steps.in-app-how', {},
-          V.h('li', { text: 'Tap Copy the invite link.' }),
+          V.h('li', { text: `Tap ${copy}.` }),
           V.h('li', { text: ios ? 'Tap ••• (or the compass) and choose Open in Safari (or Open in external browser).'
             : 'Tap Open in Chrome below, or ⋮ at the top and Open in Chrome (or Open in browser).' }),
           V.h('li', { text: `In ${browser}, tap Paste the link (or paste it into the address bar and go).` })),
-        V.button('Copy the invite link', { kind: 'primary wide-btn', icon: 'copy', onClick: async () => {
-          await V.copy(invite.link, { cloud: true });  // (never shared to other devices: it holds the code)
+        V.button(copy, { kind: 'primary wide-btn', icon: 'copy', onClick: async () => {
+          await V.copy((joining ? join : invite).link, { cloud: true });  // (never shared to other devices: it holds the code)
           V.toast(`Copied. Now open ${browser} and paste it there.`, { ms: 6000 });
         } }),
         ios ? null : V.h('a.btn.wide-btn.in-app-chrome', { href: chrome, rel: 'noopener' }, V.icon('open'),
@@ -338,17 +374,129 @@
     });
   }
 
-  /* This browser's Vault is someone else's: the invite waits until they've signed out. */
+  /* This browser's Vault is someone else's: the invite (or join code) waits until they've signed out. */
   function busyScreen() {
     return new Promise((resolve) => {
+      const open = V.button('Open Vault', { kind: 'primary wide-btn', onClick: () => { invite = null; join = null; resolve(); } });
+      if (!invite && join) {
+        screen(V.h('h1', { text: 'Already signed in' }),
+          V.h('p.muted', { text: `This browser's Vault is signed in as ${join.busy}. Sign out there first, or open the code's `
+            + 'link in another browser.' }),
+          open);
+        return;
+      }
       screen(V.h('h1', { text: 'Already signed in' }),
         V.h('p.muted', { text: `This invite is for ${invite.email}, but Vault in this browser is signed in as ${invite.busy}.` }),
         V.h('ol.steps', {},
           V.h('li', { text: 'Open Vault here and go to Settings > Sign out.' }),
           V.h('li', { text: 'Then open the invite link again.' })),
         V.h('p.hint', { text: 'Or open the link in another browser (or a private window) instead.' }),
-        V.button('Open Vault', { kind: 'primary wide-btn', onClick: () => { invite = null; resolve(); } }));
+        open);
     });
+  }
+
+  const UNREACHABLE = 'Vault can\'t reach the cloud. Check the internet, then try again.';
+  const NO_JOINING = 'That cloud doesn\'t take join codes yet. Ask for a new code.';
+
+  // What a friend is told about their own notes (the choose-password and join screens).
+  const PRIVATE = 'Your notes are only yours: nobody else using Vault can see them. Whoever runs the cloud can see what\'s '
+    + 'stored in it, so keep secrets in a locked note (it\'s scrambled with your own PIN).';
+
+  /* Someone opened a join QR code's link: they make their own Vault in that cloud with their own name, e-mail and
+     password (Vault's helper there checks the code and makes the account: vault/functions/vault-admin). The code and
+     the password only ever go to that cloud's helper, never into the address, storage or the console. Resolves
+     'joined' (made and signed in: the welcome steps come next, no password to choose) or 'signed-in' (they had an
+     account there already and signed in with it). */
+  function joinCodeScreen() {
+    return new Promise((resolve) => {
+      const [nameRow, nameBox] = field('Your name', { type: 'text', autocomplete: 'name', maxlength: '60' });
+      const [emailRow, emailBox] = field('Your e-mail', { type: 'email', autocomplete: 'email' });
+      const [passRow, passBox] = field('Pick a password', { type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
+      const [againRow, againBox] = field('Type it again', { type: 'password', autocomplete: 'new-password' });
+      const problem = V.h('p.error-text', { role: 'alert' });
+      const instead = V.button('Sign in instead', { kind: 'wide-btn', onClick: async () => {
+        await signInScreen(emailBox.value.trim());
+        resolve('signed-in');
+      } });
+      instead.hidden = true;
+      const go = V.button('Make my Vault', { kind: 'primary wide-btn', onClick: async () => {
+        problem.textContent = '';
+        instead.hidden = true;
+        const name = nameBox.value.replace(/\s+/g, ' ').trim();
+        const email = emailBox.value.trim();
+        if (!name) { problem.textContent = 'Type your name.'; nameBox.focus(); return; }
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { problem.textContent = 'Type your e-mail address (like sam@example.com).'; return; }
+        if (passBox.value.length < 8) { problem.textContent = 'Pick a password of at least 8 characters.'; return; }
+        if (passBox.value !== againBox.value) { problem.textContent = 'The two passwords aren\'t the same.'; return; }
+        go.disabled = true;
+        try {
+          const made = await askToJoin(name, email, passBox.value);
+          if (made.error) {
+            problem.textContent = made.error;
+            instead.hidden = !made.exists;
+            return;
+          }
+          join = null;  // (used: the code goes out of memory too)
+          try {
+            await V.cloud.signIn(made.email || email, passBox.value);
+          } catch (error) {
+            await signInScreen(made.email || email, 'Your Vault is made. Sign in with the e-mail and password you just picked.');
+          }
+          resolve('joined');
+        } finally {
+          go.disabled = false;
+        }
+      } });
+      againBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
+      const owner = join.name.split(/\s+/)[0];
+      screen(V.welcome.dots('password'), V.h('h1', { text: owner ? `Join ${owner}'s Vault` : 'Join Vault' }),
+        V.h('p.muted', { text: 'Make your own Vault: your notes are only yours.' }),
+        nameRow, emailRow, passRow, againRow, problem, go, instead,
+        V.h('p.hint', { text: PRIVATE }),
+        V.h('p.hint.choose-stats', { text: V.welcome.STATS_WORDS }));
+      requestAnimationFrame(() => nameBox.focus());
+    });
+  }
+
+  /* The join itself: the cloud's helper, with the cloud's public key only (there's no sign-in yet). { email } when
+     the account was made, else { error: words to show, exists: an account with that e-mail is there already }. */
+  async function askToJoin(name, email, password) {
+    const control = new AbortController();
+    const timer = setTimeout(() => control.abort(), 30000);
+    let response;
+    let answer = {};
+    try {
+      response = await fetch(`${join.url}/functions/v1/vault-admin`, { method: 'POST', signal: control.signal,
+        headers: { 'Content-Type': 'application/json', apikey: join.key },
+        body: JSON.stringify({ action: 'join', token: join.token, name, email, password }) });
+      answer = await response.json().catch(() => ({}));
+    } catch (error) {
+      // Nothing this page may read came back. When the cloud itself answers, it's the helper that's missing (a
+      // function that isn't there answers 404 with no CORS); else it's the internet, or a network that blocks it.
+      return { error: navigator.onLine && await reachable() ? NO_JOINING : UNREACHABLE };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response.ok) return { email: String((answer && answer.email) || email) };
+    const said = answer && typeof answer.message === 'string' && answer.error ? answer.message : '';
+    if (response.status === 404 || response.status === 401) return { error: NO_JOINING };  // none there, or one too old
+    if (response.status === 540) return { error: 'That cloud is asleep right now. Ask whoever showed you the code to open Vault (it wakes up in a few minutes), then try again.' };
+    return { error: said || (response.status >= 500 ? 'That cloud had trouble just now. Try again in a minute.'
+      : `That didn't work (the cloud said ${response.status}). Ask for a new code.`), exists: answer && answer.error === 'exists' };
+  }
+
+  /* Whether the join link's cloud answers at all (its sign-in service's health check). */
+  async function reachable() {
+    const control = new AbortController();
+    const timer = setTimeout(() => control.abort(), 10000);
+    try {
+      await fetch(`${join.url}/auth/v1/health`, { headers: { apikey: join.key }, signal: control.signal });
+      return true;
+    } catch (error) {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /* A friend's first sign-in (or any later one before they did it): their own password, which ends the code. */
@@ -381,7 +529,7 @@
       screen(V.welcome.dots('password'), V.h('h1', { text: 'Choose your own password' }),
         V.h('p.muted', { text: `${name ? `Welcome, ${name}! ` : ''}Your invite code only works once. Pick a password only you know: it's what you'll sign in with on your other devices.` }),
         passRow, againRow, problem, go,
-        V.h('p.hint', { text: 'Your notes are only yours: nobody else using Vault can see them. Whoever runs the cloud can see what\'s stored in it, so keep secrets in a locked note (it\'s scrambled with your own PIN).' }),
+        V.h('p.hint', { text: PRIVATE }),
         V.h('p.hint.choose-stats', { text: V.welcome.STATS_WORDS }),
         V.h('button.link-btn', { type: 'button', text: 'Sign out', onclick: async () => {
           await V.cloud.signOut().catch(() => {});
@@ -401,17 +549,57 @@
   }
 
   /* A PC whose Vault isn't set up: joining a friend's cloud with the invite link (vault/invites.py's join). A
-     phone-connect link works too, with the person's own password. Python signs in and keeps the session. */
+     phone-connect link works too, with the person's own password. A join QR code's link (pasted) takes the person's
+     name, e-mail and a password of their own, and the helper in that cloud makes their account (invites.py's
+     join_with_code): a PC part from before join codes can't, and says so. Python signs in and keeps the session.
+     `done('joined')` after a join code (no password to choose: the welcome steps are next). */
   function joinScreen(back, done) {
-    const [linkRow, linkBox] = field('Invite link', { type: 'url', placeholder: 'https://...#invite=...', autocomplete: 'off', spellcheck: 'false' });
+    const [linkRow, linkBox] = field('Invite link', { type: 'url', placeholder: 'https://...#invite=... or #join=...', autocomplete: 'off', spellcheck: 'false' });
     const [passRow, passBox] = field('Your Vault password', { type: 'password', autocomplete: 'current-password' });
     passRow.hidden = true;
+    const [nameRow, nameBox] = field('Your name', { type: 'text', autocomplete: 'name', maxlength: '60' });
+    const [emailRow, emailBox] = field('Your e-mail', { type: 'email', autocomplete: 'email' });
+    const [newRow, newBox] = field('Pick a password', { type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
+    const [againRow, againBox] = field('Type it again', { type: 'password', autocomplete: 'new-password' });
+    const details = [nameRow, emailRow, newRow, againRow];
     const problem = V.h('p.error-text');
+    const joinCode = () => /#join=/.test(linkBox.value) && V.pc.can('joinWithCode');
+    const showDetails = () => {
+      const shown = joinCode();
+      for (const row of details) row.hidden = !shown;
+      if (shown) passRow.hidden = true;
+    };
+    showDetails();
+    linkBox.addEventListener('input', showDetails);
     const go = V.button('Join', { kind: 'primary wide-btn', onClick: async () => {
       problem.textContent = '';
       const link = linkBox.value.trim();
-      if (!/#(invite|connect)=/.test(link)) {
-        problem.textContent = 'Paste the whole link your friend sent (it has #invite= in it). The code alone isn\'t enough: the link says which cloud to join.';
+      if (!/#(invite|connect|join)=/.test(link)) {
+        problem.textContent = 'Paste the whole link your friend sent (it has #invite= or #join= in it). The code alone isn\'t enough: the link says which cloud to join.';
+        return;
+      }
+      if (/#join=/.test(link)) {
+        if (!V.pc.can('joinWithCode')) {
+          problem.textContent = 'This Vault is too old for join codes. Update it first (open Jarvis and click Update, or run the '
+            + 'newest setup-vault.bat), or ask for an invite link.';
+          return;
+        }
+        showDetails();
+        const name = nameBox.value.replace(/\s+/g, ' ').trim();
+        const email = emailBox.value.trim();
+        if (!name) { problem.textContent = 'Type your name.'; nameBox.focus(); return; }
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { problem.textContent = 'Type your e-mail address (like sam@example.com).'; return; }
+        if (newBox.value.length < 8) { problem.textContent = 'Pick a password of at least 8 characters.'; return; }
+        if (newBox.value !== againBox.value) { problem.textContent = 'The two passwords aren\'t the same.'; return; }
+        go.disabled = true;
+        try {
+          await V.pc.call('joinWithCode', { link, name, email, password: newBox.value });
+          done('joined');
+        } catch (error) {
+          problem.textContent = error.message || String(error);
+        } finally {
+          go.disabled = false;
+        }
         return;
       }
       go.disabled = true;
@@ -430,10 +618,10 @@
         go.disabled = false;
       }
     } });
-    for (const box of [linkBox, passBox]) box.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
+    for (const box of [linkBox, passBox, againBox]) box.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
     screen(V.h('h1', { text: 'Join with an invite' }),
-      V.h('p.muted', { text: 'Paste the invite link a friend sent you. It gives you your own Vault in their cloud: other people using it can\'t see your notes.' }),
-      linkRow, passRow, problem, go,
+      V.h('p.muted', { text: 'Paste the invite link a friend sent you (or the link of their join QR code). It gives you your own Vault in their cloud: other people using it can\'t see your notes.' }),
+      linkRow, passRow, details, problem, go,
       V.h('button.link-btn', { type: 'button', text: 'Set up my own cloud instead', onclick: back }));
     requestAnimationFrame(() => linkBox.focus());
   }
@@ -498,6 +686,16 @@
     if (kept && kept.note && current === 'notes' && V.data.notes.has(kept.note)) V.notes.open(kept.note);
     if (asked === '#new') V.notes.chooseTemplate();
     if (['#new', '#send', '#clip', '#chat', '#claude'].includes(asked)) history.replaceState(null, '', location.pathname + location.search);
+    // The icon's "Send clipboard" with Vault already open (the usual way on a phone): Chrome only brings it to the
+    // front with #clip in the address, which doesn't start the page again. The same, once Vault is in sight.
+    const clipAsked = () => {
+      if (V.desktop || location.hash !== '#clip' || V.away()) return;
+      history.replaceState(null, '', location.pathname + location.search);
+      V.go('clips');
+      V.clips.sendNow();
+    };
+    window.addEventListener('hashchange', clipAsked);
+    V.on('back', clipAsked);
     dropAnywhere();
     // Safari may clear a site's storage after a week unused (not an installed icon's): asked to keep it.
     if (V.deviceKind.ios && !V.install.installed() && navigator.storage && navigator.storage.persist) {
@@ -537,6 +735,7 @@
   }
 
   async function boot() {
+    let joined = false;  // made a new account with a join code just now: no password to choose, the welcome steps next
     try {
       if (V.desktop) {
         await V.pc.ready;
@@ -546,7 +745,7 @@
         V.pcWindow(config.shown);
         if (await V.update.atBoot(config)) return;
         if (!config.url) {
-          await setupScreen();
+          joined = (await setupScreen()) === 'joined';
           config = await V.pc.call('config');
         }
         V.config = config;
@@ -561,13 +760,18 @@
         takeConnectLink();
         if (await V.update.atBoot()) return;
         takeInviteLink();
-        if (invite && invite.busy) await busyScreen();
-        else if (invite && V.deviceKind.inApp) await inAppScreen();
+        takeJoinLink();
+        if ((invite && invite.busy) || (join && join.busy)) await busyScreen();
+        else if ((invite || join) && V.deviceKind.inApp) await inAppScreen();
         const saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
         if (!saved) return connectScreen();
         V.config = { ...saved, phoneUrl: location.origin + location.pathname };
         V.cloud.client(saved);
         let user = await V.cloud.user();
+        if (!user && join) {  // a join code: their own name, e-mail and password make their account
+          joined = (await joinCodeScreen()) === 'joined';
+          user = await V.cloud.user();
+        }
         let note = '';
         if (!user && invite) {  // signed in by the invite's own code
           try {
@@ -587,7 +791,8 @@
       }
       // A friend still on their one-time invite code chooses their own password first, then the welcome steps
       // (js/welcome.js: their free AI key, Vault on the home screen), picked up where they were if Vault was closed.
-      if (await mustChoose()) V.welcome.remember(V.data.user.id);
+      // One who joined with a join code picked theirs already: straight to the steps.
+      if ((await mustChoose()) || (joined && V.data.user && V.data.user.id)) V.welcome.remember(V.data.user.id);
       if (V.welcome.pending(V.data.user && V.data.user.id)) {
         hello();  // (a gate screen like the others: this version started, whether or not the steps get finished now)
         await V.welcome.run({ screen, user: V.data.user, name: (invite && invite.name) || V.data.user.name || '' });

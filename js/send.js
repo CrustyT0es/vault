@@ -613,7 +613,11 @@ V.send = (() => {
     if (t && t.to_device === V.device) received(t);
   }
 
-  /* -- what Android's share sheet handed over (sw.js keeps it in V.db "shared") */
+  /* -- what Android's share sheet handed over (sw.js keeps it in V.db "shared")
+
+     Words alone (no files) are copied on all the other devices at once: Android lets no app but the keyboard read the
+     clipboard in the background, so Share > Vault is the one-tap way to copy something everywhere. Not words that
+     look like a password or a code (V.clips.mayShare): for those "Copy on all my devices" stays the owner's choice. */
 
   async function takeShared() {
     const shared = await V.db.all('shared');
@@ -621,13 +625,21 @@ V.send = (() => {
     await V.db.clear('shared');
     const all = shared.flatMap((s) => s.files || []);
     const words = shared.map((s) => [s.title, s.text, s.url].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
+    const copied = words && !all.length && V.clips && V.clips.mayShare(words) ? await V.clips.shareShared(words) : '';
+    // Where to paste it, never naming the device in hand: the PC has it already; a Chromebook's tab and the phone's
+    // Vault need opening first ("Keep this clipboard in step").
+    const where = ['Paste it on your PC now',
+      V.device !== 'web' ? 'on the Chromebook, click Vault\'s tab first' : '',
+      V.device !== 'phone' ? 'on your phone, open Vault first' : ''].filter(Boolean).join('; ') + '.';
     const content = [
+      copied === 'sent' ? V.h('p.hint', { text: where }) : null,
+      copied === 'later' ? V.h('p.hint', { text: 'Couldn\'t copy it right now: it goes when you\'re back online.' }) : null,
       all.length ? V.h('ul.shared-list', {}, all.map((f) => V.h('li', {}, V.icon(isPicture(f.type) ? 'image' : 'file'),
         V.h('span', { text: f.name }), V.h('span.muted', { text: V.size(f.size) })))) : null,
       words ? V.h('p.shared-text', { text: words.slice(0, 500) }) : null,
     ];
     V.sheet({
-      title: 'Shared with Vault', content,
+      title: copied === 'sent' ? 'Copied on all your devices' : 'Shared with Vault', content,
       actions: [
         { label: 'Save as a note', onClick: async () => {
           V.go('notes');
@@ -636,7 +648,8 @@ V.send = (() => {
           });
           if (all.length) await V.editor.addFiles(all);  // pictures and other files alike (a shared PDF is kept too)
         } },
-        ...(words && !all.length ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
+        ...(words && !all.length && copied !== 'sent'
+          ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
         { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => {
           // Into the tray, with the words in the box: a look first, then Send.
           if (words) draft = draft.trim() ? `${draft}\n${words}` : words;

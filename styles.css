@@ -2426,6 +2426,20 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   font: 600 24px/32px ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace; letter-spacing: .06em;
   text-align: center; user-select: all; overflow-wrap: anywhere;
 }
+/* Join QR codes (1.11, js/access.js's joinSheet): big enough to scan from another phone, never wider than the screen */
+.join-connect { justify-content: center; }
+.join-qr-box { flex: none; width: min(100%, 320px); }
+.join-qr-box .qr { width: 100%; }
+.join-qr-box .qr svg { display: block; width: 100%; height: auto; aspect-ratio: 1; }
+.join-blank {
+  display: grid; place-content: center; justify-items: center; gap: 10px; width: 100%; aspect-ratio: 1;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-lg); color: var(--muted); text-align: center;
+}
+.join-blank .icon { width: 28px; height: 28px; }
+.join-about { flex: 1; min-width: 220px; display: grid; gap: 6px; }
+.join-about p { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.join-about .join-left { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.join-buttons { justify-content: center; margin-top: 12px; }
 .feedback-kinds { margin: 6px 0 10px; }
 .feedback-text { min-height: 140px; }
 .feedback-count { display: block; text-align: right; color: var(--muted); font-size: 12.5px; min-height: 18px; font-variant-numeric: tabular-nums; }

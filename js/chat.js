@@ -1,10 +1,10 @@
 /* Vault: the Chat tab (called the Claude tab until 1.8.3; its id stays 'claude', so old links and kept places still
    work). Chats with Google's free Gemini, and with Claude too once it's switched on (Settings > AI, "Use Claude too",
-   js/ai.js): a list of them (newest first) and one open chat, with the model picked per chat (Gemini unless the owner
-   picks another), "Think harder" and "Search the web" switches (Claude's), notes and files to ask about, and answers
-   that can be saved as notes. While Claude is off only Gemini is offered, and a chat that was on a Claude model goes on
-   with Gemini (useNow, modelFor): its earlier answers stay as they came, nothing is ever sent to Claude, and its own
-   model is kept for when Claude is switched on again.
+   js/ai.js): a list of them (newest first) and one open chat, with the model picked per chat (Gemini Fast unless the
+   owner picks Gemini Smart or another), "Think harder" and "Search the web" switches (Claude's), notes and files to
+   ask about, and answers that can be saved as notes. While Claude is off only Gemini is offered, and a chat that was
+   on a Claude model goes on with Gemini (useNow, modelFor): its earlier answers stay as they came, nothing is ever
+   sent to Claude, and its own model is kept for when Claude is switched on again.
 
    Gemini's requests go straight from this device to Google (js/ai.js callGemini). Claude's go straight from this
    device to Claude (api.anthropic.com) with the owner's own key (js/ai.js: the key,
@@ -26,8 +26,12 @@
 
 V.chat = (() => {
   // The Gemini choice's id in a chat, kept from 1.7 so an older Vault on another device still reads such a chat as
-  // Gemini (to it, anything else is Claude). It names no model any more: ai.js picks Google's newest itself.
+  // Gemini (to it, anything else is Claude). It names no model any more: ai.js picks Google's newest itself. Since 1.11
+  // it's "Gemini Fast" (the quickest model here), and GEMINI_SMART "Gemini Smart" (Flash first). A Vault 1.8.0 reads
+  // any id but 'gemini-2.5-flash' as Claude; every page updates itself at start, and 1.8.1 and later treat any
+  // 'gemini...' id as their Gemini, so a Smart chat opened on an older page just answers with that page's Gemini.
   const GEMINI_MODEL = 'gemini-2.5-flash';
+  const GEMINI_SMART = 'gemini-smart';
   const MODELS = [
     { id: 'claude-haiku-5-5', provider: 'claude', name: 'Claude Haiku 5.5', short: 'Haiku 5.5', about: 'Quick and cheap. Good for most questions.',
       search: 'web_search_20250305', fallback: false },
@@ -37,11 +41,13 @@ V.chat = (() => {
       search: 'web_search_20260209', fallback: true },
     { id: 'claude-fable-5-1', provider: 'claude', name: 'Claude Fable 5.1', short: 'Fable 5.1', about: 'The most capable, and expensive: keep it for the hardest things.',
       search: 'web_search_20260209', fallback: true },
-    // Gemini (Google), free: Chat's own model (the only one while Claude is off). Add a free key in Settings > AI.
+    // Gemini (Google), free: Chat's own models (the only ones while Claude is off). Add a free key in Settings > AI.
     // Text and pictures; no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter
-    // (use mobile data). (any other "gemini..." id is this one too)
-    { id: GEMINI_MODEL, provider: 'gemini', name: 'Gemini Flash (free)', short: 'Gemini', free: true,
-      about: 'Google\'s free model (its newest Flash). Just needs a free Google key (Settings > AI).' },
+    // (use mobile data). `tier` goes to js/ai.js, which picks the model. (any other "gemini..." id is Gemini Fast too)
+    { id: GEMINI_MODEL, provider: 'gemini', tier: 'fast', name: 'Gemini Fast (free)', short: 'Gemini Fast', free: true,
+      about: 'The quickest Gemini right now (usually Flash-Lite: about a second to start). Free.' },
+    { id: GEMINI_SMART, provider: 'gemini', tier: 'smart', name: 'Gemini Smart (free)', short: 'Gemini Smart', free: true,
+      about: 'Google\'s bigger Flash: better for hard homework and long writing, but slower to start and busy more often. Free.' },
   ];
   const CLAUDE_MODEL = MODELS[0].id;  // (MODELS[0] stays Claude's: an id nobody knows is read as a Claude model)
   const geminiId = (id) => /^gemini/.test(String(id || ''));
@@ -136,12 +142,13 @@ V.chat = (() => {
   const fileOf = (id) => `${dir()}/${id}.json`;
   const filesDir = (id) => `${dir()}/${id}/files`;
   const modelOf = (id) => MODELS.find((m) => m.id === id)
-    || (geminiId(id) ? MODELS.find((m) => m.provider === 'gemini') : null) || MODELS[0];
-  /* "Haiku 5.5"; a model the API answered with instead ("claude-opus-4-8") as "Opus 4.8"; any Gemini as "Gemini". */
+    || (geminiId(id) ? MODELS.find((m) => m.id === GEMINI_MODEL) : null) || MODELS[0];
+  /* "Haiku 5.5"; a model the API answered with instead ("claude-opus-4-8") as "Opus 4.8"; "Gemini Smart", and any
+     other Gemini as "Gemini Fast". */
   const nameOf = (id) => {
     const known = MODELS.find((m) => m.id === id);
     if (known) return known.short;
-    if (geminiId(id)) return 'Gemini';
+    if (geminiId(id)) return modelOf(id).short;
     const [family, ...version] = String(id || 'Claude').replace(/^claude-/, '').split('-');
     return [family.charAt(0).toUpperCase() + family.slice(1), version.join('.')].filter(Boolean).join(' ');
   };
@@ -588,13 +595,14 @@ V.chat = (() => {
     return contents;
   }
 
-  /* One Gemini turn, streamed (`onText` gets the words so far). AiError kinds are turned into ChatError kinds so a
-     blocked network waits and sends later, exactly like Claude. */
-  async function geminiTurn(chat, turn, job, onText) {
+  /* One Gemini turn by `model` (Gemini Fast or Smart), streamed (`onText` gets the words so far). AiError kinds are
+     turned into ChatError kinds so a blocked network waits and sends later, exactly like Claude. */
+  async function geminiTurn(chat, turn, job, onText, model) {
     const contents = await geminiContents(chat, turn);
     const maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
     try {
-      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal, onText });
+      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal, onText,
+        tier: modelOf(model).tier || 'fast' });
     } catch (error) {
       if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
       const kind = (error && error.kind) || 'bad';
@@ -743,7 +751,11 @@ V.chat = (() => {
   /* One turn answered (a new message, Retry of the last, or a waiting turn going out once Claude can be reached).
      `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us. */
   async function answer(chat, turn, { first = false, claim = false } = {}) {
-    const model = useNow(turn.model);  // (Claude switched off: it goes with Gemini)
+    let model = useNow(turn.model);  // (Claude switched off: it goes with Gemini)
+    // A Gemini message goes with the chat's Gemini choice as it is now (a Retry after picking Gemini Smart, or a
+    // message waiting since before, asks Smart); one waiting for Gemini while the chat moved to Claude stays Gemini's.
+    const chosen = modelFor(chat);
+    if (isGemini(model) && isGemini(chosen)) model = chosen;
     const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false };
     busy = job;
     trouble = null;
@@ -759,10 +771,11 @@ V.chat = (() => {
         if (isGemini(model)) {  // Gemini: one call, streamed (no tools or server fallback: ai.js picks the model)
           const reply = fresh(model);
           turn.replies.push(reply);
-          const out = await geminiTurn(chat, turn, job, (words) => { reply.content = [{ type: 'text', text: words }]; showLive(); });
+          const out = await geminiTurn(chat, turn, job, (words) => { reply.content = [{ type: 'text', text: words }]; showLive(); },
+            model);
           reply.content = tidy([{ type: 'text', text: out.text || '' }]);
           reply.usage = out.usage || {};
-          reply.model = model;  // (the Gemini choice; the model Google answered with is in usage.model)
+          reply.model = model;  // (the Gemini choice, Fast or Smart; the model Google answered with is in usage.model)
           // Gemini took it (it answered, or said no): the message is Gemini's from now on, so Retry asks Gemini again.
           // Until then a message meant for Claude keeps Claude's name, and goes to Claude once it's switched on.
           if (out.text || out.stopReason === 'refusal') turn.model = model;
@@ -1498,7 +1511,7 @@ V.chat = (() => {
     if (!chat) return;
     const per = (r) => `$${r.input.toFixed(2)} in · $${r.output.toFixed(2)} out a million tokens`;
     const cents = (d) => `${(d * 100).toFixed(d < 0.001 ? 2 : 1)}¢`;
-    const current = modelOf(modelFor(chat)).id;  // (any "gemini..." id shows as the Gemini choice)
+    const current = modelOf(modelFor(chat)).id;  // (Gemini Smart, or any other "gemini..." id as Gemini Fast)
     // Gemini first; Claude's only while it's switched on (Settings > AI: "Use Claude too").
     const on = V.ai.claudeOn();
     const offered = [...MODELS.filter((m) => m.provider === 'gemini'), ...(on ? MODELS.filter((m) => m.provider !== 'gemini') : [])];

@@ -1,8 +1,9 @@
 /* Vault: the welcome steps after a friend joins with an invite. js/start.js runs them once the friend has chosen their
-   own password (its chooseScreen is the first step): their free Gemini key, then Vault on their home screen, then
-   "You're all set". One screen each, big buttons, dots for how far along they are, and every step can be skipped:
-   Vault works fully without them. Where they've got to is kept in localStorage 'vault-welcome' ({user, step, done}),
-   so closing Vault half-way picks up there next time, for that person only.
+   own password (its chooseScreen is the first step, or joinCodeScreen for someone who scanned a join QR code and
+   picked their password there): their free Gemini key, then Vault on their home screen, then "You're all set". One
+   screen each, big buttons, dots for how far along they are, and every step can be skipped: Vault works fully
+   without them. Where they've got to is kept in localStorage 'vault-welcome' ({user, step, done}), so closing Vault
+   half-way picks up there next time, for that person only.
 
    The Gemini key: "Open Google AI Studio" opens aistudio.google.com/apikey in a new tab; back in Vault, one tap on
    "Paste my key" reads the clipboard in that very tap (iPhones and Chrome only let a page read it during a tap; an

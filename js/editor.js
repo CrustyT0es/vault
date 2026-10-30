@@ -152,9 +152,12 @@ V.editor = (() => {
     && (a.locked ? a.secret === b.secret : a.body === b.body) && paths(a) === paths(b)
     && stable(a.extra || {}) === stable(b.extra || {});
 
-  /* While a locked note's words show on the PC, copying them doesn't go to the shared clipboard. */
+  /* While a locked note's words show, copying them doesn't go to the shared clipboard: on the PC its app stops
+     watching the clipboard, on a phone or a Chromebook "Keep this clipboard in step" only notes what's copied
+     (js/clips.js). */
   function quietClipboard(on) {
     if (V.desktop) V.pc.call('quietClipboard', { on }).catch(() => {});
+    if (V.clips && V.clips.quiet) V.clips.quiet(on);
   }
 
   function setStatus() {

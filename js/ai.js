@@ -5,10 +5,11 @@
    it's off nothing here ever uses a Claude key, Jarvis's included (`claudeOn`: getKey, the PC's makeNotes and every
    brain choice check it). Even with Claude on, Gemini writes the note-taker's notes (the owner: "by default have
    Gemini do the auto notes summary"), or Claude when there's no Gemini key; "Write notes with Claude" (extra.ai.
-   notes_claude, beside the switch, also for every device) hands them to Claude (`brain`). For the note-taker, one
-   request turns a transcript into notes: Gemini, or Claude Haiku at low effort, the cheapest there is (about a third
-   of a cent for an hour of class). The chat streams its own requests, and shares the keys, the prices and the monthly
-   tally kept here.
+   notes_claude, beside the switch, also for every device) hands them to Claude (`brain`). Gemini's notes are Gemini
+   Fast's (the quickest model here) unless "Smarter Gemini notes" (extra.ai.notes_gemini 'smart', every device) hands
+   them to Gemini Smart (Flash first: `notesTier`, 1.11). For the note-taker, one request turns a transcript into
+   notes: Gemini, or Claude Haiku at low effort, the cheapest there is (about a third of a cent for an hour of class).
+   The chat streams its own requests, and shares the keys, the prices and the monthly tally kept here.
 
    The Claude key: the owner's own Claude key, kept in their private file storage at <owner>/private/claude.json, which only
    they can read. The PC puts Jarvis's key there itself (vault/notetaker.py: Python reads .env and uploads it, so it
@@ -62,7 +63,12 @@ V.ai = (() => {
   // for Google's own "latest" names: the newest Flash, then the newest Flash-Lite when Flash isn't offered to this key,
   // its free quota is used up or it's overloaded. Beside them, up to two numbered stable Flash models this key is offered
   // (ListModels, `extras`), as fallbacks; and a chat asks first whichever has been quickest here (`ranked`, 1.9.1).
+  // Two ways of choosing among them (`tier`, 1.11): "Gemini Fast", the default for chats and the note-taker, asks
+  // whichever starts quickest here (Flash-Lite until something has been timed: about a second to start, where Flash
+  // took eight and was often busy); "Gemini Smart" asks Flash first for its better answers, and only moves a model
+  // down when it's failing or slow right now.
   const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+  const [GEMINI_FLASH, GEMINI_LITE] = GEMINI_MODELS;
   const GEMINI_MODEL = GEMINI_MODELS[0];   // the Chat tab's Gemini model
   const GEMINI_KEY_FILE = 'gemini.json';
   // Google says not to rely on a key's format, and changed it in 2026: AI Studio made "AIza..." keys, and since 28 May
@@ -167,6 +173,9 @@ V.ai = (() => {
   /* "Write notes with Claude" (Settings > AI, shown under "Use Claude too" while it's on), the same on every device: off
      unless switched on, so the free Gemini writes the note-taker's notes (brain). Meaningless while Claude is off. */
   const notesClaude = () => ((((V.data.settings || {}).extra || {}).ai || {}).notes_claude) === true;
+  /* Which Gemini writes the notes (Settings > AI, "Smarter Gemini notes", the same on every device): 'smart' only when
+     extra.ai.notes_gemini says so, else 'fast' (absent, or anything else). */
+  const notesTier = () => (((((V.data.settings || {}).extra || {}).ai || {}).notes_gemini) === 'smart' ? 'smart' : 'fast');
   /* Whether claudeOn() is the cloud's word on it: the settings row read since this page started (js/cloud.js). Before
      that, a new or wiped device has no settings at all, and "nothing" must never be taken for "off" (a waiting Claude
      message sent with Gemini, say), nor an old copy on this device for the cloud's newest. `modeReady(ms)` waits for
@@ -256,6 +265,11 @@ V.ai = (() => {
   /* "Write notes with Claude" switched on or off for every device, the same way. */
   async function setNotesClaude(on) {
     await writeAi((ai) => ({ ...ai, notes_claude: !!on }));
+  }
+
+  /* "Smarter Gemini notes" switched on (Gemini Smart writes them) or off (Gemini Fast), for every device, the same way. */
+  async function setNotesGemini(smart) {
+    await writeAi((ai) => ({ ...ai, notes_gemini: smart ? 'smart' : 'fast' }));
   }
 
   /* The settings row changed (here, or synced from another device): when "Use Claude too" is now otherwise than the
@@ -707,7 +721,8 @@ V.ai = (() => {
   // put right doesn't move), never by the date.
   // A slow mark is for the use it was made in: a chat's head start is learned and short, the note-taker's long, so a
   // model that lost a chat's race (or whose chat answer stopped part-way) still keeps its place for notes, and the
-  // other way round.
+  // other way round. One that answered busy, used up or not offered can't answer either right now: marked for both
+  // (outForNow).
   const slowUntil = new Map();  // "<model> <use>" -> until when (performance.now()) it's tried last for that use
   const thinkingStep = new Map();  // "<model> <use>" -> how far down its THINKING list that model had to go
   const slowKey = (model, use) => `${model} ${use === 'notes' ? 'notes' : 'chat'}`;
@@ -748,12 +763,17 @@ V.ai = (() => {
      'vault-gemini-speed' (never the key, never what was said; a device's own network decides this, so it isn't
      synced). A chat asks the quickest first (a model not timed here yet after the ones known to start within the usual
      head start, a model found by ListModels only once it has been timed, a failing one after those, one that lost a race
-     a moment ago last, as before), and gives it a head start that fits it (`headFor`). The note-taker keeps Flash first
-     (its notes are better) unless Flash keeps failing or kept losing its races here. Storage that can't be used (a
+     a moment ago last, as before), and gives it a head start that fits it (`headFor`). Storage that can't be used (a
      private window, a locked-down Chromebook) only means the record lasts until the page closes. Two pages of Vault
      open on one device (the installed app and a Chrome tab) share the record: each reads what's kept before using or
      changing it, so neither writes its older copy over what the other learned. Everything kept is dated, and expires
-     by its age; one dated later than now (kept while this device's clock was ahead) counts as expired. */
+     by its age; one dated later than now (kept while this device's clock was ahead) counts as expired.
+
+     1.11, from the owner's next Check Gemini (Flash busy after 8.1 s, Flash-Lite 3.1 s, a numbered Flash busy, a
+     numbered Flash-Lite 1.0 s, and still Flash's "latest" name asked first): a timing from Check Gemini counts at
+     once (`settled`: the owner asked how quick each one is, so that's no luck), a model that answers busy, used up or
+     not offered goes last at once, for chats and notes alike (`markSlow` for both, besides failedHere), and the
+     note-taker's notes are Gemini Fast's too unless the owner asks for Gemini Smart (ranked's `tier`). */
   const SPEED_KEY = 'vault-gemini-speed';
   const SPEED_KEEP = 2 * 24 * 3600 * 1000;  // older timings are forgotten (networks and Google's models change)
   const SPEED_SAMPLES = 6;                  // timings kept per model and use (chat, notes)
@@ -781,13 +801,14 @@ V.ai = (() => {
     } catch (error) { /* a private window, or storage switched off: in memory only */ }
   }
 
-  let speed = null;       // { models: { <model>: { chat: [[ms, at, ok]], notes: [...], fails, failAt, version } } }
+  let speed = null;       // { models: { <model>: { chat: [[ms, at, ok(, 1)]], notes: [...], fails, failAt, version } } }
   let speedText;          // the text in storage `speed` was read from or written as (undefined: none read yet)
 
-  /* Timings as kept: [ms to the first words (or, when not ok, how long it had gone without any), when, 1 = it answered]. */
+  /* Timings as kept: [ms to the first words (or, when not ok, how long it had gone without any), when, 1 = it answered],
+     and a fourth 1 when Check Gemini timed it (1.11; one kept by an older Vault has three, and reads as a chat's). */
   const samplesOf = (list) => (Array.isArray(list) ? list : [])
     .filter((s) => Array.isArray(s) && Number.isFinite(s[0]) && s[0] >= 0 && Number.isFinite(s[1]))
-    .map((s) => [Math.round(s[0]), s[1], s[2] ? 1 : 0]).slice(-SPEED_SAMPLES);
+    .map((s) => [Math.round(s[0]), s[1], s[2] ? 1 : 0, ...(s[3] ? [1] : [])]).slice(-SPEED_SAMPLES);
 
   /* A record from the text kept in storage (anything unreadable in it is left out). */
   function readRecord(text) {
@@ -843,19 +864,28 @@ V.ai = (() => {
     const mid = Math.floor(times.length / 2);
     return times.length % 2 ? times[mid] : Math.round((times[mid - 1] + times[mid]) / 2);
   }
-  /* typical(), once there are two timings to go on (one quick answer could be luck); null before that. */
-  const settled = (model) => (recent(model, 'chat').length >= 2 ? typical(model, 'chat') : null);
-  /* `model` (for `use`) started its answer after `ms` (`ok`), or went `ms` without starting it (lost a race, too slow). */
-  function timed(model, use, ms, ok) {
+  /* typical(), once there are two timings to go on (one quick answer in a chat could be luck), or the newest is Check
+     Gemini's (the owner asked how quick each one is: that counts at once); null before that. */
+  const settled = (model) => {
+    const times = recent(model, 'chat');
+    return times.length >= 2 || (times.length && times[times.length - 1][3]) ? typical(model, 'chat') : null;
+  };
+  /* `model` (for `use`) started its answer after `ms` (`ok`), or went `ms` without starting it (lost a race, too slow);
+     `check`: Check Gemini timed it. */
+  function timed(model, use, ms, ok, check = false) {
     if (!MODEL_NAME.test(model) || !Number.isFinite(ms)) return;
     const kind = use === 'notes' ? 'notes' : 'chat';
     changeRecord((models) => {
       const e = entryIn(models, model);
       e[kind] = [...(e[kind] || []).filter((s) => lately(s[1], SPEED_KEEP)),
-        [Math.max(0, Math.round(ms)), Date.now(), ok ? 1 : 0]].slice(-SPEED_SAMPLES);
+        [Math.max(0, Math.round(ms)), Date.now(), ok ? 1 : 0, ...(check ? [1] : [])]].slice(-SPEED_SAMPLES);
       if (ok) { e.fails = 0; e.failAt = 0; }
     });
   }
+  // Failures that say a model can't answer now (overloaded, its free quota used up, not offered to this key): it's tried
+  // last at once, for chats and notes alike, besides counting as a failure (1.11; before, it took two in a row).
+  const OUT_FOR_NOW = new Set(['busy', 'quota', 'missing']);
+  const outForNow = (model) => { markSlow(model, 'chat'); markSlow(model, 'notes'); };
   /* `model` failed: busy, its free quota used up, not offered to this key, it refused the key, or its answer stopped
      coming part-way. Failures only add up while each comes within FAIL_FOR of the one before: one long ago and one now
      aren't "in a row". */
@@ -1037,23 +1067,41 @@ V.ai = (() => {
     return table[use] || table.chat;
   }
 
-  /* The models to ask, in order, for `use` ('chat' or 'notes'; `wait`: the check on Save, the "latest" names only).
-     A chat: the quickest here first, then models found by ListModels and not timed here yet, then failing ones, then
-     any that lost a race for this use a moment ago (slowUntil), each group in Vault's own order otherwise. "Quickest"
-     goes by the usual time once a model has two timings here; until then a model counts as starting within the usual
-     head start (waits.head), or as its one timing when that was slower: one slow start moves a model down at once,
-     but only a second quick one moves it up. The note-taker: Vault's own order (Flash first), a model that keeps
-     failing or kept losing its races here moved after the rest, one that lost a moment ago last. */
-  function ranked(use = 'chat', { wait = false } = {}) {
-    const base = wait ? [...GEMINI_MODELS] : [...GEMINI_MODELS, ...extras()];
+  /* Vault's own order of the models for `tier`, before anything learned here moves them: Gemini Fast Flash-Lite first
+     (the "latest" name, then the numbered ones), Gemini Smart Flash first (likewise), each with its kind's numbered
+     models straight after it. */
+  function baseOrder(tier) {
+    const found = extras();
+    const lite = found.filter((id) => /-lite$/.test(id));
+    const flash = found.filter((id) => !/-lite$/.test(id));
+    return tier === 'smart' ? [GEMINI_FLASH, ...flash, GEMINI_LITE, ...lite] : [GEMINI_LITE, GEMINI_FLASH, ...lite, ...flash];
+  }
+
+  /* The models to ask, in order, for `use` ('chat' or 'notes') and `tier` ('fast' or 'smart'; `wait`: the check on
+     Save, the "latest" names only, in their own order).
+     Gemini Fast (chats and notes alike): the quickest here first, then models found by ListModels and not timed here
+     yet, then failing ones (and for notes, ones that lost their last two notes races here), then any that lost a race
+     for this use a moment ago or just answered busy (slowUntil), each group in baseOrder otherwise. "Quickest" goes by
+     the usual time in chats (notes are made too seldom to time them well) once a model has two timings here, or one
+     from Check Gemini; until then a model counts as starting within the usual head start (waits.head), or as its one
+     timing when that was slower: one slow start moves a model down at once, but only a second quick one moves it up.
+     Gemini Smart: baseOrder (Flash first, for its better answers), with only those groups moving a model down. As it
+     never goes by time, a model ListModels found is a fallback there until it has answered here, and again whenever
+     the last time it was timed here it didn't: an untried numbered Flash asked second would keep Flash-Lite waiting
+     out a whole first-words wait whenever both Flashes are busy or silent (the owner's numbered Flash was busy). */
+  function ranked(use = 'chat', { wait = false, tier = 'fast' } = {}) {
+    const base = wait ? [...GEMINI_MODELS] : baseOrder(tier);
     const unknown = Math.max(0, Number(waits.head) || 0);
     const rank = (model) => {
       if (isSlow(model, use)) return [3, 0];
       if (wait) return [0, 0];
-      if (failing(model)) return [2, 0];
-      if (use === 'notes') return [verySlow(model) ? 2 : 0, 0];
-      const timings = recent(model, 'chat').length;
-      if (!timings && !GEMINI_MODELS.includes(model)) return [1, 0];  // (found, not timed: a fallback until it is)
+      if (failing(model) || (use === 'notes' && verySlow(model))) return [2, 0];
+      const times = recent(model, 'chat');
+      const answered = times.length > 0 && !!times[times.length - 1][2];
+      // (found, not timed: a fallback until it is; for Gemini Smart, until it answered the last time it was timed)
+      if (!GEMINI_MODELS.includes(model) && !(tier === 'smart' ? answered : times.length)) return [1, 0];
+      if (tier === 'smart') return [0, 0];
+      const timings = times.length;
       const usual = settled(model);
       return [0, usual !== null ? usual : timings ? Math.max(typical(model, 'chat'), unknown) : unknown];
     };
@@ -1063,7 +1111,8 @@ V.ai = (() => {
 
   /* A chat's head start for `model` (ms): one and a half times its usual time here, at least waits.headMin (a quick
      model gets a moment's grace: a normal slow moment never sends a second copy of the request, which counts against
-     the free daily limit like any other) and at most waits.head; waits.head until it has two timings here. */
+     the free daily limit like any other) and at most waits.head; waits.head until its usual time is known here
+     (`settled`). */
   function headFor(model) {
     const most = Math.max(0, Number(waits.head) || 0);
     const usual = settled(model);
@@ -1247,9 +1296,10 @@ V.ai = (() => {
     }
   }
 
-  /* One request with `sending` as the key, to the models `ranked` puts first (for a chat, the quickest here; one that
-     was slow lately, last). The first model is asked at once; if it hasn't started its answer after its head start
-     (`headFor` for a chat, waits.head for one with pictures or PDFs (HEAVY_BODY), waits.notesHead for notes, plus a
+  /* One request with `sending` as the key, to the models `ranked` puts first for `use` and `tier` (Gemini Fast, the
+     default: the quickest here; Gemini Smart: Flash; either way one that was slow or busy lately, last). The first
+     model is asked at once; if it hasn't started its answer after its head start (`headFor` for a chat, waits.head
+     for one with pictures or PDFs (HEAVY_BODY), waits.notesHead for notes, plus a
      little for the request going up), the next one is asked too, and when it fails, the next at once (AT_ONCE at most
      at once). The first to start answering wins and the others are stopped (and one asked before it, tried last for a
      while). One Google doesn't offer this key, whose free quota is used up, that's overloaded or too slow to start, or
@@ -1261,8 +1311,9 @@ V.ai = (() => {
      speaks for itself: the others are still asked, and its "no" is only the answer when none of them could (never
      outweighing a busy or used-up Gemini, which waits and goes again by itself, but outweighing any word about the key:
      it took the key). What each model did is remembered on this device (`timed`, `failedHere`; an answer that stopped
-     coming part-way on Google's side counts as a failure, never as a quick start; nothing that may have been this
-     device's doing, geminiTry's `here`, counts against a model), except for the check on Save.
+     coming part-way on Google's side counts as a failure, never as a quick start; one busy, used up or not offered is
+     also tried last a while, for chats and notes; nothing that may have been this device's doing, geminiTry's `here`,
+     counts against a model), except for the check on Save.
      `wait` (ms): how long the check on Save waits for each; otherwise `waits` by `use`. Returns geminiTry's answer, or
      throws an AiError: 'stopped', 'bad' (Google turned this request down, or this message's own files are too big to
      go up on this connection), or, when no model answered: 'quota' (Google took the key, its free quota is used up),
@@ -1272,7 +1323,7 @@ V.ai = (() => {
      model's (none took the key), 'offline' (no answer: no internet, a network that blocks Google), else 'bad' (none
      offered). */
   async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0, onText = null,
-    use = 'chat' } = {}) {
+    use = 'chat', tier = 'fast' } = {}) {
     if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
     const notes = use === 'notes';
     const first = wait || (notes ? waits.notesFirst : waits.first);
@@ -1291,7 +1342,7 @@ V.ai = (() => {
     const found = (model) => !GEMINI_MODELS.includes(model);  // (one ListModels found)
     if (learn) discover(sending);  // (in the background: this key's other stable Flash models, kept a day)
     const order = [];
-    const refill = () => ranked(use, { wait }).forEach((m) => { if (!order.includes(m)) order.push(m); });
+    const refill = () => ranked(use, { wait, tier }).forEach((m) => { if (!order.includes(m)) order.push(m); });
     refill();
     const failed = [];
     const runs = [];     // { model, at, ctl, done, seen, lost, wordsAt, result | error }
@@ -1393,7 +1444,10 @@ V.ai = (() => {
             timed(run.model, use, clock() - run.at, false);
           }
           const failure = ['busy', 'quota', 'missing', 'refused'].includes(tried.trouble);
-          if (learn && !tried.here && failure) failedHere(run.model);
+          if (learn && !tried.here && failure) {
+            failedHere(run.model);
+            if (OUT_FOR_NOW.has(tried.trouble)) outForNow(run.model);  // (last at once, for chats and notes)
+          }
           failed.push(tried);
         }
         if (learn && !winner) refill();  // (models ListModels found meanwhile, after the rest)
@@ -1467,12 +1521,15 @@ V.ai = (() => {
      `onText` gets the words so far as they come. Returns { text, stopReason, usage } like `direct` (stopReason also
      'stopped', or 'cut_off' for an answer that stopped coming part-way), with usage.gemini so it's priced as free,
      usage.model the model that answered (and usage.version, the one Google says that is). A used-up free quota is
-     'busy' (why: 'quota'), so it waits and goes again later like a busy Claude. */
-  async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal, onText = null, use = 'chat' } = {}) {
+     'busy' (why: 'quota'), so it waits and goes again later like a busy Claude. `tier`: 'fast' (Gemini Fast, the
+     quickest here) or 'smart' (Gemini Smart, Flash first). */
+  async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal, onText = null, use = 'chat',
+    tier = 'fast' } = {}) {
     const sending = await getGeminiKey();
     let answer;
     try {
-      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use });
+      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use,
+        tier: tier === 'smart' ? 'smart' : 'fast' });
     } catch (error) {
       if (error.kind === 'key') geminiKey = null;  // forgotten, so a key set up again elsewhere is read next time
       if (error.kind === 'quota') throw Object.assign(new AiError('busy', error.message), { why: 'quota' });
@@ -1543,12 +1600,13 @@ V.ai = (() => {
     return { text: answer.text || '', stopReason: answer.stop_reason || '', usage: answer.usage || {} };
   }
 
-  /* The note-taker's request to the free Gemini (its key fetched in time, or it's "your cloud is taking too long").
-     `onProgress` gets the words written so far; an answer that stopped coming part-way is 'busy' (made again later). */
+  /* The note-taker's request to the free Gemini (its key fetched in time, or it's "your cloud is taking too long"), by
+     Gemini Fast unless "Smarter Gemini notes" is on (notesTier). `onProgress` gets the words written so far; an answer
+     that stopped coming part-way is 'busy' (made again later). */
   async function geminiNotes(system, text, signal = null, onProgress = null) {
     await within(getGeminiKey(), waits.look, cloudSlow());
     const answer = await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }], use: 'notes', signal,
-      onText: onProgress ? (so) => onProgress(countWords(so)) : null });
+      tier: notesTier(), onText: onProgress ? (so) => onProgress(countWords(so)) : null });
     if (answer.stopReason === 'cut_off') throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });
     return answer;
   }
@@ -1635,8 +1693,10 @@ V.ai = (() => {
      (what a "latest" name points to now, as Google says), ok, trouble (geminiTrouble's kinds, 'slow', 'offline'),
      status (the HTTP status), answered (ms to Google's answer), words (ms to the first words), thinking (the setting
      sent, null: none), thoughts (tokens it thought for, when Google says), finish, said (Google's words, never the
-     key) }. Each is remembered like a chat's (`timed`), so `first` is the model a chat asks first now, and `usual` how
-     long it usually takes here. Only ever to generativelanguage.googleapis.com, like every Gemini request. */
+     key) }. Each is remembered like a chat's (`timed`, marked as the check's, so it counts at once; a busy, used-up or
+     missing one is tried last at once, and one that answers is no longer held back by a slow mark), so `first` is the
+     model a Gemini Fast chat asks first now, `usual` how long it usually takes here, and `smart` the model a Gemini
+     Smart chat asks first. Only ever to generativelanguage.googleapis.com, like every Gemini request. */
   async function checkGemini() {
     const sending = await getGeminiKey();
     const offered = await listModels(sending, waits.check);
@@ -1656,10 +1716,16 @@ V.ai = (() => {
       const answer = tried.answer || null;
       if (answer && answer.cut && !answer.here) failedHere(model);  // (Google stopped it part-way: as in a chat)
       else if (answer && answer.cut) { /* (cut off at this end: nothing held either way) */ }
-      else if (answer && typeof timing.words === 'number') timed(model, 'chat', timing.words, true);
-      else if (tried.here) { /* (this device's doing, maybe: nothing held against the model) */ }
-      else if (tried.trouble === 'slow') timed(model, 'chat', performance.now() - began, false);
-      else if (['busy', 'quota', 'missing', 'refused'].includes(tried.trouble)) failedHere(model);
+      else if (answer && typeof timing.words === 'number') {
+        timed(model, 'chat', timing.words, true, true);
+        slowUntil.delete(slowKey(model, 'chat'));  // (it answers now, and how quickly decides its place)
+        slowUntil.delete(slowKey(model, 'notes'));
+      } else if (tried.here) { /* (this device's doing, maybe: nothing held against the model) */ }
+      else if (tried.trouble === 'slow') timed(model, 'chat', performance.now() - began, false, true);
+      else if (['busy', 'quota', 'missing', 'refused'].includes(tried.trouble)) {
+        failedHere(model);
+        if (OUT_FOR_NOW.has(tried.trouble)) outForNow(model);
+      }
       if (answer && timing.version) pointsTo(model, timing.version);
       out.push({ model, version: timing.version || (answer && answer.version) || '', ok: !!answer, trouble: tried.trouble || '',
         status: timing.status || 0, answered: timing.answered, words: timing.words,
@@ -1669,8 +1735,9 @@ V.ai = (() => {
     };
     for (const model of GEMINI_MODELS) await one(model);
     for (const model of extras()) await one(model);  // (after the "latest" names: what they point to isn't asked twice)
-    const lead = ranked('chat')[0] || GEMINI_MODELS[0];
-    return { network, models: out, first: lead, usual: typical(lead, 'chat') };
+    const lead = ranked('chat')[0] || GEMINI_LITE;
+    return { network, models: out, first: lead, usual: typical(lead, 'chat'),
+      smart: ranked('chat', { tier: 'smart' })[0] || GEMINI_FLASH };
   }
 
   const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
@@ -1719,10 +1786,11 @@ V.ai = (() => {
     return `${name}: ${what}${answered && r.trouble !== 'slow' ? ` — ${answered}` : ''}`;
   }
 
-  /* Which model a chat asks first now, in plain words (after Check Gemini). */
+  /* Which model each Gemini asks first now, in plain words (after Check Gemini). */
   function firstLine(found) {
     const usual = typeof found.usual === 'number' ? ` (about ${secs(found.usual)} to its first words here)` : '';
-    return `Chat asks ${found.first} first now${usual}.`;
+    const smart = found.smart ? ` Gemini Smart asks ${found.smart} first now.` : '';
+    return `Gemini Fast asks ${found.first} first now${usual}.${smart}`;
   }
 
   /* Whether Claude or the free Gemini can be used here: Claude only while it's switched on, from the cloud (a phone, a
@@ -1975,6 +2043,16 @@ V.ai = (() => {
         : 'Gemini writes your notes now, for free.') });
   }
 
+  /* "Smarter Gemini notes", shown while Gemini writes the notes (for every device too): off, Gemini Fast writes them
+     (the quickest model here); on, Gemini Smart (Flash first). */
+  function notesTierSwitch(ui) {
+    return accountSwitch(ui, { name: 'Smarter Gemini notes', cls: 'ai-notes-tier-switch', on: notesTier() === 'smart',
+      set: setNotesGemini,
+      hint: 'Off: Gemini Fast writes your notes (quick). On: Gemini Smart writes them (better, but slower and busy more often).',
+      said: (want) => (want ? 'Gemini Smart writes your notes now: better, a little slower.'
+        : 'Gemini Fast writes your notes now: quick.') });
+  }
+
   /* "Set up free Gemini" (the Chat tab, the note-taker): Settings > AI, at the Gemini key's row (its box ready for the
      key where there's a keyboard), or (`what` 'claude') at "Use Claude too". */
   function setUp(what = 'gemini') {
@@ -2053,12 +2131,13 @@ V.ai = (() => {
         V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Gemini speed' }), hint), timeBtn), net, times,
         lead);
     }
-    // Gemini first (the main thing), then "Use Claude too"; Claude's key, its check and the month's spending (the
-    // monthly limit is Claude's alone) only while it's on.
+    // Gemini first (the main thing, and which Gemini writes the notes while Gemini does), then "Use Claude too";
+    // Claude's key, its check and the month's spending (the monthly limit is Claude's alone) only while it's on.
     const on = claudeOn();
     return ui.card('AI',
       geminiKeyLine(ui),
       geminiRow,
+      has('gemini') && brain() === 'gemini' ? notesTierSwitch(ui) : null,
       claudeSwitch(ui),
       on ? notesSwitch(ui) : null,
       on ? keyLine(ui) : null,
@@ -2085,10 +2164,11 @@ V.ai = (() => {
     removeKey, callGemini, checkGemini, timingLine, networkLine, getGeminiKey, saveGeminiKey, removeGeminiKey,
     forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2, invited, KEPT_THEIRS,
     // How quickly each Gemini model starts answering here, and the others this key may use (tests, Settings).
-    speed: { order: (use = 'chat') => ranked(use), headFor, typical, extras, failing, forget: forgetSpeed,
+    speed: { order: (use = 'chat', tier = 'fast') => ranked(use, { tier }), headFor, typical, extras, failing,
+      slow: (model, use = 'chat') => isSlow(model, use), forget: forgetSpeed,
       record: () => JSON.parse(JSON.stringify(record())), forgetList },
     state: () => known, ready: () => has(brain()),  // (the brain the note-taker would use is set up here)
-    has, brain, claudeOn, notesClaude, modeKnown, modeReady, setClaude, setNotesClaude, setUp, recheck, lacksGemini,
-    geminiKnown, keysSettled,
+    has, brain, claudeOn, notesClaude, notesTier, modeKnown, modeReady, setClaude, setNotesClaude, setNotesGemini, setUp,
+    recheck, lacksGemini, geminiKnown, keysSettled,
     MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS, waits };  // (waits: tests shorten them)
 })();

@@ -10,6 +10,12 @@
    invite link (or its QR code) signs the friend in with it, and then they choose their own password (js/start.js's
    chooseScreen), which ends it.
 
+   Join QR codes (the helper's version 2): instead of typing in each friend, the owner shows one QR code ("Show QR
+   code") that anyone may scan for the next 30 minutes to make their own Vault in the owner's cloud, typing their own
+   name, e-mail and password on their own phone (js/start.js's joinCodeScreen). Only the helper makes the codes (and
+   the accounts made with them: it checks the code itself, as whoever scans it has no sign-in yet), so the PC asks it
+   too, even with the secret key here. "Stop this code" stops it (and every code shown before it) at once.
+
    "Stats" (the owner, wherever invites work): people joined and waiting, who was active lately, devices and Vault
    versions in use, notes, files and space, feedback waiting (vault/stats.py says how). Counts, sizes and times only,
    never what anyone wrote. Downloads aren't counted: nothing counts them, and Vault has no trackers.
@@ -26,10 +32,16 @@
 
 V.invites = (() => {
   const SLUG = 'vault-admin';
+  const PHONE_URL = 'https://crustyt0es.github.io/vault/';  // vault/__init__.py's, for a device that doesn't say
+  const JOIN_SINCE = 2;  // the helper's first version that makes join codes (vault/helper.py's JOIN_SINCE)
+  const JOINED_SLACK = 5000;  // the cloud's sign-in service and its helper may not quite agree on the time
+  const waits = { tick: 30000, poll: 15000 };  // the join sheet's countdown, and asking who joined (tests shorten them)
   const TOKENS_PAGE = 'https://supabase.com/dashboard/account/tokens';
   const GONE = 'Vault\'s helper isn\'t in your cloud any more. Set it up again in Vault on your PC: Settings > Invite people > Set up.';
   const KIND_NAMES = { pc: 'PC', android: 'Android phone', iphone: 'iPhone', ipad: 'iPad', chromebook: 'Chromebook', browser: 'Browser' };
-  let state = null;     // { how: 'pc' | 'old' | 'helper', on, helper (its note), local (the key on this PC), current }
+  // { how: 'pc' | 'old' | 'helper', on, helper (its note), local (the key on this PC), current, version (the helper's
+  // own, as it said hello: phones and Chromebooks) }
+  let state = null;
   let people = null;    // the people the owner invited, once asked
   let asking = null;
   let trouble = '';
@@ -78,7 +90,8 @@ V.invites = (() => {
     throw Object.assign(new Error(message), { status: response.status, code: (answer && answer.error) || '' });
   }
 
-  /* hello / people / invite / remove / stats, wherever this device does them. */
+  /* hello / people / invite / remove / stats / join-open / join-stop, wherever this device does them (join codes
+     always through the helper: on the PC, Python sees to that). */
   async function call(action, args = {}) {
     if (newPc()) return V.pc.call('adminCall', { action, args });
     if (oldPc()) {
@@ -120,8 +133,9 @@ V.invites = (() => {
         now = { how: 'old', on: !!found.on && !found.invited, local: !!found.on };
       } else {
         const note = await findHelper();
-        if (note) await helperCall('hello');  // there, and answering this owner
-        now = { how: 'helper', on: !!note, helper: note };
+        const said = note ? await helperCall('hello') : null;  // there, and answering this owner
+        now = { how: 'helper', on: !!note, helper: note,
+          version: Number(said && said.version) || Number(note && note.version) || 0 };
       }
       state = now;
       people = state.on ? ((await call('people')).people || []) : null;
@@ -314,6 +328,13 @@ V.invites = (() => {
       c: V.inviteCode(made.code), n: made.name }))}`;
   }
 
+  /* A join QR code's link (vault/invites.py's join_link makes the same): this cloud's address and public key, the
+     helper's join code, and the owner's first name for "Join Reese's Vault". */
+  function joinLinkFor(token, name = '') {
+    const c = V.config || {};
+    return `${c.phoneUrl || PHONE_URL}#join=${b64url(JSON.stringify({ u: c.url, k: c.key, t: token, n: name }))}`;
+  }
+
   /* The invite to hand over: the link (and its QR code), and the code itself. */
   function show(made) {
     const first = String(made.name || '').split(' ')[0] || 'them';
@@ -338,6 +359,182 @@ V.invites = (() => {
     });
   }
 
+  /* -- join QR codes (the helper's version 2) */
+
+  const leftWords = (ms) => (ms >= 60000 ? `Works for ${plural(Math.floor(ms / 60000), 'more minute')}`
+    : 'Works for less than a minute more');
+
+  /* "Scan to join": a new join code's QR code, how long it still works and who has joined with it so far (asked
+     every waits.poll while it shows). The time left is counted on this device from the minutes the helper gave, so a
+     phone whose clock is off still counts right; who joined since the code was made goes by the cloud's own clock.
+     Closing it leaves the code working until it runs out. */
+  function joinSheet(ui) {
+    const first = String((V.data.user || {}).name || '').trim().split(/\s+/)[0] || '';
+    const qrBox = V.h('div.join-qr-box');
+    const left = V.h('p.join-left', { role: 'status' });
+    const joined = V.h('p.join-joined');
+    const buttons = V.h('div.setting-buttons.join-buttons');
+    const problem = V.h('p.error-text', { role: 'alert' });
+    let code = null;  // { token, link, ends (this device's clock), since (the cloud's), stopped, over }
+    let names = [];
+    let closed = false;
+    let busy = false;
+    let polling = false;
+    let ticker = null;
+    let poller = null;
+
+    const blank = (icon, text) => V.h('div.join-blank', {}, icon ? V.icon(icon) : V.h('div.spinner'), V.h('span', { text }));
+    const showJoined = () => {
+      joined.textContent = names.length ? `Joined so far: ${names.join(', ')}` : 'Nobody has joined with it yet.';
+    };
+
+    /* The code's QR and its buttons, drawn again only when the code changes (a new one, run out or stopped). */
+    function drawCode() {
+      if (code.over) {
+        V.clear(qrBox, blank(code.stopped ? 'x' : 'clock', code.stopped ? 'Stopped' : 'Run out'));
+        V.clear(buttons, V.button('New code', { kind: 'primary', icon: 'restore', onClick: make }));
+        return;
+      }
+      const link = code.link;
+      V.clear(qrBox, V.qr(link, 300, 'QR code to join your Vault'));
+      V.clear(buttons,
+        !V.desktop && navigator.share ? V.button('Share', { icon: 'share', onClick: () => {
+          navigator.share({ title: 'Join my Vault', text: 'Make your own Vault with this link (it only works for a little while):',
+            url: link }).catch(() => {});
+        } }) : null,
+        V.button('Copy link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Link copied.'); } }),
+        V.button('Stop this code', { kind: 'danger-quiet', onClick: stop }));
+    }
+
+    /* How long it still works (every waits.tick, and right when it runs out). */
+    function tick() {
+      clearTimeout(ticker);
+      if (closed || !code) return;
+      const ms = code.ends - Date.now();
+      const over = code.stopped || ms <= 0;
+      if (over !== code.over) {
+        code.over = over;
+        drawCode();
+      }
+      left.textContent = code.stopped ? 'This code was stopped.' : over ? 'This code has run out.' : leftWords(ms);
+      if (!over) ticker = setTimeout(tick, Math.max(20, Math.min(waits.tick, ms + 20)));
+    }
+
+    async function make() {
+      if (busy || closed) return;
+      busy = true;
+      problem.textContent = '';
+      left.textContent = '';
+      V.clear(qrBox, blank('', 'Making a code...'));
+      V.clear(buttons);
+      try {
+        const made = await call('join-open');
+        if (closed) return;
+        const minutes = Number(made.minutes) || 30;
+        const ends = Date.parse(made.expires || '');
+        const since = Number.isFinite(ends) ? ends - minutes * 60000 : Date.now();
+        code = { token: made.token, link: joinLinkFor(made.token, first), ends: Date.now() + minutes * 60000,
+          since: since - JOINED_SLACK, stopped: false, over: false };
+        names = [];
+        showJoined();
+        drawCode();
+        tick();
+      } catch (error) {
+        if (closed) return;
+        code = null;
+        problem.textContent = offline(error) ? 'You\'re offline. Try again once you\'re back online.' : (error.message || String(error));
+        V.clear(qrBox, blank('alert', 'No code yet'));
+        V.clear(buttons, V.button('Try again', { icon: 'restore', onClick: make }));
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function stop() {
+      if (busy || !code || code.over) return;
+      const sure = await V.confirm('Stop this code?', 'Nobody can join with it any more (nor with a code you showed before '
+        + 'it). Everyone who already joined keeps their Vault.', { ok: 'Stop it', danger: true });
+      if (!sure || busy || !code) return;
+      busy = true;
+      try {
+        await call('join-stop');
+        code.stopped = true;
+        V.toast('That code doesn\'t work any more.');
+        tick();
+      } catch (error) {
+        V.problem(error);
+      } finally {
+        busy = false;
+      }
+    }
+
+    /* Who has joined with this code (people the helper made with a join code since it was made). Offline, or with
+       the helper busy, the last list stays. */
+    async function poll() {
+      if (closed || polling || !code) return;
+      polling = true;
+      try {
+        const answer = await call('people');
+        if (closed || !code) return;
+        names = ((answer && answer.people) || []).filter((person) => person.via === 'qr'
+          && Date.parse(person.invitedAt || '') >= code.since).map((person) => person.name || person.email);
+        showJoined();
+      } catch (error) {
+        /* as it was */
+      } finally {
+        polling = false;
+      }
+    }
+
+    V.sheet({
+      title: 'Scan to join',
+      wide: true,
+      content: [
+        V.h('div.connect.join-connect', {}, qrBox, V.h('div.join-about', {},
+          V.h('p.join-how', { text: 'Point your phone\'s camera at this code.' }), left, joined)),
+        buttons, problem,
+        V.h('p.hint.join-hint', { text: 'Closing this keeps the code working until it runs out. Only show it to people you '
+          + 'want in your Vault cloud.' })],
+      actions: [{ label: 'Done', kind: 'primary' }],
+      onClose: () => {
+        closed = true;
+        clearTimeout(ticker);
+        clearInterval(poller);
+        refresh(ui);  // (whoever joined shows in the card)
+      },
+    });
+    poller = setInterval(poll, waits.poll);
+    make();
+  }
+
+  /* The card's "Join with a QR code" row: it takes the helper, at version 2 or newer. */
+  function joinRow(ui) {
+    const title = 'Join with a QR code';
+    const about = 'Anyone who scans it in the next 30 minutes gets their own Vault here: they type their name, e-mail and a password.';
+    const showButton = (disabled) => V.button('Show QR code', { kind: 'primary', icon: 'qr', disabled,
+      onClick: () => joinSheet(ui) });
+    if (state.how === 'helper') {
+      return state.version >= JOIN_SINCE ? ui.line(title, about, showButton(false))
+        : ui.line(title, 'Update the helper in Vault on your PC first (Settings > Invite people > Update). No Update there? '
+          + 'Open Jarvis and click Update first.', null);
+    }
+    if (state.how !== 'pc') return null;  // (1.8's PC part: a Jarvis update brings the helper first)
+    if (!(Number(state.current) >= JOIN_SINCE)) {
+      // This page is newer than the PC's own Vault part, which can't make join codes or put in a helper that can.
+      return ui.line(title, V.pc && V.pc.standalone && V.pc.standalone()
+        ? 'Install the newest Vault on this PC (its setup-vault.bat) first: this Vault can\'t make join codes yet.'
+        : 'Update Jarvis first (open Jarvis and click Update): this Vault can\'t make join codes yet.', showButton(true));
+    }
+    if (!state.helper) {
+      return ui.line(title, 'Join codes need Vault\'s helper in your cloud: press Set up below (once, with a Supabase access '
+        + 'token).', null);
+    }
+    if (Number(state.helper.version) < JOIN_SINCE) {
+      return ui.line(title, 'Update the helper below first: join codes need its newest version.', showButton(true));
+    }
+    return ui.line(title, about, showButton(false));
+  }
+
   async function remove(ui, person) {
     const who = person.name || person.email;
     const sure = await V.confirm(`Remove ${who}?`, `${who}'s account is deleted with everything in it: their notes, files and `
@@ -355,8 +552,10 @@ V.invites = (() => {
 
   function personLine(ui, person) {
     const waiting = person.state === 'waiting';
-    const said = waiting ? (person.signedIn ? 'Signed in, hasn\'t chosen a password yet' : `Waiting · invited ${V.ago(person.invitedAt)}`)
-      : `Joined${person.signedIn ? ` · last signed in ${V.ago(person.signedIn)}` : ''}`;
+    const since = person.signedIn ? ` · last signed in ${V.ago(person.signedIn)}` : '';
+    const said = person.via === 'qr' ? `Joined with the QR code${since}`  // (their own password from the start)
+      : waiting ? (person.signedIn ? 'Signed in, hasn\'t chosen a password yet' : `Waiting · invited ${V.ago(person.invitedAt)}`)
+        : `Joined${since}`;
     const row = ui.line(person.name || person.email, `${person.email} · ${said}`, V.h('div.setting-buttons', {},
       waiting ? V.button('New code', { onClick: async () => {
         try { show(await call('invite', { name: person.name, email: person.email })); } catch (error) { V.problem(error); }
@@ -404,7 +603,7 @@ V.invites = (() => {
     }
     if (!state.on) return offCard(ui);
     const rows = [ui.line('Invite someone', 'They get a link that signs them in once; then they choose their own password.',
-      V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) }))];
+      V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) })), joinRow(ui)];
     if (trouble) {
       rows.push(ui.line('Couldn\'t load the people you invited', offline(trouble) ? 'You\'re offline.' : trouble, tryAgain(ui)));
     }
@@ -478,7 +677,7 @@ V.invites = (() => {
       V.h('div.setting-buttons.stats-foot', {}, V.h('span.hint', { text: `Counted ${V.ago(s.at)}` }), again));
   }
 
-  return { card, statsCard, state: () => state, refresh, call, linkFor };
+  return { card, statsCard, state: () => state, refresh, call, linkFor, joinLinkFor, waits };
 })();
 
 /* Each device's line in its person's settings row: { kind, label, version, seen }, under an id of its own (each

@@ -22,8 +22,8 @@ V.settings = (() => {
     return `${c.phoneUrl}#connect=${b64url(JSON.stringify({ u: c.url, k: c.key, e: (V.data.user || {}).email || '' }))}`;
   };
 
-  /* A QR code as an SVG drawing (dark squares on white, which every phone camera reads). */
-  V.qr = (text, size = 220) => {
+  /* A QR code as an SVG drawing (dark squares on white, which every phone camera reads). `label` says what it's for. */
+  V.qr = (text, size = 220, label = 'QR code for your phone') => {
     const code = window.qrcode(0, 'M');
     code.addData(text);
     code.make();
@@ -40,7 +40,7 @@ V.settings = (() => {
     svg.setAttribute('height', size);
     svg.setAttribute('shape-rendering', 'crispEdges');
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'QR code for your phone');
+    svg.setAttribute('aria-label', label);
     const back = document.createElementNS(svg.namespaceURI, 'rect');
     back.setAttribute('width', all); back.setAttribute('height', all); back.setAttribute('fill', '#ffffff');
     const dots = document.createElementNS(svg.namespaceURI, 'path');
