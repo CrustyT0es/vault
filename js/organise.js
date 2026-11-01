@@ -664,6 +664,14 @@ V.organise = (() => {
   }
 
   async function trash(ids) {
+    // The note the note-taker is listening into stays out of the Trash until it stops (js/notetaker.js).
+    const busy = V.notetaker && V.notetaker.listeningTo && V.notetaker.listeningTo();
+    if (busy && ids.includes(busy)) {
+      ids = ids.filter((id) => id !== busy);
+      V.toast(`The note-taker is listening into "${V.noteTitle(V.data.notes.get(busy) || {})}", so it wasn't deleted. Stop it first.`,
+        { ms: 6000 });
+      if (!ids.length) return;
+    }
     const when = new Date().toISOString();
     const before = await change(ids, (row) => ({ ...row, deleted: true, deleted_at: when }), { reopen: false });
     if (!before.length) return;

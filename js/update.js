@@ -32,8 +32,9 @@ V.update = (() => {
   let toldLater = false;
   let pc = {};               // PC: what the app said about its copies (config.update)
 
-  /* A file picker or the camera is open (Android puts Vault in the background for them), or words typed in Send or
-     Clipboard aren't sent yet: a reload now would lose them. */
+  /* A file picker or the camera is open (Android puts Vault in the background for them), words typed in Send or
+     Clipboard aren't sent yet, or the note-taker is listening (its screen hidden, maybe: js/notetaker.js): a reload now
+     would lose them. */
   let picking = 0;
   const isPicker = (target) => target instanceof HTMLInputElement && target.type === 'file';
   document.addEventListener('click', (event) => { if (isPicker(event.target)) picking = Date.now(); }, true);
@@ -41,7 +42,14 @@ V.update = (() => {
     document.addEventListener(type, (event) => { if (isPicker(event.target)) picking = 0; }, true);
   }
   const inUse = () => (picking && Date.now() - picking < 10 * 60 * 1000)
+    || !!(V.notetaker && V.notetaker.listening())
     || [...document.querySelectorAll('#app .send-row textarea')].some((box) => box.value.trim() !== '');
+  /* The owner asking for a reload (Update now, the built-in copy) while the note-taker listens: not now, and why. */
+  function listening() {
+    if (!(V.notetaker && V.notetaker.listening())) return false;
+    V.toast('The note-taker is listening. Stop it first, then update.', { ms: 6000 });
+    return true;
+  }
 
   const storage = (kind) => { try { return window[kind]; } catch (error) { return null; } };
   const read = (kind, key) => {
@@ -323,8 +331,10 @@ V.update = (() => {
 
     check,
     whatsNew,
-    /* Settings' "Update now": the owner asked, so it goes now, once nothing would be lost. */
+    /* Settings' "Update now": the owner asked, so it goes now, once nothing would be lost. (Not while the note-taker
+       listens: the reload would end it part-way through a class.) */
     async now() {
+      if (listening()) return false;
       if (!(await V.editor.settled()) || V.send.busy() || V.files.busy()) {
         V.toast('Vault updates as soon as what\'s being saved or sent is done.');
         return false;
@@ -333,6 +343,7 @@ V.update = (() => {
     },
     /* PC: back to the copy that came with Jarvis (Settings, when a downloaded one misbehaves). */
     async useBuiltIn() {
+      if (listening()) return;
       keep();
       await V.pc.call('useBundled');
     },

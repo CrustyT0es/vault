@@ -54,8 +54,8 @@ V.ai = (() => {
   // that person's own free key (aistudio.google.com/apikey), kept in their own private storage at
   // <owner>/private/gemini.json, in memory only on a phone or Chromebook, exactly like the Claude one and never shown.
   // Google's free tier costs nothing, so Gemini answers are never charged or counted against the monthly limit. It is
-  // NOT a way past a school's content filter: like Claude, Google's API is blocked on a school network — use mobile
-  // data, or let the note wait and go when you're home.
+  // NOT a way past a school's content filter: where a network blocks Google's API (the owner's school wifi doesn't;
+  // it blocks Claude's), use mobile data, or let the note wait and go when you're home.
   const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
   // Google's ListModels (the models this key may use), on the same host: never anywhere else.
   const GEMINI_LIST = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100';
@@ -1997,8 +1997,8 @@ V.ai = (() => {
         V.h('li', { text: 'Paste it here and tap Save.' })),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }),
-      V.h('p.hint.ai-school', { text: 'Like any AI, it won\'t work on school wifi: use mobile data, or let your messages '
-        + 'wait and go when you\'re home.' })));
+      V.h('p.hint.ai-school', { text: 'If a wifi blocks it, use mobile data, or let your messages wait and go when '
+        + 'you\'re home.' })));
   }
 
   /* One of the AI card's switches for every device (`name` its label, `cls` its row's class): `set(want)` writes it

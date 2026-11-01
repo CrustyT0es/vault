@@ -723,6 +723,9 @@ V.notes = (() => {
     note.locked ? V.h('div.card-snippet.locked', {}, V.icon('lock'), V.h('span', { text: 'Locked: open it with your PIN' }))
       : snippet ? V.h('div.card-snippet', {}, O.marked(snippet, look.terms)) : null,
     V.h('div.card-meta', {},
+      // The note-taker is writing into it right now (js/notetaker.js): a tap opens its live screen, not the note.
+      V.notetaker && V.notetaker.listeningTo && V.notetaker.listeningTo() === note.id
+        ? V.h('span.nt-card-chip', {}, V.h('span.nt-card-dot', { 'aria-hidden': 'true' }), V.h('span', { text: 'Listening' })) : null,
       showFolder && folder ? V.h('span.tag', {}, folderBadge(folder), V.h('span', { text: folder.name })) : null,
       O.isTemplate(note) ? V.h('span.tag', {}, V.icon('notes'), V.h('span', { text: 'Template' })) : null,
       due ? V.h('span.due.' + (due.cls || 'later'), {}, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
@@ -975,7 +978,9 @@ V.notes = (() => {
     if (backing) { backing.open = [id, opts]; return; }
     if (V.wide()) V.editor.open(id, { pane: parts.pane, ...opts });
     else V.editor.open(id, opts);
-    for (const el of parts.list.querySelectorAll('.card')) el.classList.toggle('open', el.dataset.id === id);
+    // (the note the editor really opened: one the note-taker is listening into shows its screen instead)
+    const opened = V.editor.openId();
+    for (const el of parts.list.querySelectorAll('.card')) el.classList.toggle('open', el.dataset.id === opened);
   }
 
   function render(container) {
@@ -1043,6 +1048,7 @@ V.notes = (() => {
   }, 60);
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
   V.on('attach-index', redraw);  // the attachment search index arrived (js/attachsearch.js): matches may change
+  V.on('notetaker', redraw);  // the note-taker started or stopped listening into a note: its "Listening" chip
   const typing = (target) => !!target && (target.matches('input, textarea, select') || target.isContentEditable);
   document.addEventListener('keydown', (event) => {
     if (!showing()) return;

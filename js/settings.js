@@ -69,6 +69,15 @@ V.settings = (() => {
   }
 
   async function signOut() {
+    // The note-taker listening (its screen hidden, say): stopped first, so what it heard is saved and goes up too.
+    let asked = false;
+    if (V.notetaker && V.notetaker.listening()) {
+      const stop = await V.confirm('Stop listening and sign out?', 'The note-taker is listening. What it heard is saved '
+        + 'in its note first.', { ok: 'Stop and sign out', danger: true });
+      if (!stop) return;
+      asked = true;
+      await V.notetaker.stopQuietly();
+    }
     await V.cloud.sync();
     const waiting = await V.cloud.unsent();
     if (waiting) {
@@ -80,7 +89,7 @@ V.settings = (() => {
       location.reload();
       return;
     }
-    const ok = await V.confirm('Sign out?', V.desktop
+    const ok = asked || await V.confirm('Sign out?', V.desktop
       ? `Vault on this PC${V.pc.standalone() ? '' : ' (and Jarvis\'s notes)'} stops until you sign in again. Your notes stay safe in the cloud.`
       : 'Vault on this phone stops until you sign in again. Your notes stay safe in the cloud.', { ok: 'Sign out', danger: true });
     if (!ok) return;

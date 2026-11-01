@@ -20,7 +20,14 @@
    nothing else), so there it just says to use the PC for a video or class.
 
    A note's body can't pass 1,000,000 letters (vault/schema.sql), so a lecture longer than about seven hours carries on
-   in a "(part 2)" note. Reached from the new-note sheet and as a tool in an open note. */
+   in a "(part 2)" note. Reached from the new-note sheet and as a tool in an open note.
+
+   Browsing while it listens (1.14, the owner: "I don't have to stay on the same tab"): Hide (or Esc) puts the screen
+   away without stopping anything (hearing, saving, the screen kept on all carry on), and a bar across the top of Vault
+   (`drawStrip`, the "call in progress" bar a phone shows) says it's still listening, with the time and Stop; a tap on
+   it brings the screen back with every word heard meanwhile. Only the note-taker writes into the note it listens to
+   (its save() writes the whole body), so the editor never opens that note: V.editor.open sends it here instead
+   (`listeningTo`). Dictation and voice memos refuse to start while it listens, and signing out stops it first. */
 'use strict';
 
 V.notetaker = (() => {
@@ -389,9 +396,17 @@ V.notetaker = (() => {
   /* The transcript so far into the note (only the transcript changes: the words above it stay as they are). */
   async function save() {
     if (!session || !session.dirty) return;
+    let row = V.data.notes.get(session.id);
+    // Its note went while it listened (put in the Trash or deleted on another device: this one keeps it out of the
+    // Trash): nothing heard is lost, it all carries on in a new note.
+    if (!row || row._purge || row.deleted) row = rehome(row);
+    if (row.locked) {  // locked on another device: its words never go in as plain text, so it stops here
+      session.dirty = false;
+      stopListening({ make: false, problem: 'The note was locked, so the note-taker stopped. Unlock it to listen into it again.' })
+        .catch(V.problem);
+      return;
+    }
     session.dirty = false;
-    const row = V.data.notes.get(session.id);
-    if (!row || row._purge) return;
     const { above } = split(row.body);
     const extra = { ...(row.extra || {}) };
     extra.notetaker = { ...(extra.notetaker || {}), seconds: Math.round(elapsed() / 1000), words: session.words,
@@ -414,6 +429,27 @@ V.notetaker = (() => {
     session.aboveLength = 0;
     V.cloud.save('notes', next).catch(V.problem);
     V.toast(`That's a long one: it carries on in "${title}".`, { ms: 6000 });
+    told();
+  }
+
+  /* The note it listens into is gone (`old`: its row, if any): a new one with the same title takes the whole transcript
+     so far, and the listening carries on there. Returns the new row. */
+  function rehome(old) {
+    const next = V.notes.blankNote({ folder_id: (old && old.folder_id) || null, title: session.title, body: join('', text()),
+      extra: { notetaker: { started: new Date().toISOString(), auto_title: '', engine: session.engine } } });
+    session.id = next.id;
+    session.aboveLength = 0;
+    V.cloud.save('notes', next).catch(V.problem);  // (in V.data.notes at once)
+    V.toast(`"${session.title}" was deleted, so the note-taker carries on in a new note.`, { ms: 6000 });
+    told();
+    return V.data.notes.get(next.id) || next;
+  }
+
+  /* The note being listened into changed (a session started or ended, or went on in a "(part 2)"): the notes list
+     draws its "Listening" chip again (js/notes.js), and the bar at the top says so. */
+  function told() {
+    V.emit('notetaker', { listening: session ? session.id : null });
+    drawStrip();
   }
 
   function elapsed() {
@@ -439,6 +475,8 @@ V.notetaker = (() => {
       session.waiting = yes;
       if (yes) session.wasAway = true;
       else {  // the note about missed words goes once it has been listening a while again
+        // (with its screen put away, that note can't be seen: a line says it instead)
+        if (!live()) V.toast('Vault was off the screen for a moment, so the note-taker missed what was said then.', { ms: 7000 });
         const now = session;
         setTimeout(() => { if (session === now && !now.waiting) { now.wasAway = false; drawStatus(); } }, 20000);
       }
@@ -462,6 +500,12 @@ V.notetaker = (() => {
     if (!how.kind) return;
     if (how.kind !== 'pc' || !pcSoundKnown()) source = 'mic';  // only the PC app can hear the PC's own sound
     V.emit('notetaker-listening');  // dictation (js/dictation.js) lets go of the microphone first
+    // Only the note-taker writes into its note while it listens: an editor opened on it meanwhile (a reminder's Open,
+    // over the start screen) is closed first, its typing saved.
+    if (id && V.editor.openId() === id) {
+      await V.editor.settled();
+      V.editor.close();
+    }
     let note = id ? V.data.notes.get(id) : null;
     if (!note) note = await newNote(title.trim(), folderId);
     const parts = split(note.body);
@@ -476,6 +520,7 @@ V.notetaker = (() => {
       trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '' };
     session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers());
     draw();
+    told();
     session.saver = setInterval(() => { if (session && session.dirty) save().catch(V.problem); }, SAVE_EVERY);
     session.clock = setInterval(drawClock, 1000);
     keepAwake(true);
@@ -501,10 +546,13 @@ V.notetaker = (() => {
     if (session === was && was.state === 'starting') setState('listening');
   }
 
-  /* Stop: the last words are kept and saved, then (with `make`) Claude makes the notes. */
-  async function stopListening({ make = true, problem = '' } = {}) {
-    if (!session || session.state === 'stopping') return;
+  /* Stop: the last words are kept and saved, then (with `make`) Claude makes the notes. `open` false: the note isn't
+     opened after (signing out). Resolves the note's id. With its screen put away (the owner busy elsewhere in Vault),
+     a problem is shown without taking them anywhere when it's closed, and never over another note's screen. */
+  async function stopListening({ make = true, problem = '', open = true } = {}) {
+    if (!session || session.state === 'stopping') return null;
     const was = session;
+    const shown = live();
     setState('stopping');
     await was.hearing.stop(true);
     clearInterval(was.saver);
@@ -517,17 +565,27 @@ V.notetaker = (() => {
     const id = was.id;
     const anything = !!text().trim();
     session = null;
+    told();
     if (problem) {
-      showProblem(problem, id, { tryAgain: false });
-      return;
+      if (ui && !shown) V.toast(problem, { kind: 'err', ms: 9000, action: 'Open', onAction: () => openNote(id) });
+      else showProblem(problem, id, { tryAgain: false, stay: !shown });
+      return id;
     }
     if (!make || !anything) {
-      closeLayer();
+      if (shown) closeLayer();
+      if (!open) return id;
       if (!anything) V.toast('Nothing was heard, so there\'s nothing to make notes from.');
       openNote(id);
-      return;
+      return id;
     }
     await makeNotes(id);
+    return id;
+  }
+
+  /* Signing out (or the cloud saying the sign-in ended): stopped at once, what was heard saved first, no notes made
+     and nothing opened. */
+  async function stopQuietly() {
+    if (session && session.state !== 'stopping') await stopListening({ make: false, open: false });
   }
 
   /* -- Claude: the transcript made into notes */
@@ -947,19 +1005,29 @@ V.notetaker = (() => {
       title: V.h('h2.nt-title', { text: 'Note-taker' }),
       time: V.h('span.nt-time.num', { hidden: true }),
       close: V.iconButton('x', 'Close', () => closePressed(), 'quiet'),
+      // While it listens: Hide (it carries on, with the bar at the top) instead of the X, and Stop at the other end.
+      // (with its word showing: the screen's own small print says "Tap Hide")
+      hide: V.button('Hide', { kind: 'quiet', icon: 'down', title: 'Hide: it keeps listening', aria: 'Hide: it keeps listening',
+        onClick: () => hide() }),
+      stop: V.iconButton('stop', 'Stop listening', () => stopPressed(), 'nt-stop'),
       body: V.h('div.nt-body'),
       foot: V.h('div.nt-foot'),
     };
+    parts.hide.classList.add('nt-hide');
+    parts.hide.hidden = true;
+    parts.stop.hidden = true;
     const panel = V.h('div.nt', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Note-taker' },
-      V.h('div.nt-bar', {}, parts.close, parts.title, V.h('span.bar-spacer'), parts.time), parts.body, parts.foot);
+      V.h('div.nt-bar', {}, parts.close, parts.hide, parts.title, V.h('span.bar-spacer'), parts.time, parts.stop),
+      parts.body, parts.foot);
     const layer = V.h('div.nt-layer', {}, panel);
     document.getElementById('layers').append(layer);
     requestAnimationFrame(() => layer.classList.add('shown'));
     ui = { layer, parts, ready: null, making: null, problem: null, wordsEl: null, interimEl: null, shown: 0 };
     document.addEventListener('keydown', escape, true);
+    drawStrip();  // (the bar at the top goes while the screen shows)
   }
 
-  // Esc closes it like any sheet (asking first while it listens), unless a sheet is open over it.
+  // Esc closes it like any sheet (hides it while it listens), unless a sheet is open over it.
   function escape(event) {
     if (event.key !== 'Escape' || !ui || document.querySelector('#layers > .layer:not(.leaving)')) return;
     event.stopPropagation();
@@ -973,13 +1041,39 @@ V.notetaker = (() => {
     document.removeEventListener('keydown', escape, true);
     layer.classList.remove('shown');
     setTimeout(() => layer.remove(), 200);
+    drawStrip();
+  }
+
+  /* Its live screen is showing (not put away, and not the writing or problem screen of another note meanwhile). */
+  const live = () => !!(session && ui && !ui.making && !ui.problem);
+
+  /* Hide: the screen goes, the listening doesn't (the bar at the top says so, and brings it back). Not while it's
+     stopping: the notes' screen comes next. */
+  function hide() {
+    if (!live()) { closePressed(); return; }
+    if (session.state === 'stopping') return;
+    const was = session;
+    closeLayer();
+    if (!was.toldHidden) {  // the first time this session: where it went
+      was.toldHidden = true;
+      V.toast('Still listening. Tap the bar at the top to come back.', { ms: 6000 });
+    }
+    if (strip && strip.el.isConnected) strip.open.focus({ preventScroll: true });  // (the keyboard comes back there)
+  }
+
+  /* Stop without making notes (the bar's Stop, and the one on the bar at the top): asked first, as it ends the
+     listening. What was heard stays in the note, with "Make notes" for later. */
+  async function stopPressed() {
+    if (!session || session.state === 'stopping') return;
+    const was = session;
+    const sure = await V.confirm('Stop listening?', 'What was heard is saved in the note. You can make notes from it any time.',
+      { ok: 'Stop' });
+    if (sure && session === was) stopListening({ make: false }).catch(V.problem);
   }
 
   async function closePressed() {
-    if (session && session.state !== 'stopping') {
-      const sure = await V.confirm('Stop listening?', 'What was heard is saved in the note. You can make notes from it any time.',
-        { ok: 'Stop' });
-      if (sure) stopListening({ make: false }).catch(V.problem);
+    if (live()) {  // (Esc while it listens: hidden, never stopped)
+      if (session.state !== 'stopping') hide();
       return;
     }
     if (ui && ui.making && !ui.problem) {  // Claude is writing: the screen can go (never held up), the notes still land
@@ -987,15 +1081,16 @@ V.notetaker = (() => {
       V.toast('The notes are still being made. They\'ll show in the note when they\'re ready.', { ms: 5000 });
       return;
     }
-    const id = ui && ((ui.problem && ui.problem.id) || (ui.ready && ui.ready.id));  // (its note was closed for it)
+    // (its note was closed for it; not when it stopped while the owner was elsewhere: they stay where they are)
+    const id = ui && ((ui.problem && !ui.problem.stay && ui.problem.id) || (ui.ready && ui.ready.id));
     closeLayer();
     if (id) openNote(id);
   }
 
-  function showProblem(words, id, { tryAgain = true, settings = false, gemini = false } = {}) {
+  function showProblem(words, id, { tryAgain = true, settings = false, gemini = false, stay = false } = {}) {
     openLayer();
     ui.making = null;
-    ui.problem = { words, id, tryAgain, settings, gemini };
+    ui.problem = { words, id, tryAgain, settings, gemini, stay };
     draw();
   }
 
@@ -1007,9 +1102,80 @@ V.notetaker = (() => {
   };
 
   function drawClock() {
+    drawStrip();
     if (!ui) return;
-    ui.parts.time.hidden = !session;
-    if (session) ui.parts.time.textContent = clock(elapsed());
+    ui.parts.time.hidden = !live();
+    if (live()) ui.parts.time.textContent = clock(elapsed());
+  }
+
+  /* -- the bar at the top while the screen is hidden (the "call in progress" bar): what it's doing, into which note,
+     for how long, a tap to come back and Stop. Inside #layers, so it sits over the full-screen note (55) and under
+     the note-taker (58), sheets and menus (60); <html> gets "nt-strip-on" while it listens (see drawStrip), and
+     styles.css moves the app down for it (under 900 px through --safe-top, from 900 px by padding #app). Never on the
+     sign-in or setup screens. */
+  let strip = null;
+  const setText = (el, words) => { if (el.textContent !== words) el.textContent = words; };
+
+  function stripParts() {
+    if (strip) return strip;
+    const parts = {
+      dot: V.h('span.nt-strip-dot', { 'aria-hidden': 'true' }),
+      full: V.h('span.nt-strip-full'),
+      brief: V.h('span.nt-strip-brief', { 'aria-hidden': 'true' }),
+      title: V.h('span.nt-strip-title'),
+      time: V.h('span.nt-strip-time.num'),
+    };
+    // (its name says it all, the minutes only: the seconds ticking by are never read out)
+    parts.open = V.h('button.nt-strip-open', { type: 'button', onclick: () => open() },
+      parts.dot, V.h('span.nt-strip-word', {}, parts.full, parts.brief), parts.title, parts.time);
+    parts.stop = V.h('button.nt-strip-stop', { type: 'button', title: 'Stop listening', 'aria-label': 'Stop listening',
+      onclick: () => stopPressed() }, V.icon('stop'), V.h('span.nt-strip-stop-word', { text: 'Stop' }));
+    parts.el = V.h('div.nt-strip', {}, parts.open, parts.stop);
+    strip = parts;
+    return strip;
+  }
+
+  /* What the bar says it's doing: [in full, on a narrow screen, in its spoken name]. Trouble hearing (no internet for
+     the speech service, the PC's speech recognition not ready or failing) is said, never "Listening". */
+  function stripWords(s) {
+    if (s.state === 'starting') return ['Starting...', 'Starting...', 'starting'];
+    if (s.state === 'stopping') return ['Saving...', 'Saving...', 'saving'];
+    if (s.state === 'paused') return ['Paused', 'Paused', 'paused'];
+    if (s.waiting) return ['Waiting', 'Waiting', 'waiting for Vault to be on the screen'];
+    if (s.trouble) return ['Not hearing', 'Not hearing', 'not hearing right now'];  // (why: on its screen, a tap away)
+    return s.source === 'mic' ? ['Listening', 'Listening', 'listening']
+      : ['Listening to PC sound', 'PC sound', 'listening to PC sound'];
+  }
+
+  function drawStrip() {
+    const app = document.getElementById('app');
+    // The room for the bar stays while it listens, its screen showing too: from 700 px that screen is a dialog with the
+    // app in sight behind it, which mustn't jump 36 px each time the screen comes and goes. The bar itself only shows
+    // while the screen is put away.
+    const on = !!session && !!app && app.classList.contains('ready') && !app.classList.contains('gate');
+    const shown = on && !ui;
+    document.documentElement.classList.toggle('nt-strip-on', on);
+    if (!shown) {
+      if (strip && strip.el.isConnected) strip.el.remove();
+      return;
+    }
+    const s = session;
+    const parts = stripParts();
+    if (!parts.el.isConnected) document.getElementById('layers').append(parts.el);
+    const [full, brief, said] = stripWords(s);
+    const row = V.data.notes.get(s.id);
+    const title = (row && (row.title || '').trim()) || s.title;
+    const ms = elapsed();
+    const minutes = Math.floor(ms / 60000);
+    parts.el.dataset.state = s.state === 'paused' ? 'paused' : s.state !== 'listening' || s.waiting ? 'wait'
+      : s.trouble ? 'trouble' : 'on';
+    setText(parts.full, full);
+    setText(parts.brief, brief);
+    setText(parts.title, title);
+    setText(parts.time, clock(ms));
+    const name = `Note-taker, ${title}: ${said}, ${minutes ? `${minutes} min` : 'under a minute'}. Open it`;
+    if (parts.open.getAttribute('aria-label') !== name) parts.open.setAttribute('aria-label', name);
+    parts.stop.disabled = s.state === 'stopping';
   }
 
   const hearsWith = (kind) => (kind === 'pc'
@@ -1064,8 +1230,10 @@ V.notetaker = (() => {
           V.h('span', { text: 'To make notes, set up Claude in Settings > AI. Listening works without it.' })),
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
-        how.kind === 'web' ? V.h('li', { text: navigator.wakeLock ? 'Keep Vault open while it listens: the screen stays on by itself.'
-          : 'Keep Vault open while it listens, with the screen on.' }) : null,
+        how.kind === 'web' ? V.h('li', { text: navigator.wakeLock
+          ? 'You can use the rest of Vault while it listens. Keep Vault on the screen (it stays on by itself).'
+          : 'You can use the rest of Vault while it listens. Keep Vault on the screen, with the screen on.' })
+          : how.kind ? V.h('li', { text: 'You can use the rest of Vault while it listens.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Vault on your PC.' }) : null,
@@ -1090,17 +1258,18 @@ V.notetaker = (() => {
   }
 
   function drawStatus() {
+    drawStrip();
     if (!ui || !ui.statusEl || !session) return;
     const s = session;
     const words = s.state === 'starting' ? 'Starting...' : s.state === 'paused' ? 'Paused' : s.state === 'stopping' ? 'Saving...'
-      : s.waiting ? 'Waiting for Vault to be open' : 'Listening';
+      : s.waiting ? 'Waiting for Vault to be on the screen' : 'Listening';
     ui.statusEl.dataset.state = s.state === 'listening' && !s.waiting && !s.trouble ? 'on' : s.state === 'paused' ? 'paused' : 'wait';
     ui.statusEl.querySelector('.nt-state-word').textContent = words;
     ui.statusEl.querySelector('.nt-count').textContent = s.words ? `${s.words} word${s.words === 1 ? '' : 's'}` : '';
     ui.troubleEl.hidden = !(s.trouble || s.waiting || s.wasAway);
     ui.troubleEl.querySelector('span').textContent = s.trouble
-      || (s.waiting ? 'Vault stopped listening in the background. It carries on when Vault is open again: keep it open while it listens.'
-        : 'Vault was in the background for a moment and missed what was said then. Keep it open while it listens.');
+      || (s.waiting ? 'Vault stopped listening in the background. It carries on when Vault is back on the screen.'
+        : 'Vault was in the background for a moment and missed what was said then. Keep Vault on the screen while it listens.');
   }
 
   function drawWords() {
@@ -1149,7 +1318,8 @@ V.notetaker = (() => {
       V.button('Stop', { disabled: s.state === 'stopping',
         onClick: () => stopListening({ make: false }).catch(V.problem) })) : null;
     V.clear(body, V.h('div.nt-live', {}, onAir, ui.statusEl, ui.troubleEl, ui.wordsEl,
-      V.h('p.nt-small', { text: `${hearsWith(s.engine)}${s.engine === 'web' ? ' Keep Vault open while it listens.' : ''}` })));
+      V.h('p.nt-small', { text: `${hearsWith(s.engine)} Tap Hide to use the rest of Vault while it listens.${s.engine === 'web'
+        ? ' It pauses if Vault leaves the screen (another app, or the phone locked) and carries on when Vault is back.' : ''}` })));
     const paused = s.state === 'paused';
     V.clear(foot,
       V.button(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : null, disabled: s.state === 'starting' || s.state === 'stopping',
@@ -1220,10 +1390,19 @@ V.notetaker = (() => {
   }
 
   function draw() {
+    drawStrip();
     if (!ui) return;
-    ui.layer.classList.toggle('listening', !!session);
+    // While it listens: Hide and Stop, never the X. (The writing or problem screen of another note, opened while it
+    // listens with its screen put away, is that note's: the X, and nothing of the listening.)
+    const on = live();
+    ui.layer.classList.toggle('listening', on);
     drawClock();
-    ui.parts.title.textContent = session ? session.title : 'Note-taker';
+    ui.parts.title.textContent = on ? session.title : 'Note-taker';
+    const { close, hide: hideButton, stop } = ui.parts;
+    close.hidden = on;
+    hideButton.hidden = !on;
+    stop.hidden = !on;
+    hideButton.disabled = stop.disabled = on && session.state === 'stopping';
     if (ui.problem) drawProblem();
     else if (ui.making) drawMaking();
     else if (session) drawLive();
@@ -1240,13 +1419,19 @@ V.notetaker = (() => {
     }
   });
   // The tray's "Stop listening to PC sound" (vault/desktop.py): stopped here, so what was heard is saved first.
+  // With its screen put away, the owner stays where they are (the line says so, with Open).
   V.on('pc:pc-sound-stop', () => {
     if (!session || session.source === 'mic' || session.state === 'stopping') return;
-    stopListening({ make: false }).then(() => V.toast('Stopped listening to this PC\'s sound. What was heard is in the note.'))
-      .catch(V.problem);
+    const shown = live();
+    stopListening({ make: false, open: shown }).then((id) => V.toast('Stopped listening to this PC\'s sound. What was heard is in the note.',
+      shown || !id ? {} : { action: 'Open', onAction: () => openNote(id) })).catch(V.problem);
   });
   // Signing out, or another update: what's been heard is saved first.
   window.addEventListener('pagehide', () => { if (session && session.dirty) save().catch(() => {}); });
+  // Signing out (Settings stops it itself first, so its words go up before the sign-out) or the cloud ending the
+  // sign-in: stopped, its words kept on this device (they go up once signed in again), no notes made, nothing opened.
+  V.on('signing-out', () => stopQuietly().catch(() => {}));
+  V.on('signed-out', () => stopQuietly().catch(() => {}));
 
   // A note flagged for auto-making is tried whenever the network might be back (online, the page shown or focused,
   // the app coming to the front) and on the gentle timer.
@@ -1293,6 +1478,8 @@ V.notetaker = (() => {
   });
 
   // webHearing is dictation's too (js/dictation.js): the same Android handling (newPart/taken/last), kept in one place.
+  // listeningTo: the note it's writing into now (null when it isn't listening); V.editor.open sends that one here.
   return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session,
+    listeningTo: () => (session ? session.id : null), stopQuietly,
     webHearing, rotate, slowness, iosWhyNot };  // (rotate, slowness: tests shorten them)
 })();

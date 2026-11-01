@@ -240,7 +240,8 @@ V.news = (() => {
 
   const app = () => document.getElementById('app');
   const onGate = () => !app().classList.contains('ready') || app().classList.contains('gate');  // setup, sign-in...
-  const layerOpen = () => !!document.querySelector('#layers > *');  // a sheet, a menu, a note over everything, a drawing
+  // A sheet, a menu, a note over everything, a drawing, the note-taker (not its bar at the top: js/notetaker.js).
+  const layerOpen = () => !!document.querySelector('#layers > :not(.nt-strip)');
   const NOT_TYPED = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'file', 'color', 'image'];
   function typing() {
     const el = document.activeElement;

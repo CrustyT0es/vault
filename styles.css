@@ -48,6 +48,7 @@
   --accent-soft: light-dark(#e9ecff, #2b2d51);
   --accent-line: light-dark(#b2bcff, #4438c2);
   --on-accent: #ffffff;
+  --on-accent-warn: #ffd27a;  /* a paused dot on the accent (the note-taker's bar at the top) */
   --focus: light-dark(#6c6dfa, #8d96ff);
   --brand: light-dark(#5346e7, #8d96ff);
   /* meaning */
@@ -106,7 +107,8 @@
   --ease-in: cubic-bezier(.4, 0, 1, 1);
   --ease-spring: cubic-bezier(.3, 1.3, .5, 1);
   --d-1: 90ms; --d-2: 160ms; --d-3: 240ms;
-  --safe-top: env(safe-area-inset-top, 0px);
+  --notch: env(safe-area-inset-top, 0px);
+  --safe-top: var(--notch);  /* what top bars pad by: the notch, and the note-taker's bar while it shows */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 :root[data-theme="light"] { color-scheme: light; }
@@ -1265,7 +1267,7 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
   margin: 0 -4px -10px; padding: calc(12px + var(--safe-top)) 0 0;
 }
 .crumbs[hidden] { display: none; }
-.crumbs + .list-title { padding-top: 0; min-height: 52px; }
+.crumbs:not([hidden]) + .list-title { padding-top: 0; min-height: 52px; }  /* (only when the crumbs show: else the title pads for the notch itself) */
 .folder-up { flex: none; width: 36px; height: 36px; }
 .crumb {
   position: relative; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 30px;
@@ -1280,7 +1282,7 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
 .crumb-gap { flex: none; color: var(--faint); }
 @media (min-width: 900px) {
   .crumbs { order: 0; margin: 0 0 -8px; padding: 10px 0 0; }
-  .crumbs + .list-title { padding-top: 6px; min-height: 0; }
+  .crumbs:not([hidden]) + .list-title { padding-top: 6px; min-height: 0; }
   .folder-up { width: 32px; height: 32px; }
 }
 
@@ -2212,6 +2214,81 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .spinner.big { width: 32px; height: 32px; border-width: 3px; }
 .nt-problem-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--danger-soft); color: var(--danger); }
 .nt-problem-icon .icon { width: 24px; height: 24px; }
+
+/* while it listens: Hide on the left of its bar (its word showing), Stop on the right */
+.nt-bar .nt-hide { flex: none; gap: 4px; padding: 0 12px 0 8px; }
+.nt-bar .nt-hide .icon { width: 20px; height: 20px; }
+.nt-bar .nt-stop { color: var(--danger); }
+.nt-bar .nt-stop .icon { width: 26px; height: 26px; }  /* (the filled square, as big as the other icons look) */
+.nt-bar .nt-stop:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* -- listening with its screen hidden (js/notetaker.js drawStrip): the "call in progress" bar across the top. It sits
+   in #layers over the full-screen note (55), under the note-taker (58), sheets and menus (60) and toasts. Under 900 px
+   every top bar that pads for the notch (--safe-top) moves below it; from 900 px the whole app is pushed down. Layers
+   over it pad for the notch alone (--notch), so a drawing's bar never gets an empty band. Never on the gate screens. */
+.layer, .nt-layer { --safe-top: var(--notch); }
+.nt-strip {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 56; display: flex; align-items: center; gap: 4px;
+  height: calc(36px + var(--notch)); padding: var(--notch) max(6px, env(safe-area-inset-right, 0px)) 0 max(2px, env(safe-area-inset-left, 0px));
+  background: var(--accent); color: var(--on-accent); font: 600 13px/18px var(--font);
+}
+html:has(#app.gate) .nt-strip { display: none; }
+@media (max-width: 899px) {
+  html.nt-strip-on:not(:has(#app.gate)) { --safe-top: calc(var(--notch) + 36px); }
+  /* the lists and pages scroll under the bar here: a control the keyboard moves to stops below it, never behind it */
+  html.nt-strip-on .view, html.nt-strip-on .list-column, html.nt-strip-on .chat-side { scroll-padding-top: var(--safe-top); }
+}
+@media (min-width: 900px) {
+  html.nt-strip-on #app.ready:not(.gate) { padding-top: calc(36px + var(--notch)); }
+}
+.nt-strip-open {
+  position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  border: none; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; text-align: left;
+}
+.nt-strip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: color-mix(in srgb, var(--on-accent) 55%, transparent); }
+.nt-strip[data-state=on] .nt-strip-dot { background: var(--on-accent); animation: nt-strip-breathe 2.4s ease-in-out infinite; }
+.nt-strip[data-state=paused] .nt-strip-dot, .nt-strip[data-state=trouble] .nt-strip-dot { background: var(--on-accent-warn); }
+@keyframes nt-strip-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--on-accent) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--on-accent) 0%, transparent); }
+}
+.nt-strip-word { flex: none; white-space: nowrap; }
+.nt-strip-brief { display: none; }
+.nt-strip-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.nt-strip-time { flex: none; font-variant-numeric: tabular-nums; }
+.nt-strip-stop {
+  position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px;
+  padding: 0 11px 0 9px; border: 1px solid color-mix(in srgb, var(--on-accent) 60%, transparent); border-radius: var(--r-full);
+  background: none; color: inherit; font: inherit;
+}
+.nt-strip-stop::after { content: ""; position: absolute; inset: -4px -2px; }  /* a 36 px tall target */
+/* To a finger, 44 px tall: the targets reach 8 px under the bar, where the bars below it only have their padding. */
+@media (pointer: coarse) {
+  .nt-strip-open::after { content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: -8px; }
+  .nt-strip-stop::after { inset: -5px -8px -13px; }  /* (from inside its 1 px border: the bar's top to 8 px under it) */
+}
+.nt-strip-stop .icon { width: 14px; height: 14px; }
+.nt-strip-open:hover, .nt-strip-stop:hover { background: var(--accent-hover); }
+.nt-strip-open:active, .nt-strip-stop:active { background: var(--accent-press); }
+.nt-strip :focus-visible { outline: 2px solid var(--on-accent); outline-offset: -2px; }
+.nt-strip-stop:disabled { opacity: .6; cursor: default; }
+@media (max-width: 479px) {
+  .nt-strip-full { display: none; }
+  .nt-strip-brief { display: inline; }
+}
+@media (max-width: 339px) {
+  .nt-strip-open { gap: 6px; padding: 0 6px; }
+  .nt-strip-stop { width: 30px; padding: 0; }
+  .nt-strip-stop-word { display: none; }
+}
+@media (forced-colors: active) { .nt-strip { border-bottom: 1px solid CanvasText; } }
+
+/* a note's card while the note-taker writes into it */
+.nt-card-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--r-sm);
+  background: var(--accent-wash); color: var(--accent-ink); font: 600 12px/1 var(--font); box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+.nt-card-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 
 /* the way in: above the new-note sheet's templates, and the chip on a note that has a transcript without notes */
 .template.nt-entry {

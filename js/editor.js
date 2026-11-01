@@ -2151,6 +2151,8 @@ V.editor = (() => {
   async function startMemo() {
     if (!note || recording) return;
     if (note.locked) return V.toast('Locked notes keep words only, not voice memos.');
+    // One microphone user at a time (js/dictation.js says the same): the note-taker may be listening, hidden.
+    if (V.notetaker && V.notetaker.listening()) return V.toast('The note-taker is listening. Stop it first, then record.');
     if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return V.toast('This browser can\'t record sound.', { kind: 'err' });
     }
@@ -2162,7 +2164,10 @@ V.editor = (() => {
     } catch (error) {
       return V.toast(micProblem(error), { kind: 'err', ms: 7000 });
     }
-    if (!note || note.id !== id || recording) { stream.getTracks().forEach((t) => t.stop()); return; }
+    if (!note || note.id !== id || recording || (V.notetaker && V.notetaker.listening())) {  // (it started meanwhile)
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
     const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm']
       .find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
     let recorder;
@@ -2185,6 +2190,10 @@ V.editor = (() => {
     }, 250);
     showRecorder(true);
   }
+
+  // The note-taker starting (from the new-note sheet, with this note still open beside the list): a memo being
+  // recorded is saved into its note first, as dictation lets go of the microphone too.
+  V.on('notetaker-listening', () => { if (recording) stopMemo(true); });
 
   /* Stops recording: `keep` saves the memo into its note, else it's thrown away. */
   function stopMemo(keep) {
@@ -2939,6 +2948,12 @@ V.editor = (() => {
   }
 
   function open(id, { pane = null, focusTitle = false } = {}) {
+    // The note the note-taker is listening into is its own while it listens (it writes the whole body every few
+    // seconds, so an editor's copy would be out of date at once): every way of opening it shows the note-taker instead.
+    if (V.notetaker && V.notetaker.listeningTo && id && V.notetaker.listeningTo() === id) {
+      V.notetaker.open();
+      return;
+    }
     if (!(note && openId === id && el)) {
       for (const watch of openWatchers) {
         try { watch(id); } catch (error) { console.warn('Vault:', error); }

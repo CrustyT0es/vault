@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.13.1';
+V.VERSION = '1.14.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.
@@ -86,6 +86,8 @@ V.deviceName = (id) => ({ PC: 'your PC', Phone: 'your phone', iPhone: 'your iPho
 V.deviceIcon = (id) => (id === 'pc' ? 'pc' : id === 'phone' ? 'phone' : 'laptop');
 V.setDevice = (id) => {
   if (V.desktop || id === V.device || !['phone', 'web'].includes(id)) return;
+  // (it reloads the page, which would end the note-taker part-way through a class)
+  if (V.notetaker && V.notetaker.listening()) { V.toast('The note-taker is listening. Stop it first, then change this.'); return; }
   try { localStorage.setItem('vault-device', id); } catch (error) { /* private browsing: until it closes */ }
   location.reload();
 };
