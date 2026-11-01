@@ -165,6 +165,57 @@ V.settings = (() => {
       : 'System follows this phone (or Chromebook). Each device keeps its own.', pick));
   }
 
+  /* The two reading aids (js/reading.js), for every device the person uses: dyslexia-friendly text (its font, page
+     colour and reading ruler shown under it while it's on) and Quick read (with its colour). Each change goes to the
+     cloud first; while it's on its way its control waits, and one that can't be made goes back and says so. */
+  let readingBusy = false;
+  async function changeReading(changes) {
+    if (readingBusy) return;
+    readingBusy = true;
+    draw();
+    try {
+      await V.reading.set(changes);
+    } catch (error) {
+      console.warn('Vault:', error);
+      V.toast(V.reading.NOT_CHANGED, { kind: 'err', ms: 5000 });
+    } finally {
+      readingBusy = false;
+      draw();
+    }
+  }
+
+  function readingCard() {
+    const now = V.reading.get();
+    const swatch = (group, name, list, value, label, dot) => V.h('div.swatches', { role: 'radiogroup', 'aria-label': group },
+      list.map((option) => V.h('button.swatch', { type: 'button', role: 'radio', 'aria-checked': String(value === option),
+        disabled: readingBusy, dataset: { [name]: option }, onclick: () => { if (value !== option) changeReading({ [name]: option }); } },
+      V.h('span.swatch-dot', { dataset: { dot: dot(option) } }), V.h('span', { text: label(option) }))));
+    const switchFor = (name, label) => V.h('input.switch', { type: 'checkbox', checked: now[name], 'aria-label': label,
+      disabled: readingBusy, onchange: (event) => changeReading({ [name]: event.target.checked }) });
+    const named = (word) => word[0].toUpperCase() + word.slice(1);
+    const fonts = V.h('div.segmented', { role: 'radiogroup', 'aria-label': 'Font' },
+      [['lexend', 'Lexend'], ['opendyslexic', 'OpenDyslexic']].map(([value, label]) => V.h('button', {
+        type: 'button', role: 'radio', 'aria-checked': String(now.font === value), disabled: readingBusy, dataset: { font: value },
+        onclick: () => { if (now.font !== value) changeReading({ font: value }); } }, V.h('span', { text: label }))));
+    // A few words drawn the way notes are drawn now, so each choice shows what it does.
+    const sample = V.reading.area(V.h('p.reading-sample', { text: 'Reading is quicker when your eyes can see where each word starts.' }));
+    return card('Reading',
+      line('Dyslexia-friendly text', 'An easier font, more room between letters, words and lines, and a soft page '
+        + 'colour. On every device you use.', switchFor('dyslexia', 'Dyslexia-friendly text')),
+      now.dyslexia ? [
+        line('Font', 'Lexend is calm and clear; OpenDyslexic gives each letter a heavier bottom.', fonts),
+        V.h('div.setting.setting-stack', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Page colour' }),
+          V.h('span', { text: 'A soft colour behind your notes, cards and answers.' })),
+        swatch('Page colour', 'tint', V.reading.TINTS, now.tint, (t) => (t === 'none' ? 'None' : named(t)), (t) => 'tint-' + t)),
+        line('Reading ruler', 'In the Read view, a soft band on the line you\'re reading.', switchFor('ruler', 'Reading ruler')),
+      ] : null,
+      line('Quick read', 'The first part of every word drawn bolder on a soft colour, so your eyes can jump from '
+        + 'word to word.', switchFor('quick', 'Quick read')),
+      now.quick ? V.h('div.setting.setting-stack', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Quick read colour' })),
+        swatch('Quick read colour', 'quickColour', V.reading.COLOURS, now.quickColour, named, (c) => 'quick-' + c)) : null,
+      now.dyslexia || now.quick ? V.h('div.setting.reading-try', {}, sample) : null);
+  }
+
   function pcCard() {
     if (!V.desktop || !V.prefs) return null;
     return card('This PC',
@@ -246,6 +297,7 @@ V.settings = (() => {
       phoneCard(),
       V.arrive ? V.arrive.card({ card, line, toggle, draw }) : null,  // js/arrive.js: a Chromebook's copying and saving
       appearanceCard(),
+      readingCard(),
       card('Locked notes',
         line(V.lock.hasPin() ? 'Your PIN is set' : 'No PIN yet',
           'Locked notes are scrambled on your device with your PIN. If you forget it, they can\'t be opened, by anyone.',
@@ -294,6 +346,7 @@ V.settings = (() => {
   V.on('status', () => draw());
   V.on('update', () => draw());
   V.on('ai', () => draw());
+  V.on('reading', () => draw());
   V.on('data', (table) => { if (table === 'settings') draw(); });
 
   return { render: (container) => { root = container; draw(); } };

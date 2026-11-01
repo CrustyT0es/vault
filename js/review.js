@@ -541,7 +541,8 @@ V.review = (() => {
         : `${card.kind === 'blank' ? card.term.replace(V.study.GAP, 'blank') : card.term}. Tap to see the answer`);
       V.clear(ui.card,
         V.h('span.flash-side', { text: flipped ? 'Answer' : from(card) }),
-        V.h('span.flash-words' + (flipped && card.kind === 'blank' ? '.in-context' : ''), {}, flipped ? answerOf(card) : question(card)),
+        // (reading text: Quick read's pieces go in when it's on, js/reading.js)
+        V.reading.area(V.h('span.flash-words' + (flipped && card.kind === 'blank' ? '.in-context' : ''), {}, flipped ? answerOf(card) : question(card))),
         V.h('span.flash-hint', {}, R.icon('flip'), flipped ? 'Tap to see the question' : 'Tap to see the answer'));
       const comes = preview(current(card));
       V.clear(ui.actions, flipped

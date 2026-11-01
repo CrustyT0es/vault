@@ -1171,7 +1171,7 @@ V.chat = (() => {
       pre.replaceWith(box);
       box.append(pre, copy);
     }
-    return el;
+    return V.reading.area(el);  // (reading text: Quick read's pieces go in when it's on, never in code: js/reading.js)
   }
 
   function status(turn) {

@@ -154,10 +154,11 @@ V.learn = (() => {
 
     /* The question's own words: a blank's sentence with its gap (or, for true or false, with the answer to judge). */
     function prompt(card, claim = null) {
-      if (card.kind !== 'blank') return [V.h('span.learn-term', { text: card.term }),
+      // (reading text: Quick read's pieces go in when it's on, js/reading.js)
+      if (card.kind !== 'blank') return [V.reading.area(V.h('span.learn-term', { text: card.term })),
         claim === null ? null : V.h('span.learn-claim', {}, V.h('span.learn-claim-label', { text: 'Answer' }), V.h('span', { text: claim }))];
-      return V.h('span.learn-term', {}, claim === null ? RV.question(card)
-        : [card.before, V.h('mark.blank-fill', { text: claim }), card.after]);
+      return V.reading.area(V.h('span.learn-term', {}, claim === null ? RV.question(card)
+        : [card.before, V.h('mark.blank-fill', { text: claim }), card.after]));
     }
 
     function draw() {
@@ -176,7 +177,7 @@ V.learn = (() => {
         answer = V.h('div.learn-options', { role: 'group', 'aria-label': 'Choices' }, asked.options.map((option, i) => {
           const state = !answered ? '' : option === card.answer ? '.right' : option === answered.picked ? '.wrong' : '.faded';
           return V.h('button.learn-option' + state, { type: 'button', disabled: !!answered, onclick: () => pick(option) },
-            V.h('span.learn-key', { text: String(i + 1) }), V.h('span.learn-option-text', { text: option }));
+            V.h('span.learn-key', { text: String(i + 1) }), V.reading.area(V.h('span.learn-option-text', { text: option })));
         }));
       } else if (kind === 'truth') {
         const mark = (value) => (!answered ? '' : value === asked.truth ? '.right' : value === answered.picked ? '.wrong' : '.faded');

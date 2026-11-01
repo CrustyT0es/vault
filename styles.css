@@ -9,6 +9,15 @@
 @font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/Inter-SemiBold.woff2") format("woff2"); }
 @font-face { font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/Inter-Bold.woff2") format("woff2"); }
 @font-face { font-family: "Inter Display"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/InterDisplay-SemiBold.woff2") format("woff2"); }
+/* The two dyslexia-friendly fonts (js/reading.js; their licences beside them in fonts/). Only named by the rules
+   that apply while one is chosen, so a browser only fetches them then. Lexend in its Latin and Latin Extended parts;
+   OpenDyslexic whole, as its makers publish it (its name is reserved, so it's never cut down). */
+@font-face { font-family: "Lexend"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/Lexend-Regular.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Lexend"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/Lexend-Regular-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Lexend"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/Lexend-Bold.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Lexend"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/Lexend-Bold-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "OpenDyslexic"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/OpenDyslexic-Regular.woff2") format("woff2"); }
+@font-face { font-family: "OpenDyslexic"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/OpenDyslexic-Bold.woff2") format("woff2"); }
 
 :root {
   color-scheme: light dark;
@@ -52,6 +61,19 @@
   --on-danger-fill: light-dark(#ffffff, #fb817f);
   /* ==highlighted== words (a highlighter's yellow, soft enough that every word colour still reads on it) */
   --highlight: light-dark(#fff0a8, #433a1c);
+  /* the reading aids (js/reading.js): softer letters and soft page colours for dyslexia-friendly text (the dark ones
+     muted), and Quick read's colours behind the first letters of each word */
+  --reading-text: light-dark(#25272d, #e3e5e9);
+  --tint-cream: light-dark(#fbf6e8, #1d1b16);
+  --tint-peach: light-dark(#fdf0e7, #201a17);
+  --tint-mint: light-dark(#eef8f1, #161d19);
+  --tint-sky: light-dark(#ecf3fc, #151b23);
+  --tint-lilac: light-dark(#f4f0fc, #1b1822);
+  --quick-blue: light-dark(#d9e6ff, #203452);
+  --quick-yellow: light-dark(#ffe98f, #3e3516);
+  --quick-green: light-dark(#d3f2dc, #1d3a2a);
+  --quick-pink: light-dark(#ffdbe9, #47223b);
+  --quick-purple: light-dark(#e8ddff, #352a52);
   /* toasts are always graphite */
   --toast: light-dark(#17191c, #2b2e32);
   --toast-edge: light-dark(#17191c, #44474e);
@@ -1061,8 +1083,8 @@ h4.read-heading { font: 600 16px/26px var(--font); color: var(--text-2); }
 .read-check.done .read-text { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 .read-link { color: var(--accent-ink); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
 .read-link:hover { text-decoration-color: currentColor; }
-.read-body u { text-underline-offset: 3px; }
-.read-body s { text-decoration-color: color-mix(in srgb, currentColor 75%, transparent); }
+.read-body u, .block-preview u { text-underline-offset: 3px; }
+.read-body s, .block-preview s { text-decoration-color: color-mix(in srgb, currentColor 75%, transparent); }
 mark.read-hl { padding: 0 2px; margin: 0 -2px; border-radius: 3px; background: var(--highlight); color: inherit; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .read-code-span {
   padding: 1px 5px; border: 1px solid var(--line-soft); border-radius: var(--r-xs); background: var(--surface-2);
@@ -1832,6 +1854,47 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 }
 /* Windows' high contrast colours draw every letter themselves: the copy would only get in the way. */
 @media (forced-colors: active) { .blank-shade { display: none; } }
+/* An unseen copy of a box's words as written, laid out as the box lays them out, made for a moment to find where its
+   letters are (js/editor.js: copyOf). Never hidden away, high contrast colours too, so it can always be measured. */
+.block-measure {
+  position: absolute; inset: 0; overflow: hidden; padding: 4px 0; pointer-events: none; user-select: none;
+  visibility: hidden; white-space: pre-wrap; overflow-wrap: break-word;
+}
+.block-measure > div { min-height: 1lh; }
+
+/* The box being written in, when its words have marks (js/editor.js: letters): it draws no letters of its own, and a
+   copy over it draws them all, every letter just where the box puts it (only colour and outlines here too, nothing
+   that makes a letter wider). Its marks keep their room but are out of sight, but on the line with the caret (or the
+   lines with the words picked), where they're faint; a link's brackets and address, code's backticks and italic's
+   marks are always faint (italic stays upright, as under the box: slanted letters would sit a hair off the box's).
+   Nothing is drawn behind the letters, so the caret and the words picked (the box's own) show through, and the bold
+   drawn under the box (.shade-b) is left to the copy over it. */
+.block-field.lettered > .block-input, .block-field.lettered > .block-input::selection { color: transparent !important; }
+.block-field.lettered > .blank-shade .shade-b { color: transparent; -webkit-text-stroke-color: transparent; }
+.block-letters {
+  position: absolute; inset: 0; overflow: hidden; padding: 4px 0; pointer-events: none; user-select: none;
+  color: var(--ink); white-space: pre-wrap; overflow-wrap: break-word;
+}
+.block-letters > div { min-height: 1lh; }
+.block-letters .lt-b { -webkit-text-stroke: .05em var(--ink); }
+.block-letters .lt-mark, .block-letters .lt-soft { -webkit-text-stroke-width: 0; }
+.block-letters .lt-mark { color: transparent; }
+.block-letters > .lit .lt-mark, .block-letters .lt-soft { color: var(--faint); }
+.block-letters .lt-ime { text-decoration: underline var(--ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+@media (forced-colors: active) { .block-letters { display: none; } }
+
+/* A box that isn't being written in shows its words formatted, the marks out of sight (js/editor.js: preview): a copy
+   in the Read view's look takes the box's place, a line per line, wrapping as the box would, and the box lies over it,
+   invisible but still there (a tap lands in it, screen readers read it), as does the copy under it (.blank-shade).
+   The browser's Find finds (and marks) the words in the copy. */
+.block-preview { padding: 4px 0; min-height: 34px; color: var(--text); white-space: pre-wrap; overflow-wrap: break-word; pointer-events: none; }
+.block-preview > div { min-height: 1lh; }
+.block-field.previewing > .block-input { position: absolute; inset: 0; height: 100% !important; min-height: 0; opacity: 0; }
+.block-field.previewing > .blank-shade { opacity: 0; }
+.heading-block .block-preview { min-height: 38px; }
+.heading-block.h2 .block-preview { min-height: 35px; }
+.heading-block.h3 .block-preview { color: var(--text-2); }
+.check-row.done .block-preview { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); color: var(--muted); }
 
 /* the Review page, in the Notes tab's list */
 .list.review { gap: 8px; }
@@ -2547,3 +2610,91 @@ a.btn { text-decoration: none; }  /* (start.js's "Open in Chrome": a link, for A
   background: none; color: inherit; text-align: left;
 }
 .news-open:hover strong { color: var(--accent-ink); }
+
+/* ---------------------------------------------------------------- reading aids (js/reading.js)
+
+   Dyslexia-friendly text (html[data-reading]): a reading font, more room between letters, words and lines, a soft
+   page colour and slightly softer letters, in reading text only: a note (its boxes and every copy of their words, its
+   Read view), flash cards, Chat's answers and announcements. A box and its copies (.block-field > *: the box, the
+   copy under it, the one over it, the formatted one and the measuring one) all get exactly the same, so every letter
+   still lies just where the box puts it. Never in code. */
+:root { --reading-font: var(--font); --reading-ls: .05em; --reading-ws: .16em; --reading-lh: 1.7; --tint: var(--page); --quick: var(--quick-blue); }
+:root[data-reading-font="lexend"] { --reading-font: "Lexend", var(--font); }
+:root[data-reading-font="opendyslexic"] { --reading-font: "OpenDyslexic", var(--font); }
+:root[data-reading-tint="cream"] { --tint: var(--tint-cream); }
+:root[data-reading-tint="peach"] { --tint: var(--tint-peach); }
+:root[data-reading-tint="mint"] { --tint: var(--tint-mint); }
+:root[data-reading-tint="sky"] { --tint: var(--tint-sky); }
+:root[data-reading-tint="lilac"] { --tint: var(--tint-lilac); }
+:root[data-quick="blue"] { --quick: var(--quick-blue); }
+:root[data-quick="yellow"] { --quick: var(--quick-yellow); }
+:root[data-quick="green"] { --quick: var(--quick-green); }
+:root[data-quick="pink"] { --quick: var(--quick-pink); }
+:root[data-quick="purple"] { --quick: var(--quick-purple); }
+
+html[data-reading] .blocks .block-field > *,
+html[data-reading] :is(.read-body, .read-body *:not(code, pre, pre *, .read-code-span)),
+html[data-reading] :is(.note-title, .flash-words, .learn-term, .learn-option-text, .reading-sample) {
+  font-family: var(--reading-font); letter-spacing: var(--reading-ls); word-spacing: var(--reading-ws); line-height: var(--reading-lh);
+}
+/* softer letters where notes, cards and answers are read */
+html[data-reading] :is(.editor, .flash-card, .learn-card, .learn-options, .chat-md, .news-text, .news-note-body, .reading-try) { --text: var(--reading-text); }
+/* italics stand upright (slanted letters are harder to read), in the accent colour so they still stand out */
+html[data-reading] :is(.read-body, .block-preview, .flash-words, .learn-term) :is(em, i) { font-style: normal; color: var(--accent-ink); }
+/* the page colour: the note's whole page (its tools too: they're on --page), the cards and the answers */
+html[data-reading-tint] .editor { --page: var(--tint); }
+html[data-reading-tint] :is(.flash-card:not(.flipped), .learn-card) { background-color: var(--tint); }
+html[data-reading-tint] :is(.chat-md, .news-text > .read-body, .reading-try) { background-color: var(--tint); border-radius: var(--r-md); padding: 8px 12px; }
+
+/* The reading ruler: a soft band one line high in the Read view (the line under the pointer, or the one last
+   pressed), behind the words, never in the way of a press. Only while dyslexia-friendly text has it on. */
+.read-view { position: relative; isolation: isolate; }
+.reading-ruler {
+  position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: top var(--d-1) var(--ease-out);
+}
+html:not([data-reading-ruler]) .reading-ruler { display: none; }
+
+/* Quick read (html[data-quick]): the first letters of each word drawn heavier (an outline round the letters, as the
+   editor draws **bold**: never a wider letter, so nothing moves) on a soft colour (a shadow past its edges, never
+   padding). In the box being written in, its copies draw them: the colour under the box (.shade-q), the heavier
+   letters over it (.lt-q). */
+.quick-lead {
+  background: var(--quick); box-shadow: 0 0 0 1px var(--quick); border-radius: 2px; -webkit-text-stroke: .045em currentColor;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.blank-shade .shade-q { background: var(--quick); box-shadow: 0 0 0 1px var(--quick); border-radius: 2px; }
+.block-letters .lt-q { -webkit-text-stroke: .045em var(--ink); }
+/* (in a **bold** word, on top of the bold's own outline: never lighter than the rest of its word) */
+.block-letters .lt-b .lt-q { -webkit-text-stroke-width: .095em; }
+
+/* Settings > Appearance > Reading: the colour choices (each a dot of its colour and its name), wrapping on a phone,
+   and a few words drawn the way notes are now */
+.setting.setting-stack { flex-direction: column; align-items: stretch; gap: 10px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.swatch {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px 0 8px; border-radius: var(--r-full);
+  border: 1px solid var(--line); background: var(--card); color: var(--text-2); font: 500 13.5px/1 var(--font);
+}
+.swatch:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
+.swatch[aria-checked="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); font-weight: 600; }
+.swatch-dot { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line-strong); flex: none; }
+.swatch-dot[data-dot="tint-none"] { background: var(--page); }
+.swatch-dot[data-dot="tint-cream"] { background: var(--tint-cream); }
+.swatch-dot[data-dot="tint-peach"] { background: var(--tint-peach); }
+.swatch-dot[data-dot="tint-mint"] { background: var(--tint-mint); }
+.swatch-dot[data-dot="tint-sky"] { background: var(--tint-sky); }
+.swatch-dot[data-dot="tint-lilac"] { background: var(--tint-lilac); }
+.swatch-dot[data-dot="quick-blue"] { background: var(--quick-blue); }
+.swatch-dot[data-dot="quick-yellow"] { background: var(--quick-yellow); }
+.swatch-dot[data-dot="quick-green"] { background: var(--quick-green); }
+.swatch-dot[data-dot="quick-pink"] { background: var(--quick-pink); }
+.swatch-dot[data-dot="quick-purple"] { background: var(--quick-purple); }
+@media (pointer: coarse) { .swatch { min-height: 44px; } }
+.reading-try { display: block; }
+.reading-sample { margin: 0; color: var(--text); font-size: 16px; line-height: 26px; overflow-wrap: anywhere; }
+
+/* a switch in a menu (a note's ⋯: Quick read, dyslexia-friendly text) says whether it's on */
+.menu-item .menu-state { margin-left: auto; padding-left: 16px; color: var(--muted); font-size: 13px; }
+.menu-item[aria-checked="true"] .menu-state { color: var(--accent-ink); font-weight: 600; }

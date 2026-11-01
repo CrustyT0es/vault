@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.12.0';
+V.VERSION = '1.13.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.
@@ -395,13 +395,18 @@ V.confirm = (title, text, { ok = 'OK', danger = false } = {}) => new Promise((re
   });
 });
 
+/* A menu of `items` ({ label, icon, onClick, danger }) under `anchor`. An item with `checked` (true or false) is a
+   switch: it says whether it's on, with a tick when it is. */
 V.menu = function menu(anchor, items) {
   const rect = anchor.getBoundingClientRect();
-  const list = V.h('div.menu', { role: 'menu' }, items.filter(Boolean).map((item) => V.h(
-    'button.menu-item' + (item.danger ? '.danger' : ''), {
-      type: 'button', role: 'menuitem',
+  const list = V.h('div.menu', { role: 'menu' }, items.filter(Boolean).map((item) => {
+    const switches = typeof item.checked === 'boolean';
+    return V.h('button.menu-item' + (item.danger ? '.danger' : '') + (switches ? '.menu-switch' : ''), {
+      type: 'button', role: switches ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': switches ? String(item.checked) : null,
       onclick: () => { done(); item.onClick(); },
-    }, item.icon ? V.icon(item.icon) : null, V.h('span', { text: item.label }))));
+    }, item.icon ? V.icon(item.icon) : null, V.h('span', { text: item.label }),
+    switches ? V.h('span.menu-state', { text: item.checked ? 'On' : 'Off' }) : null);
+  }));
   const wrap = V.h('div.layer.menu-layer', { onmousedown: (event) => { if (event.target === wrap) done(); } }, list);
   const done = () => { wrap.remove(); document.removeEventListener('keydown', esc, true); };
   const esc = (event) => { if (event.key === 'Escape') { event.stopPropagation(); done(); } };

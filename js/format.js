@@ -673,7 +673,8 @@ V.format = (() => {
 
   /* The words of one line as page elements, every piece of text remembered with where it is in the note (`map`:
      text node -> {line, col}), so a tap in the Read view can put the caret on the same spot to write. With `withBlanks`
-     a {{blank}} shows as its word, softly underlined. */
+     a {{blank}} shows as its word, softly underlined. (The editor shows a box's words this way too while it isn't
+     being written in: js/editor.js, preview.) */
   function inline(str, line, col, map, withBlanks = false) {
     const link = (href, kids) => V.h('a.read-link', { href, target: '_blank', rel: 'noopener noreferrer', title: href }, kids);
     const draw = (list, from, to) => {
@@ -893,5 +894,5 @@ V.format = (() => {
   };
 
   return { HEADING, LIST, MARKS, links, blanks, site, continueList, cycleList, stats, render, fileKind, typeOf, icon, clock,
-    pieces, unmark, marksAt, toggleMark, openPairAt };
+    pieces, unmark, marksAt, toggleMark, openPairAt, inline, lead };
 })();

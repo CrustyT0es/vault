@@ -282,7 +282,7 @@ V.news = (() => {
   function rendered(text) {
     const { el } = V.format.render(text);
     for (const tick of el.querySelectorAll('.read-tick')) tick.disabled = true;  // only to look at
-    return el;
+    return V.reading.area(el);  // (reading text: Quick read's pieces go in when it's on, js/reading.js)
   }
 
   /* The poll: one button per answer, "Voted" on this person's; once the counts come back, a bar for each. */

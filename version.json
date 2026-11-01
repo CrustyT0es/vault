@@ -1,12 +1,13 @@
 {
  "format": 1,
- "version": "1.12.0",
+ "version": "1.13.0",
  "min_shell": 1,
  "notes": [
-  "Updates for everyone: the person who runs your Vault cloud can now post an update, a poll or a note, and it pops up once when you open Vault (never while you're typing). Settings > Announcements shows them again.",
-  "For the person who runs Vault: Settings > Invite people > Announcements. Update the helper there first."
+  "Clean notes: words you've styled show without their == ** ++ marks. Only the line you're typing on shows them, faintly.",
+  "Dyslexia-friendly text (Settings > Appearance > Reading): an easier font (Lexend or OpenDyslexic), more space between letters and lines, a soft page colour and a reading ruler.",
+  "Quick read: the first part of every word in bold on a colour you pick, for faster reading. Switch it on in Settings or a note's \u22ef menu."
  ],
- "build": "1.12.0-cbf05cc675f6",
+ "build": "1.13.0-86a5c4140b96",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -28,9 +29,41 @@
    "sha256": "87664feda509612c05afee63f7686f98e5bd84d3042a4aac5284278bfdf99ff2",
    "size": 44272
   },
+  "fonts/Lexend-Bold-ext.woff2": {
+   "sha256": "5ae459b6dc29461eab9f02d0ff4395d3842d6bdf280e8224a79ab2667e65ee2f",
+   "size": 13708
+  },
+  "fonts/Lexend-Bold.woff2": {
+   "sha256": "52dcdaa127bac4a5ea4c39ee17a3f454ceacc18d9f2a45cc453eeab68d378588",
+   "size": 14808
+  },
+  "fonts/Lexend-OFL.txt": {
+   "sha256": "9dbb5d4c2b4b2f821d5d2861dc42297d337700f099d9183cd1348f951e0716e4",
+   "size": 4592
+  },
+  "fonts/Lexend-Regular-ext.woff2": {
+   "sha256": "b7289189cf6efefd520224a63a24bc02054f8566f33e39ce9d1a448ccd8a40a4",
+   "size": 13144
+  },
+  "fonts/Lexend-Regular.woff2": {
+   "sha256": "0601e0a909219a542cdd581e3f8f1ff8fb208978cbc9bca1c90df02fd8062bb1",
+   "size": 14476
+  },
   "fonts/OFL.txt": {
    "sha256": "58cbf162f2857e54774db7f7e6b00edcc18121a243b3a02831b60b7276d14172",
    "size": 4262
+  },
+  "fonts/OpenDyslexic-Bold.woff2": {
+   "sha256": "b534a0b84ef3cca941ebdb506ce3f4e0010aa4ef881271bac8b6959dbf694fbf",
+   "size": 108068
+  },
+  "fonts/OpenDyslexic-OFL.txt": {
+   "sha256": "ac40e91930fdb4d64a85509ba1054a5665921b4257a86acde51439c397b4bc64",
+   "size": 4749
+  },
+  "fonts/OpenDyslexic-Regular.woff2": {
+   "sha256": "0441bc21071e42db57c217f93fbc48d3b55a2987c02814c94dc93621c42e8695",
+   "size": 103336
   },
   "icons/favicon-32.png": {
    "sha256": "2666c4e97047d7f2e4d76ec04729a01f180acdf4367c8c9d02827382a18f2a4a",
@@ -65,8 +98,8 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "db91374fd5692d48323fcf8d6461099a563983ae61d1820b84d231f23b868a83",
-   "size": 5153
+   "sha256": "14fe96fb19ac3400240826b43e7d41fea4d1b55ef89605699e8dec1829500e89",
+   "size": 5193
   },
   "js/access.js": {
    "sha256": "545406553477dacd7a75e7b1124a4655064e660d21e01cc3ca890d5645986e07",
@@ -89,8 +122,8 @@
    "size": 5778
   },
   "js/chat.js": {
-   "sha256": "592b5240a710d043681421205c9470b7fcc40f77546e56fb834bac3ccef73839",
-   "size": 98737
+   "sha256": "4628b2709536474f95a7c5eecb5354b9ffb29c211ed8ceda24d777709ce2c1aa",
+   "size": 98842
   },
   "js/clips.js": {
    "sha256": "c36acc1a7abf53295396d5b3ce99e41ee74f6ebefcaba65c0f936dfbc19ad31d",
@@ -109,8 +142,8 @@
    "size": 19526
   },
   "js/editor.js": {
-   "sha256": "aa4f34ec40e358d2875888e8d7194c67105bc5c08e32add117f621cd88b0a190",
-   "size": 121883
+   "sha256": "daa4f3bc1c9b79f82471de19a896e36ba3c7d1ca39c34ed2d8d2a7db0390c699",
+   "size": 168430
   },
   "js/exams.js": {
    "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
@@ -121,8 +154,8 @@
    "size": 65468
   },
   "js/format.js": {
-   "sha256": "f5183878c7f68ad8e657a867d51b67ca72c7abb82703f2f690ca47c56e377fb8",
-   "size": 46021
+   "sha256": "a6ff0e43b578d99053fe345b5778bc1104d25abeb2c36ff9e84685512e815e2e",
+   "size": 46142
   },
   "js/history.js": {
    "sha256": "b73742397b9eeb30fe8f88a0e82aeb1b1e055d49f57d3b37b6558dae9bdaa861",
@@ -133,16 +166,16 @@
    "size": 46552
   },
   "js/learn.js": {
-   "sha256": "1c57fc8814c57d3db8b6ae117f14772d7744789574ec29823b8c239da871476c",
-   "size": 15387
+   "sha256": "35d545969cc5900223283ee48d1e3f34fbab5977bc604f33d5ccf6c1e54ed69b",
+   "size": 15514
   },
   "js/lock.js": {
    "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
    "size": 7054
   },
   "js/news.js": {
-   "sha256": "4cc023fe5859dc03bb76d7091a058e176d03c22f36cc4726dda176ee7cc5f68b",
-   "size": 33812
+   "sha256": "4e72ac8da12ef5babd9d7bbf2839c6597eda5f4da981eb1f02f7ecf00255a77e",
+   "size": 33902
   },
   "js/notes.js": {
    "sha256": "cf1e291b8569e85b3ea97b419ce7eebc485417196c10b6e2229b20e3813cb26a",
@@ -156,21 +189,25 @@
    "sha256": "5053a91207c01b8b7fa546e9fd07a19fc3b10a4bcc8d3c7189ec251aeeee1373",
    "size": 39875
   },
+  "js/reading.js": {
+   "sha256": "f99867d90ca208e0fd8a8cf78320132738411fdb638fcc71f8c284184169c8ae",
+   "size": 13906
+  },
   "js/reminders.js": {
    "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
    "size": 38059
   },
   "js/review.js": {
-   "sha256": "c97b4f85a913ec4f36ab9c0d2c32a261690143f0735ecaa41ac9d6b413a9a761",
-   "size": 31948
+   "sha256": "ff96a5447c1e34b82ad57eecf83463eb01bd4a07d1cf7e0019dc3fe637d48496",
+   "size": 32045
   },
   "js/send.js": {
    "sha256": "e82962851c575a138dc7979358944077c8b2de73cb26ceeb1abe7ee7405550ad",
    "size": 58786
   },
   "js/settings.js": {
-   "sha256": "eea067af226d18cf025956cadd21931f4d85f9eef3542025afa13ae67dd2646f",
-   "size": 17606
+   "sha256": "5112a8b5a2921bac312144feb80763da6a31395d0d864f1ef26fda13802ac6a1",
+   "size": 21257
   },
   "js/start.js": {
    "sha256": "43730fba920d07ca145e8c8a6e5404162a48c293abb6d734f22e5f3cbf172051",
@@ -185,8 +222,8 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "c49b64ef1999f7bba1c7d34ebbc71e3199c92afc04afc33fefc9979d942307a6",
-   "size": 43599
+   "sha256": "c02f532fc5e1f8611b9422f1ec7281508abcfed54b61654bd0b13e7b89b8d519",
+   "size": 44055
   },
   "js/welcome.js": {
    "sha256": "ba8fc8628c36a3dbe33268e47ee3906a1d4138385f3542d18bd7bc292ed72e23",
@@ -197,11 +234,11 @@
    "size": 1452
   },
   "styles.css": {
-   "sha256": "68451f5794a3582a17410e38aabb31ca8ddd07b1e760ae401061f34a12f82fad",
-   "size": 162804
+   "sha256": "9d54bf95f4cfba3d038edaaad0b0bd42e493bb24b911bb60d5aa4c5a853b95a2",
+   "size": 175495
   },
   "sw.js": {
-   "sha256": "43036e901bffec411aa52fafe814418e61dfd95137429ce5cc7d4025d22ced53",
+   "sha256": "9be78cf27677c728ad0e9df16ed4f500eefbace22db5f68dd592aea717a9e5ee",
    "size": 8260
   },
   "vendor/LICENSE-supabase-js.txt": {
