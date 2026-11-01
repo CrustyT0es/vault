@@ -2668,6 +2668,8 @@ html:not([data-reading-ruler]) .reading-ruler { display: none; }
 .block-letters .lt-q { -webkit-text-stroke: .045em var(--ink); }
 /* (in a **bold** word, on top of the bold's own outline: never lighter than the rest of its word) */
 .block-letters .lt-b .lt-q { -webkit-text-stroke-width: .095em; }
+/* Quick read's colour switched off (html[data-quick-plain]): just the heavier letters, no colour behind them */
+html[data-quick-plain] :is(.quick-lead, .blank-shade .shade-q) { background: none; box-shadow: none; }
 
 /* Settings > Appearance > Reading: the colour choices (each a dot of its colour and its name), wrapping on a phone,
    and a few words drawn the way notes are now */

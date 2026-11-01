@@ -166,7 +166,7 @@ V.settings = (() => {
   }
 
   /* The two reading aids (js/reading.js), for every device the person uses: dyslexia-friendly text (its font, page
-     colour and reading ruler shown under it while it's on) and Quick read (with its colour). Each change goes to the
+     colour and reading ruler shown under it while it's on) and Quick read (with its colour, which can be switched off). Each change goes to the
      cloud first; while it's on its way its control waits, and one that can't be made goes back and says so. */
   let readingBusy = false;
   async function changeReading(changes) {
@@ -211,8 +211,11 @@ V.settings = (() => {
       ] : null,
       line('Quick read', 'The first part of every word drawn bolder on a soft colour, so your eyes can jump from '
         + 'word to word.', switchFor('quick', 'Quick read')),
-      now.quick ? V.h('div.setting.setting-stack', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Quick read colour' })),
-        swatch('Quick read colour', 'quickColour', V.reading.COLOURS, now.quickColour, named, (c) => 'quick-' + c)) : null,
+      now.quick ? line('Colour behind the bold part', 'Off: just the bolder letters, with no colour.',
+        switchFor('quickHighlight', 'Colour behind the bold part')) : null,
+      now.quick && now.quickHighlight ? V.h('div.setting.setting-stack', {}, V.h('div.setting-text', {},
+        V.h('strong', { text: 'Quick read colour' })),
+      swatch('Quick read colour', 'quickColour', V.reading.COLOURS, now.quickColour, named, (c) => 'quick-' + c)) : null,
       now.dyslexia || now.quick ? V.h('div.setting.reading-try', {}, sample) : null);
   }
 

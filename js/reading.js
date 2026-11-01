@@ -6,7 +6,8 @@
    band one line high that follows the pointer, or the line last pressed.
 
    Quick read: the first third of each word (ceil(letters / 3): "Reading" -> "Rea", a word of one to three letters ->
-   its first) drawn heavier on a soft colour, so the eye can jump from word to word. In reading text only: a note's
+   its first) drawn heavier on a soft colour (the colour has its own switch: off, just the heavier letters), so the eye
+   can jump from word to word. In reading text only: a note's
    Read view and its formatted words in the editor (js/editor.js draws the box being written in itself, in its copies,
    without changing a letter's width), flash cards in Review and Learn, Chat's answers and announcements. Never in
    the app's own labels, list titles, `code`, links, or a locked note.
@@ -14,7 +15,7 @@
    The choices live in the settings row's extra.reading (changed through V.cloud.changeExtra, like "Use Claude too",
    so they follow the person everywhere), with a copy in localStorage 'vault-reading' so they're on from the very first
    frame, before the cloud answers. They're attributes on <html> (data-reading, data-reading-font, data-reading-tint,
-   data-reading-ruler, data-quick) and styles.css does the rest; Quick read's pieces are spans put round the first
+   data-reading-ruler, data-quick, data-quick-plain) and styles.css does the rest; Quick read's pieces are spans put round the first
    letters of each word in what's already drawn (textContent only, never innerHTML), so copying gives the words as
    they are. */
 'use strict';
@@ -24,7 +25,8 @@ V.reading = (() => {
   const FONTS = ['lexend', 'opendyslexic'];
   const TINTS = ['none', 'cream', 'peach', 'mint', 'sky', 'lilac'];
   const COLOURS = ['blue', 'yellow', 'green', 'pink', 'purple'];
-  const DEFAULTS = { dyslexia: false, font: 'lexend', tint: 'none', ruler: false, quick: false, quickColour: 'blue' };
+  const DEFAULTS = { dyslexia: false, font: 'lexend', tint: 'none', ruler: false, quick: false, quickColour: 'blue',
+    quickHighlight: true };
 
   /* Whatever was stored, made into a whole, sensible set of choices (unknown values: the defaults). */
   function tidy(raw) {
@@ -36,6 +38,7 @@ V.reading = (() => {
       ruler: r.ruler === true,
       quick: r.quick === true,
       quickColour: COLOURS.includes(r.quickColour) ? r.quickColour : DEFAULTS.quickColour,
+      quickHighlight: r.quickHighlight !== false,  // (on unless switched off: choices kept before it existed have it on)
     };
   }
   const same = (a, b) => Object.keys(DEFAULTS).every((k) => a[k] === b[k]);
@@ -60,6 +63,7 @@ V.reading = (() => {
     set('data-reading-tint', now.dyslexia && now.tint !== 'none' ? now.tint : '');
     set('data-reading-ruler', now.dyslexia && now.ruler ? 'on' : '');
     set('data-quick', now.quick ? now.quickColour : '');
+    set('data-quick-plain', now.quick && !now.quickHighlight ? 'on' : '');  // (just the heavier letters, no colour)
   }
   apply();  // (at once: this file comes right after util.js, before anything is drawn)
 
@@ -92,8 +96,8 @@ V.reading = (() => {
   /* The plain sentence for a change that didn't go through. */
   const NOT_CHANGED = 'That reading setting wasn\'t changed: Vault couldn\'t reach your cloud. Check you\'re online and try again.';
 
-  /* One of the two switched on or off (a note's ⋯ menu), with a line saying so either way. */
-  const NAMES = { quick: 'Quick read', dyslexia: 'Dyslexia-friendly text' };
+  /* One of the switches turned on or off (a note's ⋯ menu), with a line saying so either way. */
+  const NAMES = { quick: 'Quick read', quickHighlight: 'Quick read\'s colour', dyslexia: 'Dyslexia-friendly text' };
   async function toggle(name) {
     const want = !now[name];
     try {
@@ -290,6 +294,7 @@ V.reading = (() => {
     get: () => ({ ...now }),
     quickOn: () => now.quick,
     look: () => (now.quick ? now.quickColour : ''),
+    highlightOn: () => now.quick && now.quickHighlight,
     set, toggle, tidy, ranges, quick, unquick, wrapLine, area, ruler,
   };
 })();

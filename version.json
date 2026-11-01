@@ -1,13 +1,14 @@
 {
  "format": 1,
- "version": "1.13.0",
+ "version": "1.13.1",
  "min_shell": 1,
  "notes": [
+  "Quick read's colour is optional now: switch off \"Colour behind the bold part\" (Settings > Appearance > Reading, or \"Quick read colour\" in a note's \u22ef menu) for just the bolder letters.",
   "Clean notes: words you've styled show without their == ** ++ marks. Only the line you're typing on shows them, faintly.",
   "Dyslexia-friendly text (Settings > Appearance > Reading): an easier font (Lexend or OpenDyslexic), more space between letters and lines, a soft page colour and a reading ruler.",
   "Quick read: the first part of every word in bold on a colour you pick, for faster reading. Switch it on in Settings or a note's \u22ef menu."
  ],
- "build": "1.13.0-86a5c4140b96",
+ "build": "1.13.1-dc8398f900c1",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -142,8 +143,8 @@
    "size": 19526
   },
   "js/editor.js": {
-   "sha256": "daa4f3bc1c9b79f82471de19a896e36ba3c7d1ca39c34ed2d8d2a7db0390c699",
-   "size": 168430
+   "sha256": "7c4befcac08e2c55793720347e2a36af45d220fd359196e8b831e97c40e83322",
+   "size": 168614
   },
   "js/exams.js": {
    "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
@@ -190,8 +191,8 @@
    "size": 39875
   },
   "js/reading.js": {
-   "sha256": "f99867d90ca208e0fd8a8cf78320132738411fdb638fcc71f8c284184169c8ae",
-   "size": 13906
+   "sha256": "69c2802805b2c46782c29728c2859fef8a1ff511ecf5aa2cb667aba1422ab28f",
+   "size": 14354
   },
   "js/reminders.js": {
    "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
@@ -206,8 +207,8 @@
    "size": 58786
   },
   "js/settings.js": {
-   "sha256": "5112a8b5a2921bac312144feb80763da6a31395d0d864f1ef26fda13802ac6a1",
-   "size": 21257
+   "sha256": "ad2ba34e136da061dc6c046044b092647404c7434c20806b653b965301aa78a9",
+   "size": 21491
   },
   "js/start.js": {
    "sha256": "43730fba920d07ca145e8c8a6e5404162a48c293abb6d734f22e5f3cbf172051",
@@ -222,7 +223,7 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "c02f532fc5e1f8611b9422f1ec7281508abcfed54b61654bd0b13e7b89b8d519",
+   "sha256": "30c68782f73cb63f39eeec751b0cdbc45e96730ea5c4c4bfd63a6310e86762d0",
    "size": 44055
   },
   "js/welcome.js": {
@@ -234,11 +235,11 @@
    "size": 1452
   },
   "styles.css": {
-   "sha256": "9d54bf95f4cfba3d038edaaad0b0bd42e493bb24b911bb60d5aa4c5a853b95a2",
-   "size": 175495
+   "sha256": "111a6ec77aafdba26f6cda1636be9375803ec2f7be18cdcc87e87b84e85680f3",
+   "size": 175711
   },
   "sw.js": {
-   "sha256": "9be78cf27677c728ad0e9df16ed4f500eefbace22db5f68dd592aea717a9e5ee",
+   "sha256": "7ae7abcedb401b682d27cacb997db099b8c66418c56604bfa4435de483f106c3",
    "size": 8260
   },
   "vendor/LICENSE-supabase-js.txt": {

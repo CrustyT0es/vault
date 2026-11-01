@@ -2615,6 +2615,8 @@ V.editor = (() => {
       V.history ? { label: 'History', icon: 'clock', onClick: () => V.history.show(note.id) } : null,
       // The two reading aids (js/reading.js), for every device: the same switches as Settings > Appearance > Reading.
       { label: 'Quick read', icon: 'bolt', checked: V.reading.get().quick, onClick: () => V.reading.toggle('quick') },
+      V.reading.get().quick ? { label: 'Quick read colour', icon: 'spark', checked: V.reading.get().quickHighlight,
+        onClick: () => V.reading.toggle('quickHighlight') } : null,
       { label: 'Dyslexia-friendly text', icon: 'text', checked: V.reading.get().dyslexia, onClick: () => V.reading.toggle('dyslexia') },
       { label: 'Move to Trash', icon: 'trash', danger: true, onClick: trash },
     ]);
