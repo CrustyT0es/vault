@@ -539,6 +539,13 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 .card-snippet { color: var(--text-2); font: 400 13.5px/20px var(--font); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-snippet.muted, .card-snippet.locked { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .card-snippet.locked .icon { width: 14px; height: 14px; }
+/* A checklist's tick boxes in a card's words (js/notes.js boxed()): drawn small boxes, never a letter-like ○ */
+.snip-box {
+  display: inline-block; position: relative; width: .85em; height: .85em; margin: 0 .3em 0 .05em; vertical-align: -.1em;
+  border: 1.5px solid var(--muted); border-radius: 3px; box-sizing: border-box;
+}
+.snip-box.done { background: var(--muted); border-color: transparent; }
+.snip-box .icon { position: absolute; inset: 0; margin: auto; width: .7em; height: .7em; color: var(--card); }
 .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font: 500 12.5px/16px var(--font); color: var(--muted); margin-top: 2px; min-width: 0; }
 .card-meta .when { margin-left: auto; }
 .tag { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }

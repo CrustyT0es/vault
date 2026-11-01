@@ -63,21 +63,74 @@ V.notes = (() => {
   const isTag = (value) => typeof value === 'string' && value.startsWith('tag:');
   const tagKey = (value) => value.slice(4);
 
-  /* A note's words for its card (and an untitled note's title): one line, tick boxes as ○ and ●, and without the marks
-     of bold, italic, underline, strikethrough or highlight (js/format.js: unmark). Kept with each note's row (the
-     lists are drawn again often, and a long note's marks needn't be read each time): a changed note is a new row, so
-     its old words go with the old one, and a locked note's are never kept. */
+  /* A note's words for its card (and an untitled note's title), as words, never as the way they're written: one line,
+     without the marks of bold, italic, underline, strikethrough or highlight (js/format.js: unmark), without a
+     heading's #, a list's - or *, a quote's >, `code` ticks, the ``` lines, --- rules or a {{blank}}'s braces; a flash
+     card's "q :: a" as "q → a"; lines run together with " · " where one doesn't end a sentence ("Summary · Plants make
+     their own food..."). Tick boxes are ○ and ● here (a card draws them as boxes: boxed()); a title has none. Kept with
+     each note's row (the lists are drawn again often, and a long note's marks needn't be read each time): a changed note
+     is a new row, so its old words go with the old one, and a locked note's are never kept. */
   const plainKept = new WeakMap();
-  function plain(note) {
+  const ENDS = /[.!?:;,…]$/;  // a line ending like this runs on with a space; any other gets " · "
+  function pieces(body) {
+    const out = [];
+    let fenced = false;
+    for (const raw of (V.format ? V.format.unmark(body) : body).split('\n')) {
+      if (/^\s*```/.test(raw)) { fenced = !fenced; continue; }
+      let line = raw;
+      let box = null;
+      if (!fenced) {
+        const check = CHECK.exec(line);
+        if (check) { box = check[2] === ' ' ? 'open' : 'done'; line = check[3]; }
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) continue;  // a --- rule
+        line = line.replace(/^\s{0,3}#{1,6}\s+/, '')  // a heading's #s (a #tag has no space after it, so it stays)
+          .replace(/^\s*>\s?/, '')                   // a quote
+          .replace(/^\s*[-*+•]\s+/, '')              // a list's dash or star (a numbered list keeps its numbers)
+          .replace(/\{\{([^{}]*)\}\}/g, '$1')        // a {{blank}}
+          .replace(/`([^`\n]+)`/g, '$1')             // `code`
+          .replace(/\s+::\s+/g, ' → ');              // a flash card
+      }
+      line = line.replace(/\s+/g, ' ').trim();
+      if (line) out.push({ text: line, box });
+    }
+    return out;
+  }
+  function joined(list, boxes) {
+    let words = '';
+    for (const piece of list) {
+      const glyph = boxes && piece.box ? (piece.box === 'open' ? '○ ' : '● ') : '';
+      if (words) words += (glyph || ENDS.test(words.replace(/["'”’)\]]+$/, ''))) ? ' ' : ' · ';
+      words += glyph + piece.text;
+    }
+    return words;
+  }
+  function plain(note, boxes = true) {
     const body = note.body || '';
     const kept = plainKept.get(note);
-    if (kept && kept.body === body) return kept.words;
-    const words = (V.format ? V.format.unmark(body) : body).split('\n').map((line) => {
-      const box = CHECK.exec(line);
-      return box ? (box[2] === ' ' ? '○ ' : '● ') + box[3] : line;
-    }).join(' ').replace(/\s+/g, ' ').trim();
-    if (V.format && !note.locked) plainKept.set(note, { body, words });
-    return words;
+    let made = kept && kept.body === body ? kept : null;
+    if (!made) {
+      const list = pieces(body);
+      made = { body, words: joined(list, true), title: joined(list, false) };
+      if (V.format && !note.locked) plainKept.set(note, made);
+    }
+    return boxes ? made.words : made.title;
+  }
+
+  /* A card's words with its tick boxes (○ / ●, from plain()) drawn as small boxes, the ticked ones with a tick. */
+  function boxed(parts) {
+    const out = [];
+    for (const part of parts) {
+      if (typeof part !== 'string') { out.push(part); continue; }
+      for (const bit of part.split(/([○●] ?)/)) {
+        if (!bit) continue;
+        if (bit[0] === '○' || bit[0] === '●') {
+          const done = bit[0] === '●';
+          out.push(V.h('span.snip-box' + (done ? '.done' : ''), { role: 'img', 'aria-label': done ? 'done' : 'to do' },
+            done ? V.icon('check') : null));
+        } else out.push(bit);
+      }
+    }
+    return out;
   }
 
   function progress(note) {
@@ -89,7 +142,7 @@ V.notes = (() => {
     return all ? { all, done } : null;
   }
 
-  V.noteTitle = (note) => (note.title || '').trim() || (!note.locked && plain(note).slice(0, 60)) || 'Untitled';
+  V.noteTitle = (note) => (note.title || '').trim() || (!note.locked && plain(note, false).slice(0, 60)) || 'Untitled';
 
   function shown() {
     if (filter === 'trash') {
@@ -721,7 +774,7 @@ V.notes = (() => {
       V.h('span.card-title', {}, O.marked(V.noteTitle(note), look.terms)),
       note.pinned ? V.icon('pin-on', 'pinned') : null),
     note.locked ? V.h('div.card-snippet.locked', {}, V.icon('lock'), V.h('span', { text: 'Locked: open it with your PIN' }))
-      : snippet ? V.h('div.card-snippet', {}, O.marked(snippet, look.terms)) : null,
+      : snippet ? V.h('div.card-snippet', {}, boxed(O.marked(snippet, look.terms))) : null,
     V.h('div.card-meta', {},
       // The note-taker is writing into it right now (js/notetaker.js): a tap opens its live screen, not the note.
       V.notetaker && V.notetaker.listeningTo && V.notetaker.listeningTo() === note.id
