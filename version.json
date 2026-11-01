@@ -1,14 +1,12 @@
 {
  "format": 1,
- "version": "1.11.0",
+ "version": "1.12.0",
  "min_shell": 1,
  "notes": [
-  "Friends can join by scanning a QR code: Settings > Invite people > Join with a QR code. They type their name, e-mail and a password on their own phone, and they're in (the code works for 30 minutes, up to 10 people, and you can stop it).",
-  "Gemini Fast is the default for chats and note summaries: the quickest Gemini first, usually about a second. Pick Gemini Smart in a chat's model menu (or Smarter Gemini notes in Settings > AI) for harder things.",
-  "One Check Gemini (Settings > AI) is enough to put the quickest model first, and a busy model goes to the back at once.",
-  "Copying on your phone reaches your PC and Chromebook: open Vault after copying, or Share > Vault, or the icon's Send clipboard. Keep this clipboard in step is now on by default."
+  "Updates for everyone: the person who runs your Vault cloud can now post an update, a poll or a note, and it pops up once when you open Vault (never while you're typing). Settings > Announcements shows them again.",
+  "For the person who runs Vault: Settings > Invite people > Announcements. Update the helper there first."
  ],
- "build": "1.11.0-71ba2686ade7",
+ "build": "1.12.0-cbf05cc675f6",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -67,12 +65,12 @@
    "size": 5653
   },
   "index.html": {
-   "sha256": "b75229de22a0aa42a171cd1912f79d0c386d5f39e3540584e82e95f5448c28af",
-   "size": 5116
+   "sha256": "db91374fd5692d48323fcf8d6461099a563983ae61d1820b84d231f23b868a83",
+   "size": 5153
   },
   "js/access.js": {
-   "sha256": "8c4542df1c9057800806525a636e460582fa17fb2495545f725927cd98a07702",
-   "size": 46264
+   "sha256": "545406553477dacd7a75e7b1124a4655064e660d21e01cc3ca890d5645986e07",
+   "size": 47336
   },
   "js/ai.js": {
    "sha256": "24b51386f496001f0a3cfc974eb51fe2a6813c89ad31a254de04efad3f79f023",
@@ -142,6 +140,10 @@
    "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
    "size": 7054
   },
+  "js/news.js": {
+   "sha256": "4cc023fe5859dc03bb76d7091a058e176d03c22f36cc4726dda176ee7cc5f68b",
+   "size": 33812
+  },
   "js/notes.js": {
    "sha256": "cf1e291b8569e85b3ea97b419ce7eebc485417196c10b6e2229b20e3813cb26a",
    "size": 55186
@@ -167,12 +169,12 @@
    "size": 58786
   },
   "js/settings.js": {
-   "sha256": "7601d96910f0d2f2108c5eb1bd125180ea4dcfead9e6903d6719f0ed1e72b0aa",
-   "size": 17504
+   "sha256": "eea067af226d18cf025956cadd21931f4d85f9eef3542025afa13ae67dd2646f",
+   "size": 17606
   },
   "js/start.js": {
-   "sha256": "9cc6d0e7f8df07dbca92b1bf8ce77b8005953e60d2207a97de1dcc41c53549fc",
-   "size": 47234
+   "sha256": "43730fba920d07ca145e8c8a6e5404162a48c293abb6d734f22e5f3cbf172051",
+   "size": 47339
   },
   "js/study.js": {
    "sha256": "28c29e9a44704eba9f40e523797f03bfece91857f154fd438659714666fc5aea",
@@ -183,7 +185,7 @@
    "size": 15028
   },
   "js/util.js": {
-   "sha256": "3a981692a85c316989b799c3df6039498aaf495c288925cff01ec854c0d988c9",
+   "sha256": "c49b64ef1999f7bba1c7d34ebbc71e3199c92afc04afc33fefc9979d942307a6",
    "size": 43599
   },
   "js/welcome.js": {
@@ -195,11 +197,11 @@
    "size": 1452
   },
   "styles.css": {
-   "sha256": "84c73f3b88ebfc4948ae97690a1e8073242f70241927cb11663e24fa0747c88b",
-   "size": 158158
+   "sha256": "68451f5794a3582a17410e38aabb31ca8ddd07b1e760ae401061f34a12f82fad",
+   "size": 162804
   },
   "sw.js": {
-   "sha256": "161190f8dac20fb87a2945406265482e6be5cdd0e188a6539b1318a5ca6e88df",
+   "sha256": "43036e901bffec411aa52fafe814418e61dfd95137429ce5cc7d4025d22ced53",
    "size": 8260
   },
   "vendor/LICENSE-supabase-js.txt": {

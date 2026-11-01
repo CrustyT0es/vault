@@ -2477,3 +2477,73 @@ a.btn { text-decoration: none; }  /* (start.js's "Open in Chrome": a link, for A
 .stats-people li span { color: var(--muted); font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; }
 .stats-privacy { margin: 10px 0 0; }
 .setting-buttons.stats-foot { justify-content: space-between; align-items: center; }
+
+/* Updates for everyone (1.12, js/news.js): the pop-up with its poll and note, the owner's composer, Settings' card */
+.news-sheet .sheet-head { align-items: flex-start; }
+.news-sheet .sheet-head h2 { white-space: normal; overflow-wrap: anywhere; font: 600 19px/26px var(--font); letter-spacing: -.01em; }
+.sheet-body > .news-from { margin: 0 0 8px; color: var(--muted); font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; }
+.sheet-body > .news-count { margin: 0 0 8px; color: var(--accent-ink); font: 600 12.5px/18px var(--font); }
+.news-text { margin: 4px 0 6px; }
+.news-text .read-body, .news-note-body .read-body { font-size: 15px; line-height: 23px; }
+.news-poll { display: grid; gap: 8px; margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.news-question { margin: 0 0 2px; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.news-option {
+  display: grid; gap: 7px; width: 100%; min-height: 48px; padding: 11px 14px; text-align: left;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--card); color: var(--text);
+  transition: background var(--d-1), border-color var(--d-1);
+}
+.news-option:hover:not(:disabled) { background: var(--surface-2); }
+.news-option:disabled { cursor: default; }
+.news-option.voted { border-color: var(--accent); background: var(--accent-wash); }
+.news-option-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.news-option-text { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.news-voted { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--accent-ink); font: 600 12.5px/16px var(--font); }
+.news-voted .icon { width: 14px; height: 14px; }
+.news-tally { flex: none; color: var(--text-2); font: 500 13px/16px var(--font); font-variant-numeric: tabular-nums; }
+.news-bar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.news-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width .4s var(--ease-out); }
+.news-poll-hint { margin: 0; }
+.news-note {
+  display: grid; gap: 6px; margin: 14px 0 4px; padding: 12px 14px; min-width: 0;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
+}
+.news-note-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.news-note-head .icon { color: var(--muted); }
+.news-note-head strong { min-width: 0; overflow-wrap: anywhere; }
+.news-note-body { max-height: 184px; overflow: hidden; }
+.news-note-more { margin: 0; }
+.setting-buttons.news-note-buttons { padding: 4px 0 0; }
+.news-message { min-height: 104px; }
+.setting-buttons.news-compose-add { padding: 14px 0 4px; }
+.news-compose-poll:not(:empty), .news-compose-note:not(:empty) {
+  display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); min-width: 0;
+}
+.news-compose-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.news-compose-poll > .btn { justify-self: start; }
+.news-answers { display: grid; gap: 8px; }
+.news-answer { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.news-answer .field { flex: 1; min-width: 0; }
+.news-results-label { margin: 4px 0 0; }
+.segmented.news-results { width: 100%; }
+.news-results button { min-width: 0; padding: 6px 10px; white-space: normal; line-height: 18px; text-align: center; }
+.news-pick-list { display: grid; gap: 2px; max-height: 240px; overflow: auto; }
+.news-pick-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px;
+  border: none; border-radius: var(--r-md); background: none; color: var(--text); text-align: left;
+}
+.news-pick-item:hover { background: var(--surface-2); }
+.news-pick-item .icon { color: var(--muted); }
+.news-pick-item span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-chosen {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg);
+}
+.news-chosen .icon { color: var(--muted); }
+.news-chosen strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-chosen .icon-btn .icon { color: inherit; }
+.setting.news-row { gap: 8px; }
+.news-open {
+  flex: 1; min-width: 0; display: block; margin: -6px 0; padding: 6px 0; border: none; border-radius: var(--r-sm);
+  background: none; color: inherit; text-align: left;
+}
+.news-open:hover strong { color: var(--accent-ink); }

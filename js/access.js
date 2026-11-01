@@ -16,6 +16,9 @@
    the accounts made with them: it checks the code itself, as whoever scans it has no sign-in yet), so the PC asks it
    too, even with the secret key here. "Stop this code" stops it (and every code shown before it) at once.
 
+   Announcements (the helper's version 3): the card's "New announcement" opens js/news.js's composer, for an update,
+   a poll or a note that pops up once for everyone in the owner's cloud.
+
    "Stats" (the owner, wherever invites work): people joined and waiting, who was active lately, devices and Vault
    versions in use, notes, files and space, feedback waiting (vault/stats.py says how). Counts, sizes and times only,
    never what anyone wrote. Downloads aren't counted: nothing counts them, and Vault has no trackers.
@@ -34,6 +37,7 @@ V.invites = (() => {
   const SLUG = 'vault-admin';
   const PHONE_URL = 'https://crustyt0es.github.io/vault/';  // vault/__init__.py's, for a device that doesn't say
   const JOIN_SINCE = 2;  // the helper's first version that makes join codes (vault/helper.py's JOIN_SINCE)
+  const NEWS_SINCE = 3;  // ...and the first with announcements (vault/helper.py's NEWS_SINCE)
   const JOINED_SLACK = 5000;  // the cloud's sign-in service and its helper may not quite agree on the time
   const waits = { tick: 30000, poll: 15000 };  // the join sheet's countdown, and asking who joined (tests shorten them)
   const TOKENS_PAGE = 'https://supabase.com/dashboard/account/tokens';
@@ -507,33 +511,42 @@ V.invites = (() => {
     make();
   }
 
-  /* The card's "Join with a QR code" row: it takes the helper, at version 2 or newer. */
-  function joinRow(ui) {
-    const title = 'Join with a QR code';
-    const about = 'Anyone who scans it in the next 30 minutes gets their own Vault here: they type their name, e-mail and a password.';
-    const showButton = (disabled) => V.button('Show QR code', { kind: 'primary', icon: 'qr', disabled,
-      onClick: () => joinSheet(ui) });
+  /* A row of the card whose button needs the helper at version `since` or newer (join codes: 2, announcements: 3).
+     `cant`: what this Vault can't do yet; `what`: what needs the helper. */
+  function helperRow(ui, { since, title, about, button, cant, what }) {
     if (state.how === 'helper') {
-      return state.version >= JOIN_SINCE ? ui.line(title, about, showButton(false))
+      return state.version >= since ? ui.line(title, about, button(false))
         : ui.line(title, 'Update the helper in Vault on your PC first (Settings > Invite people > Update). No Update there? '
           + 'Open Jarvis and click Update first.', null);
     }
     if (state.how !== 'pc') return null;  // (1.8's PC part: a Jarvis update brings the helper first)
-    if (!(Number(state.current) >= JOIN_SINCE)) {
-      // This page is newer than the PC's own Vault part, which can't make join codes or put in a helper that can.
+    if (!(Number(state.current) >= since)) {
+      // This page is newer than the PC's own Vault part, which can't do it or put in a helper that can.
       return ui.line(title, V.pc && V.pc.standalone && V.pc.standalone()
-        ? 'Install the newest Vault on this PC (its setup-vault.bat) first: this Vault can\'t make join codes yet.'
-        : 'Update Jarvis first (open Jarvis and click Update): this Vault can\'t make join codes yet.', showButton(true));
+        ? `Install the newest Vault on this PC (its setup-vault.bat) first: this Vault can't ${cant} yet.`
+        : `Update Jarvis first (open Jarvis and click Update): this Vault can't ${cant} yet.`, button(true));
     }
     if (!state.helper) {
-      return ui.line(title, 'Join codes need Vault\'s helper in your cloud: press Set up below (once, with a Supabase access '
+      return ui.line(title, `${what} need Vault's helper in your cloud: press Set up below (once, with a Supabase access `
         + 'token).', null);
     }
-    if (Number(state.helper.version) < JOIN_SINCE) {
-      return ui.line(title, 'Update the helper below first: join codes need its newest version.', showButton(true));
+    if (Number(state.helper.version) < since) {
+      return ui.line(title, `Update the helper below first: ${what.toLowerCase()} need its newest version.`, button(true));
     }
-    return ui.line(title, about, showButton(false));
+    return ui.line(title, about, button(false));
   }
+
+  /* The card's "Join with a QR code" row: it takes the helper, at version 2 or newer. */
+  const joinRow = (ui) => helperRow(ui, { since: JOIN_SINCE, title: 'Join with a QR code',
+    about: 'Anyone who scans it in the next 30 minutes gets their own Vault here: they type their name, e-mail and a password.',
+    button: (disabled) => V.button('Show QR code', { kind: 'primary', icon: 'qr', disabled, onClick: () => joinSheet(ui) }),
+    cant: 'make join codes', what: 'Join codes' });
+
+  /* "Announcements" (js/news.js): an update, a poll or a note that pops up for everyone. The helper's version 3. */
+  const newsRow = (ui) => (V.news ? helperRow(ui, { since: NEWS_SINCE, title: 'Announcements',
+    about: 'Post an update, a poll or a note for everyone in your Vault cloud.',
+    button: (disabled) => V.button('New announcement', { kind: 'primary', icon: 'plus', disabled, onClick: () => V.news.compose() }),
+    cant: 'post announcements', what: 'Announcements' }) : null);
 
   async function remove(ui, person) {
     const who = person.name || person.email;
@@ -603,7 +616,7 @@ V.invites = (() => {
     }
     if (!state.on) return offCard(ui);
     const rows = [ui.line('Invite someone', 'They get a link that signs them in once; then they choose their own password.',
-      V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) })), joinRow(ui)];
+      V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) })), joinRow(ui), newsRow(ui)];
     if (trouble) {
       rows.push(ui.line('Couldn\'t load the people you invited', offline(trouble) ? 'You\'re offline.' : trouble, tryAgain(ui)));
     }
@@ -677,7 +690,7 @@ V.invites = (() => {
       V.h('div.setting-buttons.stats-foot', {}, V.h('span.hint', { text: `Counted ${V.ago(s.at)}` }), again));
   }
 
-  return { card, statsCard, state: () => state, refresh, call, linkFor, joinLinkFor, waits };
+  return { card, statsCard, state: () => state, refresh, call, findHelper, linkFor, joinLinkFor, waits };
 })();
 
 /* Each device's line in its person's settings row: { kind, label, version, seen }, under an id of its own (each

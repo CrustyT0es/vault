@@ -259,6 +259,7 @@ V.settings = (() => {
       V.ai ? V.ai.card({ card, line, toggle, draw }) : null,  // js/ai.js
       V.invites ? V.invites.card({ card, line, toggle, draw }) : null,  // js/access.js
       V.invites ? V.invites.statsCard({ card, line, toggle, draw }) : null,  // js/access.js: the owner's Stats
+      V.news ? V.news.card({ card, line, toggle, draw }) : null,  // js/news.js: updates for everyone
       V.feedback ? V.feedback.card({ card, line, toggle, draw }) : null,  // js/access.js
       aboutCard()));
     kept();

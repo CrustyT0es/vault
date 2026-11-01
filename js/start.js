@@ -732,6 +732,7 @@
       });
     }
     V.update.started(kept);
+    if (V.news) V.news.start();  // updates for everyone (js/news.js): asked now, shown at a calm moment
   }
 
   async function boot() {
