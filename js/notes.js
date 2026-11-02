@@ -186,7 +186,11 @@ V.notes = (() => {
     return all ? { all, done } : null;
   }
 
-  V.noteTitle = (note) => (note.title || '').trim() || (!note.locked && plain(note, false).slice(0, 60)) || 'Untitled';
+  /* A note's name wherever it's shown (cards, Today, Upcoming, Review, reminders, the note-taker's bar...): its title
+     as words, without the marks of bold, highlight... (a title typed or made with them showed "**Bio** test"), else its
+     first words. */
+  const titleWords = (title) => (V.format ? V.format.unmark(title, true) : title).trim();  // ("__init__.py" keeps its __)
+  V.noteTitle = (note) => titleWords(note.title || '') || (!note.locked && plain(note, false).slice(0, 60)) || 'Untitled';
 
   function shown() {
     if (filter === 'trash') {
@@ -1078,14 +1082,18 @@ V.notes = (() => {
   }
 
   /* The ⋯: Select notes (Stop picking while picking) first, as the long press is hidden; then Sort (the one in use
-     said, its choices in a second menu), View List | Grid, and an open folder's own options. Only what the list shown
-     can use: Upcoming and the Trash keep their own order, and there's nothing to pick in an empty list. */
+     said, its choices in a second menu), View List | Grid, an open folder's own options, and Flash cards (Review). Only
+     what the list shown can use: Upcoming and the Trash keep their own order, and there's nothing to pick in an empty
+     list. */
   function moreMenu(anchorEl) {
     const folder = V.data.folders.get(filter);
     const grid = O.view() === 'grid';
     const sorts = filter !== 'due' && filter !== 'trash';
     const sortName = (O.SORTS.find(([id]) => id === O.sort()) || O.SORTS[0])[1];
     const setView = (value, done) => { done(); if (O.view() !== value) { O.setView(value); draw(); } };
+    const cards = !!V.review && filter !== 'review';
+    let cardsDue = 0;
+    try { cardsDue = cards ? V.review.dueCount() : 0; } catch (error) { console.error(error); }
     anchorEl.setAttribute('aria-expanded', 'true');
     V.menu(anchorEl, [
       picking ? { label: 'Stop picking', icon: 'x', onClick: () => stopPicking() }
@@ -1101,6 +1109,11 @@ V.notes = (() => {
           V.h('button', { type: 'button', role: 'radio', 'aria-checked': String(grid), text: 'Grid', onclick: () => setView('grid', done) }))) },
       folder && !query ? { sep: true } : null,
       folder && !query ? { label: 'Folder options…', icon: 'folder', onClick: () => folderMenu(folder, anchorEl) } : null,
+      // Flash cards: Review (its chip is far along the row on a phone), with how many are due today.
+      cards ? { sep: true } : null,
+      cards ? { node: (done) => V.h('button.menu-item.menu-more.menu-cards', {
+        type: 'button', role: 'menuitem', onclick: () => { done(); setFilter('review'); },
+      }, V.icon('cards'), V.h('span', { text: 'Flash cards' }), cardsDue ? V.h('span.menu-value', { text: `${cardsDue} due` }) : null) } : null,
     ], { cls: 'notes-menu', label: 'More options', returnFocus: true,
       onClose: () => { if (anchorEl.isConnected) anchorEl.setAttribute('aria-expanded', 'false'); } });
   }

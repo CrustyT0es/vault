@@ -15,8 +15,25 @@
 
    The history is append-only, as Claude needs it: every answer's content blocks (its thinking included, with their
    signatures) are kept exactly as they came and sent back unchanged, earlier turns are never edited, and Retry only
-   redoes the last answer. A chat's system prompt is frozen when it starts. A turn that was stopped, refused or broke
-   is shown but never sent again (so nothing after it depends on it).
+   redoes the last answer. A chat's system prompt is frozen when it starts, except that a chat started on an older
+   built-in prompt (one that called the app Vault) is sent today's built-in one (systemOf). A turn that was stopped,
+   refused or broke is shown but never sent again (so nothing after it depends on it).
+
+   Wefty's own tools (1.16.1, js/chattools.js): both brains can do things in Wefty (add a subscription, make a note, set
+   a due date, add flash cards...). An answer that asks for tools ends a "round": what it asked for and what came of it
+   are kept in the turn's `work` ([{ provider, model, served, replies, calls: [{ id, name, args, started, ok, result }] }],
+   `served`: the Google model that answered a Gemini round, whose signatures go only to it), and the model is asked
+   again with them until it answers in words, which go in `replies` as before. So an older Wefty, which knows only
+   `replies`, reads such a turn as a plain question and answer (never a tool call without its result), and its own
+   request drops the thinking that hung on the rounds (the turn's `tools` key names the Wefty tools). A round is saved
+   (and sent up) before its tools run, and before and after each change, and a call that has a result (or was started)
+   is never run again; while it goes on, its 'answering' mark is kept fresh (the heartbeat in `answer`). So a reload,
+   another device taking the turn over, Retry, or a message that waited to send carry on from the rounds kept, never
+   repeating a change. Each change is an `action` in the turn (shown as a chip
+   with Open and Undo), and only the owner's own typed words in that message can ask for one (V.chatTools.run). On the
+   PC, Claude's requests carry the tools only where Jarvis lets them through (its chatTools bridge call); elsewhere the
+   rounds go as words (madeNote), as tool_use blocks without tools are refused. Changes of a turn that failed or was
+   stopped (not sent as the history) are told to the next message the same way.
 
    Each chat is kept in the owner's private file storage, <owner>/chats/<id>.json (read when the tab opens, saved
    after each answer), with this device's copy in V.db so the list shows at once and offline. Files attached to a
@@ -75,21 +92,44 @@ V.chat = (() => {
      from the cloud: a new device knows nothing yet, so it isn't sent by itself until it does. */
   const unsure = (turn) => !isGemini(turn.model) && !V.ai.claudeOn() && !V.ai.modeKnown();
   const SETTLE_MS = 5000;  // a send (or Retry) waits this long at most for a new device to read "Use Claude too"
-  const SYSTEM = [
-    'You are a helpful AI assistant built into Wefty, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
+  const SYSTEM_REST = [
     'Keep answers clear, friendly and no longer than they need to be. Use Markdown: short paragraphs, lists, **bold** for the key words, headings for long answers, and code blocks for code.',
     'They can save any answer as a note, so make answers worth keeping.',
     'When they share a note it comes inside <note> tags, and a text file inside <file> tags: help with what is in it.',
+  ];
+  const SYSTEM = [
+    'You are a helpful AI assistant built into Wefty, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
+    ...SYSTEM_REST,
   ].join('\n\n');
+  /* Every built-in prompt Wefty has shipped, word for word (when SYSTEM changes, the one it replaces goes here). A chat
+     keeps the prompt it started with (chat.system, never rewritten, so an older Wefty on another device reads the chat
+     just as before), but one that started on a built-in prompt is sent today's (systemOf): the ones before 1.15 still
+     called the app Vault, and the model then said so. A prompt that isn't one of these is the chat's own, and stays. */
+  const BUILT_IN = new Set([
+    ['You are Claude, helping the owner of Vault, their own notes app, which they use for school and for everything else. They are a student.', ...SYSTEM_REST].join('\n\n'),  // 1.7
+    ['You are a helpful AI assistant built into Vault, the owner\'s own notes app, which they use for school and for everything else. They are a student.', ...SYSTEM_REST].join('\n\n'),  // 1.7.0 to 1.14
+    SYSTEM,
+  ]);
+  /* The system prompt a chat's next request sends. A different one from the chat's own (an older built-in one) changes
+     what Claude's earlier answers were made with: their thinking no longer fits, so requestFor asks the API to drop
+     those blocks (not refuse the request), and the prompt's cache starts again once. Gemini keeps nothing of that. */
+  const systemOf = (chat) => (BUILT_IN.has(chat.system) ? SYSTEM : chat.system);
   const MAX_TOKENS = 16000;            // room for the thinking and the answer...
   const MAX_TOKENS_THINKING = 32000;   // ...and more with "Think harder"
   const MOST_REPLIES = 4;              // a turn paused by web search is carried on 3 times at most
+  const MOST_ROUNDS = 6;               // rounds of Wefty tools one answer may take (then it's told to say what's done)
+  // (a Gemini call sent back without the signature Google gave it, because another model made it: Google's own word
+  // for "don't check this one")
+  const NO_SIGNATURE = 'skip_thought_signature_validator';
   const SEARCHES = 5;                  // web searches an answer may make (a cent each)
   const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
   const BINDING_BETA = 'thinking-binding-controls-2026-08-01';
   const SENT = new Set(['done', 'cut']);  // turns sent again as the history
   const WAIT_KINDS = new Set(['offline', 'away', 'busy']);  // a blocked or flaky network: the turn waits and goes later
   const CLAIM_MS = 120000;   // a turn another device marked 'answering' is left to it this long, then taken as abandoned
+  // While a turn other devices can see is being answered, its 'answering' mark is renewed this often (a long answer,
+  // or many rounds of tools, takes longer than CLAIM_MS, and must never be taken over while it's going). (Tests shorten it.)
+  const claimWaits = { beat: 30000 };
   const PUMP_EVERY = 60000;  // while a message is waiting to send, try it again at least this often
   // A Gemini message held because Gemini was busy, slow or over its free per-minute limit (Google answered: the
   // network works) goes again sooner than the minute: after `busy` ms (`quota` for the limit, `big` for a chat whose
@@ -174,6 +214,7 @@ V.chat = (() => {
     busy: 'Claude is busy right now. Your message is kept: try again in a minute.',
     dropped: 'The connection dropped before the answer finished.',
     cutOff: 'The answer stopped coming part-way. Tap Try again to ask again.',
+    steps: 'It took too many steps in Wefty, so it stopped. What it did is below.',
     old: 'Update Jarvis to chat on this PC (open Jarvis and click Update). Your chats are on your phone and Chromebook too.',
   };
 
@@ -218,12 +259,22 @@ V.chat = (() => {
     }
   }
 
-  async function upload(chat) {
-    await V.cloud.upload(fileOf(chat.id), new Blob([JSON.stringify(chat)], { type: 'application/json' }), { mime: 'application/json' });
-    index.waiting.delete(chat.id);
-    const mine = (await listed(chat.id).catch(() => [])).find((f) => f.name === chat.id + '.json');
-    index.prints[chat.id] = mine ? printOf(mine) : '';
-    await keepIndex();
+  /* A chat sent up as it is now (`copy`: what's sent instead, for an answer's heartbeat). One at a time per chat, in
+     the order asked: an older copy still on its way never lands after a newer one (a round's results lost that way
+     would have its calls run again). */
+  const uploading = new Map();  // chat id -> its upload going now
+  function upload(chat, copy = chat) {
+    const blob = new Blob([JSON.stringify(copy)], { type: 'application/json' });
+    const going = (uploading.get(chat.id) || Promise.resolve()).catch(() => {}).then(async () => {
+      await V.cloud.upload(fileOf(chat.id), blob, { mime: 'application/json' });
+      if (copy === chat) index.waiting.delete(chat.id);
+      const mine = (await listed(chat.id).catch(() => [])).find((f) => f.name === chat.id + '.json');
+      index.prints[chat.id] = mine ? printOf(mine) : '';
+      await keepIndex();
+    });
+    uploading.set(chat.id, going);
+    going.catch(() => {}).then(() => { if (uploading.get(chat.id) === going) uploading.delete(chat.id); });
+    return going;
   }
 
   /* A chat saved here, then up to the cloud (later, at the next look, when it can't go now). */
@@ -554,6 +605,99 @@ V.chat = (() => {
 
   const repliesOf = (turn) => (turn.replies || []).map((r) => forHistory(r.content || [])).flat();
 
+  /* ---- Wefty's tools: a turn's rounds, and whether a request offers them */
+
+  const workOf = (turn) => (turn && Array.isArray(turn.work) ? turn.work : []);
+  /* Every reply of a turn: its rounds' (the tools it asked for) then the answer's. */
+  const allReplies = (turn) => [...workOf(turn).flatMap((step) => step.replies || []), ...(turn.replies || [])];
+  /* Whether a request by `model` offers Wefty's tools: always from the page (Gemini, and Claude on a phone or a
+     Chromebook); on the PC Claude's goes through Jarvis, which lets them through since 1.16.1 (chatTools). */
+  const weftyFor = (model) => !!V.chatTools && (isGemini(model) || !V.desktop || V.pc.can('chatTools'));
+  /* The system prompt sent: today's built-in one for a chat begun on an older one (systemOf), plus what Wefty's tools
+     can do when the request offers them (added here, never stored, so older chats get it too). */
+  const systemFor = (chat, wefty) => (wefty ? `${systemOf(chat)}\n\n${V.chatTools.PROMPT}` : systemOf(chat));
+  /* A change may be asked for only in a message with the owner's own words (a picture alone is never a request). */
+  const mayWrite = (turn) => !!String(turn.text || '').trim();
+  const claudeId = (call) => String(call.id || 'call').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+  const resultText = (call) => JSON.stringify(call.result || { error: 'Nothing came back from this.' });
+  const stepWords = (step) => (step.replies || []).flatMap((r) => r.content || []).filter((b) => b && b.type === 'text')
+    .map((b) => b.text || '').join('');
+
+  /* A Wefty call in an answer that ended before asking for it properly (max_tokens part-way through its input, or the
+     pause cap): never run, and taken out of the answer, as one kept in the history with a tool_use and no tool_result
+     after it would be refused by the API in every later request of the chat. True when one was taken out. */
+  function unasked(reply) {
+    const kept = (reply.content || []).filter((b) => !(b && b.type === 'tool_use'));
+    const took = kept.length !== (reply.content || []).length;
+    reply.content = kept;
+    return took;
+  }
+  const saysWords = (turn) => repliesOf(turn).some((b) => b && b.type !== 'thinking' && b.type !== 'redacted_thinking');
+
+  /* The changes a turn made in Wefty, in words (for a request that doesn't send its rounds as they were). */
+  const actionWords = (turn) => (turn.actions || []).map((a) => a.label).filter(Boolean).join('; ');
+
+  /* Words added to a message as it's sent (never stored) for changes made in Wefty that the request doesn't otherwise
+     show, so the model never makes them again: those of the messages just before it that never got a full answer
+     (failed or stopped after their tools ran: they aren't sent as the history), and, with `wefty` false, this
+     message's own (its rounds left out, claudeWork). */
+  function madeNote(chat, turn, wefty = true) {
+    const lines = [];
+    const skipped = [];
+    for (let i = chat.turns.indexOf(turn) - 1; i >= 0; i--) {
+      const t = chat.turns[i];
+      if (SENT.has(t.state) && repliesOf(t).length) break;
+      if (actionWords(t)) skipped.unshift(actionWords(t));
+    }
+    if (skipped.length) lines.push(`(Already done in Wefty for an earlier message that didn't get a full answer: ${skipped.join('; ')}.)`);
+    if (!wefty && actionWords(turn)) lines.push(`(Already done in Wefty for this message: ${actionWords(turn)}.)`);
+    return lines;
+  }
+
+  /* A turn's rounds as Claude's messages: what the model said and asked for (as it came, when Claude asked; else its
+     words and the calls), then the results. `wefty` false (a request without Wefty's tools, as on a PC whose Jarvis
+     can't pass them on): none, as tool_use blocks in a request with no tools are refused; `madeNote` says what they
+     did instead. */
+  function claudeWork(turn, wefty = true) {
+    const out = [];
+    if (!wefty) return out;
+    for (const step of workOf(turn)) {
+      const calls = step.calls || [];
+      const said = step.provider === 'claude' ? (step.replies || []).map((r) => forHistory(r.content || [])).flat()
+        : [...(stepWords(step) ? [{ type: 'text', text: stepWords(step) }] : []),
+          ...calls.map((c) => ({ type: 'tool_use', id: claudeId(c), name: c.name, input: c.args || {} }))];
+      out.push({ role: 'assistant', content: said });
+      out.push({ role: 'user', content: calls.map((c) => ({ type: 'tool_result', tool_use_id: claudeId(c), content: resultText(c),
+        ...(c.ok ? {} : { is_error: true }) })) });
+    }
+    return out;
+  }
+
+  /* The same rounds as Gemini's contents: the model's turn exactly as Google sent it (each call with its signature),
+     or, for rounds another model made, its words and calls; then the function responses. */
+  const signers = new WeakMap();  // a Gemini round's model turn as sent -> the Google model that answered it
+  function geminiWork(turn) {
+    const out = [];
+    for (const step of workOf(turn)) {
+      const calls = step.calls || [];
+      const kept = step.provider === 'gemini' && step.replies && step.replies[0] && Array.isArray(step.replies[0].parts)
+        ? step.replies[0].parts : null;
+      let parts = kept ? JSON.parse(JSON.stringify(kept)) : [...(stepWords(step) ? [{ text: stepWords(step) }] : []),
+        ...calls.map((c) => ({ functionCall: { name: c.name, args: c.args || {} } }))];
+      if (!parts.some((p) => p.thoughtSignature)) {
+        parts = parts.map((p) => (p.functionCall ? { ...p, thoughtSignature: NO_SIGNATURE } : p));
+      }
+      const entry = { role: 'model', parts };
+      // (which Google model made its signatures: the request races Flash and Flash-Lite, and one model never gets
+      // another's signature, ai.js signedFor)
+      if (kept && step.served) signers.set(entry, step.served);
+      out.push(entry);
+      out.push({ role: 'user', parts: calls.map((c) => ({ functionResponse: { name: c.name, response: c.result || {},
+        ...(c.gid ? { id: c.gid } : {}) } })) });
+    }
+    return out;
+  }
+
   /* A message's own words: the notes it asks about, today's date when it searches, and what was typed. */
   function contentFor(text, notes, search) {
     const content = notes.map((n) => ({ type: 'text', text: `<note title="${String(n.title).replace(/"/g, '\'')}">\n${n.text}\n</note>` }));
@@ -580,29 +724,33 @@ V.chat = (() => {
     return parts.length ? parts : [{ text: '' }];
   }
 
-  /* The chat so far as Gemini contents: each sent turn (its answer as one text part), then this one. */
+  /* The chat so far as Gemini contents: each sent turn (its tool rounds, then its answer as one text part), then this
+     one (and its rounds so far). */
   async function geminiContents(chat, turn) {
     const contents = [];
     for (const t of chat.turns) {
       if (t === turn) break;
       const answer = repliesOf(t);
       if (!SENT.has(t.state) || !answer.length) continue;
-      contents.push({ role: 'user', parts: await geminiParts(t) });
+      contents.push({ role: 'user', parts: [...await geminiParts(t), ...madeNote(chat, t).map((text) => ({ text }))] });
+      contents.push(...geminiWork(t));
       const words = answer.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
       contents.push({ role: 'model', parts: [{ text: words || '' }] });
     }
-    contents.push({ role: 'user', parts: await geminiParts(turn) });
+    contents.push({ role: 'user', parts: [...await geminiParts(turn), ...madeNote(chat, turn).map((text) => ({ text }))] });
+    contents.push(...geminiWork(turn));
     return contents;
   }
 
   /* One Gemini turn by `model` (Gemini Fast or Smart), streamed (`onText` gets the words so far). AiError kinds are
      turned into ChatError kinds so a blocked network waits and sends later, exactly like Claude. */
-  async function geminiTurn(chat, turn, job, onText, model) {
+  async function geminiTurn(chat, turn, job, onText, model, wefty = false) {
     const contents = await geminiContents(chat, turn);
     const maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
     try {
-      return await V.ai.callGemini({ system: chat.system, contents, maxTokens, signal: job.controller.signal, onText,
-        tier: modelOf(model).tier || 'fast' });
+      return await V.ai.callGemini({ system: systemFor(chat, wefty), contents, maxTokens, signal: job.controller.signal, onText,
+        tier: modelOf(model).tier || 'fast', tools: wefty ? V.chatTools.forGemini() : null,
+        signedBy: (entry) => signers.get(entry) || null });
     } catch (error) {
       if (job.stopped) return { text: '', stopReason: 'stopped', usage: {} };
       const kind = (error && error.kind) || 'bad';
@@ -613,24 +761,35 @@ V.chat = (() => {
   }
 
   const toolsFor = (turn) => (turn.search ? [{ type: modelOf(turn.model).search, name: 'web_search', max_uses: SEARCHES }] : []);
+  /* What a turn's `tools` keeps: the tools its request had, Wefty's by their version only (an older Wefty, whose own
+     key never has it, drops the thinking that hung on them rather than sending it where it no longer fits). */
+  const keyFor = (turn, wefty) => JSON.stringify([...toolsFor(turn), ...(wefty ? [{ wefty: V.chatTools.VERSION }] : [])]);
 
   /* The request for `turn`: the chat's sent turns before it, exactly as they were, then this one (and its paused
      answer, when web search paused it). */
-  async function requestFor(chat, turn) {
+  async function requestFor(chat, turn, wefty = false) {
     const pc = V.desktop;
     const m = modelOf(turn.model);
-    const tools = toolsFor(turn);
-    const toolKey = JSON.stringify(tools);
+    const tools = [...toolsFor(turn), ...(wefty ? V.chatTools.forClaude() : [])];
+    const toolKey = keyFor(turn, wefty);
+    turn.tools = toolKey;
+    const thought = (blocks) => blocks.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking');
+    // (a chat that started on an older built-in prompt: what its answers so far were made with isn't what's sent now)
+    const newSystem = systemOf(chat) !== chat.system;
     const messages = [];
     let drop = false;
     for (const t of chat.turns) {
       if (t === turn) break;
       const answer = repliesOf(t);
       if (!SENT.has(t.state) || !answer.length) continue;
-      messages.push({ role: 'user', content: await userContent(t, pc) });
+      const work = claudeWork(t, wefty);
+      const noted = madeNote(chat, t, wefty).map((text) => ({ type: 'text', text }));
+      messages.push({ role: 'user', content: [...await userContent(t, pc), ...noted] });
+      messages.push(...work);
       messages.push({ role: 'assistant', content: answer });
-      // A turn made with other tools: its thinking no longer fits, so the API is asked to drop it (not refuse).
-      if ((t.tools || '[]') !== toolKey && answer.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking')) drop = true;
+      // A turn made with other tools, or under the older prompt: its thinking no longer fits, so the API is asked to
+      // drop it (not refuse). Only the blocks that don't fit go: the answers made since under this prompt keep theirs.
+      if (((t.tools || '[]') !== toolKey || newSystem) && (thought(answer) || work.some((w) => w.role === 'assistant' && thought(w.content)))) drop = true;
     }
     // The last answer gets a cache mark too, so a long reply (web search's many blocks) never pushes the previous
     // request's cached part out of reach. Only the copy sent is marked.
@@ -639,7 +798,9 @@ V.chat = (() => {
       lastAnswer[lastAnswer.length - 1] = { ...lastAnswer[lastAnswer.length - 1], cache_control: { type: 'ephemeral' } };
       messages[messages.length - 1] = { role: 'assistant', content: lastAnswer };
     }
-    messages.push({ role: 'user', content: await userContent(turn, pc) });
+    messages.push({ role: 'user', content: [...await userContent(turn, pc),
+      ...madeNote(chat, turn, wefty).map((text) => ({ type: 'text', text }))] });
+    messages.push(...claudeWork(turn, wefty));
     const paused = repliesOf(turn);
     if (paused.length) messages.push({ role: 'assistant', content: paused });
     let maxTokens = turn.think ? MAX_TOKENS_THINKING : MAX_TOKENS;
@@ -648,7 +809,7 @@ V.chat = (() => {
       const left = Math.max(0, tally.limit - tally.spent);
       maxTokens = Math.max(1024, Math.min(maxTokens, Math.floor(left / V.ai.rates(m.id).output * 1e6)));
     }
-    const body = { model: m.id, max_tokens: maxTokens, stream: true, cache_control: { type: 'ephemeral' }, system: chat.system,
+    const body = { model: m.id, max_tokens: maxTokens, stream: true, cache_control: { type: 'ephemeral' }, system: systemFor(chat, wefty),
       thinking: drop ? { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } : { type: 'adaptive' },
       output_config: { effort: turn.think ? 'high' : 'low' }, messages };
     if (tools.length) body.tools = tools;
@@ -748,6 +909,62 @@ V.chat = (() => {
     return V.ai.price(usage, served);
   }
 
+  /* One round of Wefty's tools: the calls an answer asked for, run here once each. The round is saved (and sent up)
+     before any of them runs, and again after each change, so whatever happens next (a reload, another device taking
+     the turn over) never runs one twice: a call that has a result is done, and one that was started without one is
+     said to have maybe happened. `refuse`: the round is answered without running anything (too many rounds). */
+  async function runRound(chat, turn, step, job, refuse = '') {
+    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length };
+    job.shown = true;  // (other devices can see this turn from now on: its mark is kept fresh, `answer`'s heartbeat)
+    turn.answeringAt = now();
+    chat.updated = now();
+    await persist(chat).catch(() => {});
+    for (const call of step.calls || []) {
+      if (call.result) continue;  // (done already)
+      if (call.started) {
+        call.ok = false;
+        call.result = { error: 'Wefty was closed while doing this, so it may or may not have happened. Check (with a find or list tool) before doing it again.' };
+        continue;
+      }
+      if (refuse || job.stopped) {
+        call.ok = false;
+        call.result = { error: refuse || 'Stopped before this was done.' };
+        continue;
+      }
+      call.started = now();
+      showLive();
+      // A change is saved as started before it's made: if Wefty is closed (or the turn taken over) before its result
+      // is saved, it's said to have maybe happened, never made again.
+      if (V.chatTools.isWrite(call.name)) {
+        turn.answeringAt = now();
+        chat.updated = now();
+        await persist(chat).catch(() => {});
+      }
+      const out = await V.chatTools.run(call.name, call.args, ctx);
+      call.ok = !!out.ok;
+      call.result = out.result || {};
+      if (out.action) {
+        turn.actions = [...(turn.actions || []), out.action];
+        call.action = out.action.id;
+        ctx.writes += 1;
+      }
+      if (V.chatTools.isWrite(call.name)) {  // (its result saved: a refused or failed change too, as it's been started)
+        turn.answeringAt = now();
+        chat.updated = now();
+        await persist(chat).catch(() => {});
+      }
+      showLive();
+    }
+  }
+
+  /* A turn carried on from rounds kept (reloaded, taken over from another device, Retry, or sent after waiting): a last
+     round left part-way has its other calls run, or answered, before the model is asked again. */
+  async function finishRounds(chat, turn, job) {
+    const work = workOf(turn);
+    const last = work[work.length - 1];
+    if (last && (last.calls || []).some((c) => !c.result)) await runRound(chat, turn, last, job);
+  }
+
   /* One turn answered (a new message, Retry of the last, or a waiting turn going out once Claude can be reached).
      `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us. */
   async function answer(chat, turn, { first = false, claim = false } = {}) {
@@ -756,32 +973,65 @@ V.chat = (() => {
     // message waiting since before, asks Smart); one waiting for Gemini while the chat moved to Claude stays Gemini's.
     const chosen = modelFor(chat);
     if (isGemini(model) && isGemini(chosen)) model = chosen;
-    const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false };
+    const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false, shown: claim };
     busy = job;
+    // The heartbeat: while other devices can see this turn as 'answering' (claimed, or a round of tools saved), its
+    // mark is renewed, so a long answer or many rounds never look abandoned. What's sent is the chat as saved, with
+    // this turn's words still coming left out (as a device taking it over would start them again).
+    let beating = Promise.resolve();
+    const beat = setInterval(() => {
+      if (!job.shown || busy !== job) return;
+      turn.answeringAt = now();
+      const copy = { ...chat, turns: chat.turns.map((t) => (t === turn ? { ...t, replies: [] } : t)) };
+      beating = upload(chat, copy).catch(() => {});
+    }, claimWaits.beat);
     trouble = null;
     turn.state = 'answering';
     turn.answeringAt = now();
     turn.replies = [];
     turn.problem = '';
+    if (!Array.isArray(turn.work)) turn.work = [];
+    const wefty = weftyFor(model);
     draw();
     if (claim) { chat.updated = now(); await persist(chat).catch(() => {}); }  // tell other devices before we ask
     let failed = null;
     try {
-      for (let n = 0; n < MOST_REPLIES; n++) {
-        if (isGemini(model)) {  // Gemini: one call, streamed (no tools or server fallback: ai.js picks the model)
+      await finishRounds(chat, turn, job);
+      let pauses = 0;
+      let rounds = turn.work.length;
+      /* An answer that asked for Wefty's tools: kept as a round (moved out of `replies`), and its calls run. */
+      const toolRound = async (provider, calls, usedModel, served = '') => {
+        const step = { provider, model: usedModel, ...(served ? { served } : {}), replies: turn.replies, calls };
+        turn.replies = [];
+        turn.work.push(step);
+        rounds += 1;
+        await runRound(chat, turn, step, job, rounds > MOST_ROUNDS
+          ? 'That\'s too many steps for one answer: nothing more was done. Say what\'s done so far.' : '');
+      };
+      for (let n = 0; n < MOST_REPLIES + MOST_ROUNDS + 2; n++) {
+        if (isGemini(model)) {  // Gemini: one call, streamed (no server tools or fallback: ai.js picks the model)
           const reply = fresh(model);
           turn.replies.push(reply);
           const out = await geminiTurn(chat, turn, job, (words) => { reply.content = [{ type: 'text', text: words }]; showLive(); },
-            model);
+            model, wefty);
           reply.content = tidy([{ type: 'text', text: out.text || '' }]);
           reply.usage = out.usage || {};
           reply.model = model;  // (the Gemini choice, Fast or Smart; the model Google answered with is in usage.model)
+          const calls = wefty && out.stopReason === 'tool_use' ? out.calls || [] : [];
           // Gemini took it (it answered, or said no): the message is Gemini's from now on, so Retry asks Gemini again.
           // Until then a message meant for Claude keeps Claude's name, and goes to Claude once it's switched on.
-          if (out.text || out.stopReason === 'refusal') turn.model = model;
+          if (out.text || calls.length || out.stopReason === 'refusal') turn.model = model;
           reply.cost = 0;  // free
           reply.stop_reason = out.stopReason;
           if (job.stopped) { turn.state = 'stopped'; break; }
+          if (calls.length && rounds > MOST_ROUNDS) { turn.state = 'failed'; turn.problem = WORDS.steps; break; }
+          if (calls.length) {
+            reply.parts = out.parts || [];
+            await toolRound('gemini', calls.map((c) => ({ id: c.id || 'g' + V.uuid().slice(0, 12), gid: c.id || '',
+              name: c.name, args: c.args || {} })), model, (out.usage && out.usage.model) || '');
+            if (job.stopped) { turn.state = 'stopped'; break; }
+            continue;
+          }
           if (!out.text && out.stopReason !== 'refusal') throw new ChatError('dropped', WORDS.dropped);
           if (out.stopReason === 'cut_off') {  // the words stopped coming part-way: what came stays, with Retry
             turn.state = 'failed';
@@ -793,7 +1043,7 @@ V.chat = (() => {
           showLive();
           break;
         }
-        const { body, betas } = await requestFor(chat, turn);
+        const { body, betas } = await requestFor(chat, turn, wefty);
         const reply = fresh(body.model);
         turn.replies.push(reply);
         let finished = { stopped: false };
@@ -808,20 +1058,39 @@ V.chat = (() => {
           : `Claude stopped with a problem (${reply.error.message || reply.error.type}).`);
         if (finished.stopped || job.stopped) { turn.state = 'stopped'; break; }
         if (!reply.stop_reason) throw new ChatError('dropped', WORDS.dropped);
-        if (reply.stop_reason === 'pause_turn') continue;
+        if (reply.stop_reason === 'pause_turn') {
+          if (++pauses >= MOST_REPLIES) break;
+          continue;
+        }
+        const uses = wefty && reply.stop_reason === 'tool_use' ? reply.content.filter((b) => b && b.type === 'tool_use') : [];
+        if (uses.length && rounds > MOST_ROUNDS) { turn.state = 'failed'; turn.problem = WORDS.steps; break; }
+        if (uses.length) {
+          await toolRound('claude', uses.map((b) => ({ id: String(b.id || ''), name: b.name, args: b.input || {} })), body.model);
+          if (job.stopped) { turn.state = 'stopped'; break; }
+          continue;
+        }
+        if (unasked(reply) && !saysWords(turn)) { turn.state = 'failed'; turn.problem = WORDS.cutOff; break; }
         turn.state = reply.stop_reason === 'refusal' ? 'refused' : reply.stop_reason === 'max_tokens' ? 'cut' : 'done';
         break;
       }
-      if (turn.state === 'answering') turn.state = 'cut';
+      if (turn.state === 'answering') {
+        const took = turn.replies.map(unasked).some(Boolean);
+        if (took && !saysWords(turn)) { turn.state = 'failed'; turn.problem = WORDS.cutOff; } else turn.state = 'cut';
+      }
       if (SENT.has(turn.state) && !repliesOf(turn).length) turn.state = 'failed';  // nothing came back to keep
     } catch (error) {
       failed = error instanceof ChatError ? error : new ChatError('bad', error.message || String(error));
     } finally {
+      clearInterval(beat);
       busy = null;
     }
+    await beating;  // (uploads go in order anyway; this one is never left to land after the answer)
     delete turn.answeringAt;
     if (failed) {
       const heard = turn.replies.some((r) => r.content.length);
+      // (a turn whose tools have run is never taken back to the box: what they did is kept with it, and it goes on
+      // from there, once it can be sent, or with Try again)
+      const worked = workOf(turn).length > 0;
       if (!heard && (WAIT_KINDS.has(failed.kind) || (claim && failed.kind === 'nokey' && isGemini(model)))) {
         // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
         // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send". So does a message
@@ -831,7 +1100,7 @@ V.chat = (() => {
         turn.waitWhy = failed.kind === 'nokey' ? 'setup' : failed.why;  // (the waiting line says why, naming the model)
         turn.problem = '';
         turn.replies = [];
-      } else if (first && !heard && failed.kind !== 'dropped') {
+      } else if (first && !heard && !worked && failed.kind !== 'dropped') {
         // The owner's to fix (no key, a bad key, no credit, an old PC app): the message goes back in the box.
         chat.turns = chat.turns.filter((t) => t !== turn);
         const draft = draftOf(chat.id);
@@ -1026,6 +1295,15 @@ V.chat = (() => {
       return;
     }
     forgetSoon(turn.id);
+    if (workOf(turn).length) {  // its tools have done things: it stays (with its Undo), stopped, never sent again
+      turn.state = 'stopped';
+      delete turn.waitWhy;
+      chat.updated = now();
+      await persist(chat);
+      reflect();
+      draw();
+      return;
+    }
     chat.turns = chat.turns.filter((t) => t !== turn);
     const draft = draftOf(chat.id);
     draft.text = turn.text || '';
@@ -1090,7 +1368,7 @@ V.chat = (() => {
         files: taken.files.map((f) => ({ id: f.id, kind: f.kind, name: f.name, mime: f.mime, size: f.size, path: f.path,
           w: f.w, h: f.h, pages: f.pages, tokens: f.tokens })),
         content: contentFor(taken.text.trim(), taken.notes, !!current.search), replies: [], state: 'answering' };
-      turn.tools = JSON.stringify(toolsFor(turn));
+      turn.tools = keyFor(turn, weftyFor(model));
       sentNotes.set(turn, taken.notes);
       if (!current.title) current.title = titleFrom(turn);
       current.turns.push(turn);
@@ -1113,8 +1391,14 @@ V.chat = (() => {
     }
   }
 
+  /* A chat's or a note's title as shown, without marks (chats and note chips from before 1.16.1 kept them as typed:
+     "what is **mitosis**"); what's stored is left as it is. */
+  const shownTitle = (title) => (V.format && title ? V.format.unmark(String(title), true) : String(title || '')).trim();
+
   function titleFrom(turn) {
-    const line = (turn.text || '').split('\n').find((l) => l.trim()) || '';
+    // (the words of the first line typed, without any marks: "what is **mitosis**" is "what is mitosis")
+    const typed = (turn.text || '').split('\n').find((l) => l.trim()) || '';
+    const line = V.format ? V.format.unmark(typed) : typed;
     const words = line.trim() || (turn.files[0] && turn.files[0].name) || (turn.notes[0] && `About ${turn.notes[0].title}`) || 'New chat';
     return words.length > 60 ? words.slice(0, 57).trimEnd() + '...' : words;
   }
@@ -1143,8 +1427,9 @@ V.chat = (() => {
 
   /* ---------------------------------------------------------------- the words of an answer */
 
-  const textOf = (turn) => (turn.replies || []).flatMap((r) => r.content || []).filter((b) => b && b.type === 'text')
-    .map((b) => b.text || '').join('');
+  /* An answer's words: what it said along the way while it used Wefty's tools, then the answer itself. */
+  const textOf = (turn) => [...workOf(turn).map(stepWords), (turn.replies || []).flatMap((r) => r.content || [])
+    .filter((b) => b && b.type === 'text').map((b) => b.text || '').join('')].filter((t) => t.trim()).join('\n\n');
 
   function sourcesOf(turn) {
     const seen = new Map();
@@ -1174,11 +1459,16 @@ V.chat = (() => {
     return V.reading.area(el);  // (reading text: Quick read's pieces go in when it's on, never in code: js/reading.js)
   }
 
+  /* Whether the turn is running Wefty's tools now (a round with a call still to come back). */
+  const working = (turn) => turn.state === 'answering' && workOf(turn).some((step) => (step.calls || []).some((c) => !c.result))
+    && !(turn.replies || []).length;
+
   function status(turn) {
     const blocks = (turn.replies || []).flatMap((r) => r.content || []).filter(Boolean);
     const searching = [...blocks].reverse().find((b) => b.type === 'server_tool_use');
     const lastIsSearch = blocks.length && blocks[blocks.length - 1] === searching;
-    const words = lastIsSearch && searching.input && searching.input.query ? `Searching the web for "${searching.input.query}"...` : 'Thinking...';
+    const words = working(turn) ? 'Working in Wefty...'
+      : lastIsSearch && searching.input && searching.input.query ? `Searching the web for "${searching.input.query}"...` : 'Thinking...';
     return V.h('div.chat-thinking', {}, V.h('div.spinner'), V.h('span', { text: words }));
   }
 
@@ -1204,9 +1494,9 @@ V.chat = (() => {
     f.state === 'up' ? V.h('div.spinner') : null,
     onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${f.name}`, onclick: onRemove }, V.icon('x')) : null);
 
-  const noteChip = (n, onRemove) => V.h('span.chat-chip.note', { title: n.title },
-    V.icon(n.locked ? 'lock' : 'notes'), V.h('span.chat-chip-name', { text: n.title }),
-    onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${n.title}`, onclick: onRemove }, V.icon('x')) : null);
+  const noteChip = (n, onRemove) => V.h('span.chat-chip.note', { title: shownTitle(n.title) },
+    V.icon(n.locked ? 'lock' : 'notes'), V.h('span.chat-chip-name', { text: shownTitle(n.title) }),
+    onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${shownTitle(n.title)}`, onclick: onRemove }, V.icon('x')) : null);
 
   function turnEl(chat, turn, last) {
     const you = V.h('div.chat-you', {},
@@ -1222,7 +1512,8 @@ V.chat = (() => {
             V.h('span', { text: waitingWords(turn) })),
           V.h('div.chat-waiting-actions', {},
             V.button('Send now', { kind: 'quiet', icon: 'send', onClick: () => sendWaiting(chat, turn, { manual: true }) }),
-            V.button('Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) })))));
+            V.button('Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) }))),
+          actionsEl(chat, turn)));
     }
     const answering = turn.state === 'answering';  // ours now, or another device's (a claimed turn shows "Thinking...")
     const text = textOf(turn);
@@ -1231,7 +1522,8 @@ V.chat = (() => {
       body.append(V.h('p.chat-note', { text: `${isGemini(turn.model) ? 'Gemini' : 'Claude'} declined to answer this one. Try asking it another way.` }));
     } else {
       if (text) body.append(rendered(text));
-      if (answering && (!text || turn.replies.some((r) => (r.content || []).filter(Boolean).slice(-1).some((b) => b.type === 'server_tool_use')))) {
+      if (answering && (!text || working(turn) || !(turn.replies || []).some((r) => (r.content || []).some((b) => b && b.type === 'text' && b.text))
+        || turn.replies.some((r) => (r.content || []).filter(Boolean).slice(-1).some((b) => b.type === 'server_tool_use')))) {
         body.append(status(turn));
       }
     }
@@ -1240,9 +1532,9 @@ V.chat = (() => {
     if (turn.state === 'stopped') notes.push('Stopped.');
     if (turn.state === 'cut') notes.push('Cut off: the answer got too long.');
     if (turn.state === 'failed') notes.push(turn.problem || WORDS.dropped);
-    const fallback = (turn.replies || []).flatMap((r) => r.content || []).filter((b) => b && b.type === 'fallback').pop();
-    const served = (turn.replies || []).map((r) => r.model).filter(Boolean).pop() || turn.model;
-    const cost = (turn.replies || []).reduce((sum, r) => sum + (r.cost || 0), 0);
+    const fallback = allReplies(turn).flatMap((r) => r.content || []).filter((b) => b && b.type === 'fallback').pop();
+    const served = allReplies(turn).map((r) => r.model).filter(Boolean).pop() || turn.model;
+    const cost = allReplies(turn).reduce((sum, r) => sum + (r.cost || 0), 0);
     const meta = [nameOf(served) + (fallback ? ' (the first model declined)' : ''), cost ? V.ai.money(cost) : '']
       .filter(Boolean).join(' · ');
     const actions = answering ? null : V.h('div.chat-actions', {},
@@ -1256,10 +1548,32 @@ V.chat = (() => {
     return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
       V.h('div.chat-claude', {}, body,
         notes.length ? V.h('p.chat-note', { text: notes.join(' ') }) : null,
+        actionsEl(chat, turn),
         sources.length ? V.h('div.chat-sources', {}, V.h('span.chat-sources-label', { text: 'Sources' }),
           sources.map(([url, title]) => V.h('a.chat-source', { href: url, target: '_blank', rel: 'noopener noreferrer', title: url,
             text: V.format.site(url).name || title }))) : null,
         actions));
+  }
+
+  /* The changes Chat made in Wefty for this message: a chip each, with Open and Undo (js/chattools.js). An Undo is kept
+     in the chat (every device then shows it undone). */
+  function actionsEl(chat, turn) {
+    const actions = (turn.actions || []).filter((a) => a && a.id && a.label);
+    if (!actions.length || !V.chatTools) return null;
+    return V.h('div.chat-actions-done', { role: 'list', 'aria-label': 'Done in Wefty' },
+      actions.map((a) => V.h('div', { role: 'listitem' }, V.chatTools.chip(a, { onUndone: (done) => keepUndone(chat.id, turn.id, done) }))));
+  }
+
+  async function keepUndone(chatId, turnId, action) {
+    const chat = chatOf(chatId);
+    const turn = chat && (chat.turns || []).find((t) => t.id === turnId);
+    const kept = turn && (turn.actions || []).find((a) => a.id === action.id);
+    if (kept && kept !== action) kept.undone = action.undone;
+    if (chat && chats.has(chat.id)) {
+      chat.updated = now();
+      await persist(chat).catch(() => {});
+    }
+    draw();
   }
 
   /* While an answer comes in, only it is drawn again (once a frame at most), the list staying where it's scrolled
@@ -1291,7 +1605,7 @@ V.chat = (() => {
     const waiting = (chat.turns || []).some((t) => t.state === 'waiting');
     return V.h('div.chat-row' + (chat.id === openId ? '.on' : ''), { dataset: { id: chat.id } },
       V.h('button.chat-row-main', { type: 'button', onclick: () => open(chat.id) },
-        V.h('span.chat-row-title', { text: chat.title || 'New chat' }),
+        V.h('span.chat-row-title', { text: shownTitle(chat.title) || 'New chat' }),
         waiting ? V.h('span.chat-row-waiting', {}, V.icon('clock'), V.h('span', { text: 'Waiting to send' }))
           : V.h('span.chat-row-meta', { text: [V.ago(chat.updated), nameOf(last ? last.model : chat.model)].join(' · ') })),
       V.iconButton('more', 'More', (event) => rowMenu(event.currentTarget, chat), 'tiny'));
@@ -1310,7 +1624,7 @@ V.chat = (() => {
     if (!chat) { V.clear(parts.thread); V.clear(parts.head); return; }
     V.clear(parts.head,
       V.iconButton('back', 'Back to chats', () => { showingChat = false; draw(); }, 'chat-back'),
-      V.h('button.chat-title', { type: 'button', title: 'Rename', onclick: () => rename(chat), text: chat.title || 'New chat' }),
+      V.h('button.chat-title', { type: 'button', title: 'Rename', onclick: () => rename(chat), text: shownTitle(chat.title) || 'New chat' }),
       V.iconButton('more', 'More', (event) => chatMenu(event.currentTarget, chat)));
     const last = chat.turns[chat.turns.length - 1];
     const where = `${chat.id}:${chat.turns.length}:${last ? last.state : ''}`;
@@ -1722,7 +2036,8 @@ V.chat = (() => {
       lines.push('**You:**', '', turn.text || '', ...(extras.length ? ['', `(Attached: ${extras.join(', ')})`] : []), '');
       const who = isGemini(turn.model) ? 'Gemini' : 'Claude';
       const words = turn.state === 'refused' ? `(${who} declined to answer this one.)` : textOf(turn) || '(No answer.)';
-      lines.push(`**${who}** (${nameOf(turn.model)}):`, '', words, '', '---', '');
+      const done = (turn.actions || []).map((a) => `- ${a.label}${a.undone ? ' (undone)' : ''}`);
+      lines.push(`**${who}** (${nameOf(turn.model)}):`, '', words, ...(done.length ? ['', '(Done in Wefty:)', ...done] : []), '', '---', '');
     }
     return lines.join('\n');
   }
@@ -1786,5 +2101,6 @@ V.chat = (() => {
     busy: () => !!busy || !!sendingId || sendingTurns.size > 0,  // (an answer coming, or a message getting ready to go)
     waiting: waitingCount,
     retryWaits,  // (tests shorten them)
+    claimWaits,  // (tests shorten the heartbeat)
   };
 })();

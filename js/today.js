@@ -1,13 +1,13 @@
 /* Wefty: Today (1.16), the first screen on every device: a greeting, then what's on today from your notes.
 
-   On a phone, top to bottom: the greeting and the thread under it, Quick actions (New note, Note-taker, Dictate),
-   Due today (each to-do of the notes due today or late, with a box to tick), Tests coming up (a countdown and how the
-   flash cards for it are going), Flash cards due today (by the folder each card is in), Later this week, and Jump back
-   in (pinned notes, then the ones edited last). On a Chromebook or the PC (900 px and up), full width: the greeting
-   with the day's counts, the week from Monday to Friday, then two columns (tests, flash cards and Jump back in on the
-   left; quick actions, due today and later on the right). Every number comes from this device's own copy of the notes
-   (it works offline and costs nothing), through the same rules as Upcoming (js/reminders.js) and Review
-   (js/review.js), so they always agree.
+   On a phone, top to bottom: the greeting and the thread under it, Quick actions (New note, Note-taker, Dictate and
+   Flash cards, which opens Review), Due today (each to-do of the notes due today or late, with a box to tick), Tests
+   coming up (a countdown and how the flash cards for it are going), Flash cards due today (by the folder each card is
+   in), Later this week, and Jump back in (pinned notes, then the ones edited last). On a Chromebook or the PC (900 px
+   and up), full width: the greeting with the day's counts, the week from Monday to Friday, then two columns (tests,
+   flash cards and Jump back in on the left; quick actions, due today and later on the right). Every number comes from
+   this device's own copy of the notes (it works offline and costs nothing), through the same rules as Upcoming
+   (js/reminders.js) and Review (js/review.js), so they always agree.
 
    Each part is drawn by section(), which catches and logs, so a bad row can't keep the app from opening (js/start.js's
    V.go is the second net: a Today that throws shows your notes instead). Other parts add their own sections with
@@ -131,13 +131,17 @@
   }
   const repeating = (note) => !!(note && note.extra && (note.extra.reset === 'daily' || note.extra.reset === 'weekly'));
 
-  /* The chip after a row: "3 days late", a reminder's time with a bell, or nothing. */
+  /* The chip after a row: "3 days late", a reminder's time with a bell, or nothing. A repeating one has the repeat
+     mark too ("6:00 PM" and the mark; "Every Tue" for a repeating due date alone), and says it all to a screen reader. */
   function chipFor(note, today) {
     const day = R().dayOf(note);
     const late = day ? daysFrom(today, day) : 0;
     if (late < 0) return { text: late === -1 ? '1 day late' : `${-late} days late`, cls: 'late' };
     const at = R().remindAt(note);
-    if (at) return { text: R().remindLabel(note), cls: at < new Date() ? 'late' : 'soon', bell: true };
+    const rule = R().repeatOf ? R().repeatOf(note) : null;
+    const said = rule ? R().repeatLine(note) : '';
+    if (at) return { text: R().remindLabel(note), cls: at < new Date() ? 'late' : 'soon', bell: true, repeat: !!rule, said };
+    if (rule) return { text: R().repeatText(rule), cls: 'plain', repeat: true, said };
     return null;
   }
 
@@ -319,8 +323,16 @@
       await writeWords(noteId, flip.words);
       const nowDone = itemsOf(flip.words).every((i) => i.done);
       if (nowDone && !repeating(note) && !note.done && CHECK.exec(flip.line)[2] !== ' ') {
-        await R().change(noteId, (row) => { row.done = true; });
-        V.toast('Nice, done.', { action: 'Undo', onAction: () => undoDone(noteId, flip) });
+        // A repeating reminder isn't done for good: on to its next one, its boxes fresh again.
+        const row = latest(noteId);
+        const moved = R().upNext && R().upNext(row) ? await R().moveOn(noteId, { from: R().occurrence(row).key, why: 'done' }) : null;
+        if (moved) {
+          V.toast(`Done. Next one: ${R().dayLabel(moved.next.day)}${moved.next.at ? ' ' + R().clock(moved.next.at) : ''}`,
+            { action: 'Undo', onAction: () => undoMove(noteId, moved, flip) });
+        } else {
+          await R().change(noteId, (row) => { row.done = true; });
+          V.toast('Nice, done.', { action: 'Undo', onAction: () => undoDone(noteId, flip) });
+        }
       }
     } catch (error) {
       V.problem(error);
@@ -333,6 +345,18 @@
       const words = wordsOf(latest(noteId));
       const back = words === null ? null : flipped(words, flip.index, flip.line);
       if (back) await writeWords(noteId, back.words);
+    } catch (error) {
+      V.problem(error);
+    }
+    redraw();
+  }
+  async function undoMove(noteId, moved, flip) {
+    try {
+      if (await R().putBack(noteId, moved)) {
+        const words = wordsOf(latest(noteId));
+        const back = words === null ? null : flipped(words, flip.index, flip.line);
+        if (back) await writeWords(noteId, back.words);
+      }
     } catch (error) {
       V.problem(error);
     }
@@ -387,7 +411,9 @@
   }
   function chip(c) {
     if (!c) return null;
-    return V.h('span.due.today-chip.' + (c.cls || 'plain'), {}, c.bell ? R().icon('bell') : null, V.h('span', { text: c.text }));
+    return V.h('span.due.today-chip.' + (c.cls || 'plain') + (c.repeat ? '.repeats' : ''), { title: c.said || null },
+      c.bell ? R().icon('bell') : null, V.h('span', { text: c.text }),
+      c.repeat ? R().icon('repeat', 'repeat-mark-icon') : null, c.said ? V.h('span.sr-only', { text: ` (${c.said})` }) : null);
   }
   function whereLine(note) {
     const folder = folderOf(note);
@@ -395,14 +421,27 @@
       emoji(folder), note.locked ? V.icon('lock') : null, V.h('span', { text: V.noteTitle(note) }));
   }
 
+  /* How many flash cards are due today, for the Flash cards tile (0 when none, or when they can't be counted). */
+  function cardsDue() {
+    try { return RV() && RV().dueCount ? RV().dueCount() || 0 : 0; } catch (error) { console.error(error); return 0; }
+  }
+
   function quick() {
-    const tile = (key, name, label, sub, onClick, title) => V.h('button.today-tile', { type: 'button', onclick: onClick,
-      title: title || null, dataset: { key: `q:${key}` } },
-    V.h('span.tile-ic', {}, icon(name)), V.h('span.tile-text', {}, V.h('span.tile-label', { text: label }), V.h('small', { text: sub })));
+    // (a tile with a count is named with it: the badge is hidden from screen readers, and the line under the name is
+    // hidden on screens under 360 px)
+    const tile = (key, name, label, sub, onClick, title, count = 0) => V.h('button.today-tile', { type: 'button', onclick: onClick,
+      title: title || null, 'aria-label': count ? `${label}, ${sub}` : null, dataset: { key: `q:${key}` } },
+    V.h('span.tile-ic', {}, icon(name), count ? V.h('b.tile-count', { text: count > 99 ? '99+' : String(count), 'aria-hidden': 'true' }) : null),
+    V.h('span.tile-text', {}, V.h('span.tile-label', { text: label }), V.h('small', { text: sub })));
+    // Flash cards: Review, with today's count when cards are due; with none due it still opens on the decks, Learn and
+    // practice (Notes' Review list).
+    const due = cardsDue();
     return part('quick', 'Quick actions', V.h('div.today-tiles', {},
       tile('new', 'plus', 'New note', 'Start writing', newNote, V.appShortcuts ? 'New note (Ctrl+N)' : null),
       V.notetaker ? tile('notetaker', 'listen', 'Note-taker', 'Record a class', () => V.notetaker.open()) : null,
-      canDictate() ? tile('dictate', 'dictate', 'Dictate', 'Talk to type', dictate) : null));
+      canDictate() ? tile('dictate', 'dictate', 'Dictate', 'Talk to type', dictate) : null,
+      V.review ? tile('cards', 'cards', 'Flash cards', due ? `${due} due today` : 'Review and learn', () => toNotes('review'),
+        null, due) : null));
   }
 
   function dueSection(rows) {
@@ -511,7 +550,8 @@
       return V.h('div.today-row', { dataset: { id: note.id } },
         tick(false, `${row.text}: done`, onTick, `t:${row.key}`),
         V.h('div.today-row-text', {}, V.h('strong', { text: row.text }), whereLine(note)),
-        chip({ text: label, cls: days <= 3 ? 'soon' : 'plain' }));
+        chip({ text: label, cls: days <= 3 ? 'soon' : 'plain', repeat: !!(R().repeatOf && R().repeatOf(note)),
+          said: R().repeatLine ? R().repeatLine(note) : '' }));
     })), { label: 'Upcoming', onClick: () => toNotes('due') });
   }
 
@@ -716,7 +756,9 @@
     draw();
   }
 
-  V.on('data', () => redrawSoon());
+  // (never for the clipboard or what's sent: Today shows neither, and a phone's clipboard in step writes one each time
+  // it comes back to the front, so a long screen was drawn again under a finger scrolling it)
+  V.on('data', (table) => { if (table !== 'clips' && table !== 'transfers') redrawSoon(); });
   V.on('notetaker', () => redrawSoon());
   V.on('note-left', () => redrawSoon());
   V.on('status', (value) => { if ((value === 'synced' || value === 'held') && !synced) { synced = true; redrawSoon(); } });

@@ -1,18 +1,18 @@
 {
  "format": 1,
- "version": "1.16.0",
+ "version": "1.16.1",
  "min_shell": 1,
  "notes": [
+  "Chat can now do things in Wefty for you: send a picture of a subscription and say \"add this to subscriptions\", or ask it to make a note, add flash cards or set a due date. Each change shows under the answer with Open and Undo.",
+  "Repeating reminders: \"Badminton every Tuesday 6pm\", every day, every weekday, every other Friday, every month. Ticking it done (or the time passing) sets the next one, and Chat can set them too.",
+  "Flash cards are on Today now, with how many are due, and in Notes' \u22ef menu on a phone.",
+  "Today holds still on phones: no more jumping sideways or a white square in the corner.",
+  "No more ** or == marks in note titles and previews, and bold words look bold while you type on a phone.",
+  "Chat calls itself Wefty now, even in chats you started before the new name.",
   "Wefty now opens on Today: what's due and late, tests coming up, flash cards to review, subscriptions renewing soon, and the notes you were just in. Tick things off right there.",
-  "Four tabs: Today, Notes, Share and Chat. Share holds Send, Files and Clipboard together.",
-  "Your picture at the top has Settings, Invite people, Feedback and Sign out. A small dot on it means something hasn't synced yet: tap it to see what.",
-  "Tidier Settings: Account, Appearance, AI, Devices, Notes & files and About, each on its own page, with a search box. Type \"PIN\", \"dark\" or \"backup\" to find a setting.",
-  "Subscriptions (Today's \u22ef menu): keep track of what you pay for and when it renews. Wefty reminds you on Today a few days before, and before a free trial ends.",
-  "A new dark mode: deeper, softer and easier on the eyes, with Wefty's purple on each screen's main button. For phones with black screens there's Pure black too: Settings > Appearance.",
-  "On a phone, Select notes is now in Notes' \u22ef menu (holding a note still picks it), and the search is behind the magnifier.",
-  "Vault is now Wefty: same notes, same sign-in, a new name and icon. The web address is now crustyt0es.github.io/wefty/, and the old one sends you there."
+  "Four tabs: Today, Notes, Share and Chat. Share holds Send, Files and Clipboard together."
  ],
- "build": "1.16.0-2935f629ae1d",
+ "build": "1.16.1-755877fa649b",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -127,16 +127,16 @@
    "size": 7943
   },
   "index.html": {
-   "sha256": "1d8819f36e5cc500f8639c0548af1ab80cca237da249080682f659dba40b37ab",
-   "size": 5852
+   "sha256": "d451b7e2a66217b26b69f80f52d616c6a87bb51c265341ef2b4610bfb1f3b9fe",
+   "size": 5894
   },
   "js/access.js": {
    "sha256": "001652204ad102ff76d0c7ac1afd94bc8c790fba217de3ddef022bea81c4814a",
    "size": 58495
   },
   "js/ai.js": {
-   "sha256": "6f54705e2421751d66ef467f2f2ec05759f1d075fb91446e618d0aa222e2d0cd",
-   "size": 138136
+   "sha256": "c246b2d96154b56ae95dd1d9b7e7c1c7ba5fa43954360a8500d2b5d742aacb50",
+   "size": 141407
   },
   "js/arrivals.js": {
    "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
@@ -151,8 +151,12 @@
    "size": 7173
   },
   "js/chat.js": {
-   "sha256": "1f887e2a90f04ada204c2cee6cd5e2ef1738fcd1f3770181699d4b6bb9ce04ff",
-   "size": 98836
+   "sha256": "5f8a99768a109a98d060864c02f8c6f2c510ca4b09738196e537025fd344161c",
+   "size": 119701
+  },
+  "js/chattools.js": {
+   "sha256": "299a09f7485cc0e4da6e82ab2f0855183e237be973bbae37613a7ee549b4bf6d",
+   "size": 39049
   },
   "js/clips.js": {
    "sha256": "55fc0a99aa651c7afddd412f538535d9a9db834ce58f1914ec276fee3633c675",
@@ -175,8 +179,8 @@
    "size": 19526
   },
   "js/editor.js": {
-   "sha256": "aa3c8ab8abedb9f428716d5a40aa6271972d0561b65f51eee9bae20cb175d8a8",
-   "size": 169582
+   "sha256": "ac0c7704a90e51caa64a9b1a883e622351416a49fee39819b10430902e0e2291",
+   "size": 169896
   },
   "js/exams.js": {
    "sha256": "ef5ab68960e616067290201e4b5bc23f1345dfad955a3bc4507aaaa02e265c9a",
@@ -187,8 +191,8 @@
    "size": 65816
   },
   "js/format.js": {
-   "sha256": "a6ff0e43b578d99053fe345b5778bc1104d25abeb2c36ff9e84685512e815e2e",
-   "size": 46142
+   "sha256": "4f7f43ae032a3cdc503b466e55426f667cf9fd3f07f9747c1b1521799ed059b6",
+   "size": 46671
   },
   "js/history.js": {
    "sha256": "5c0ab090bf0ffed0271fd46cf641ffbe8e892bd9588127bf0b75b430055f2b45",
@@ -211,16 +215,16 @@
    "size": 4894
   },
   "js/news.js": {
-   "sha256": "9f81ae450a22062336750869e2f2016117f678e31092c303e1bb53c6964c2d56",
-   "size": 36703
+   "sha256": "5c866bb9284f4dea4cd6223934a0a5130964314f2faa2fd630747c662f2772bc",
+   "size": 36803
   },
   "js/notes.js": {
-   "sha256": "9f94a653522252ad9fceb6d07412c5d0464bec36376a24e4d6a94c09a441e2e7",
-   "size": 70289
+   "sha256": "b7b20e3cd187d304b0a05c408f3fda038d4de0b4da1f88152b2c4a1b8e5f4474",
+   "size": 71327
   },
   "js/notetaker.js": {
-   "sha256": "b6add56d7ed201cb2714b47428a07545bd97e80c591731d9b1485e7048859677",
-   "size": 80114
+   "sha256": "6269a43e85d373f5969d33f1f12a91742781bfe95061fbbf8de91fb6c6ce578b",
+   "size": 80352
   },
   "js/organise.js": {
    "sha256": "5a1c5819893487f65c7b78acb0405c314c4e8c5b6aa46f54d6c32f27cdc9c61c",
@@ -235,12 +239,12 @@
    "size": 14354
   },
   "js/reminders.js": {
-   "sha256": "521155c59de0b1c55ed5d75dfe34b575984e5eba7c15ca6ba3a73f8df7314ae4",
-   "size": 38141
+   "sha256": "94f9e41999b0dbff38971746a2cc926da93bdd407dede7dcb7174a64ccf8260e",
+   "size": 70984
   },
   "js/review.js": {
-   "sha256": "bb36468424d0609f43b5dd10e4fde1fd009019b2bdc30833be48eeefed44d149",
-   "size": 33118
+   "sha256": "e2087b2de74b652d66593b71520533351dddd03ad112fa6146626892560f0749",
+   "size": 33269
   },
   "js/send.js": {
    "sha256": "598b50622a74d802435b4572d320d959ef15533bf80d3294ce699e94b53740a2",
@@ -267,23 +271,23 @@
    "size": 23926
   },
   "js/subs.js": {
-   "sha256": "08a2a451be43bcd9b8eebbc91ede2af3be59b3b7826c3be90f1df5a2a34dc74b",
-   "size": 23998
+   "sha256": "fd86aa1eed0301bd4e49f53a19557960aca79d494923f5289d0d79a02480e3d3",
+   "size": 24444
   },
   "js/theme.js": {
    "sha256": "2f2efdacab9e0982aef08241c39f639fa550f1615cc8306e1d7d3b28c147313c",
    "size": 3935
   },
   "js/today.js": {
-   "sha256": "0412cbc2937fcfed468599d999a57f378e7d937551c690686fc74d0c1fc12dc2",
-   "size": 40341
+   "sha256": "51bfa7d187f130111730744014f7488761eaf69b45240222b8cac103d55201b5",
+   "size": 43136
   },
   "js/update.js": {
    "sha256": "158adfcd16731bb83097fe6f2c6d03cda20e1fc290698b52c33a8ae1269e07b3",
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "bfa2259b6822c66fb07f3050634a53f58e8fcfc2513c953d0dff8c127c493760",
+   "sha256": "e1bab1932042b28395e475af63fbb56e3acd411d76660f7937558c8035ca2cd3",
    "size": 53618
   },
   "js/welcome.js": {
@@ -295,11 +299,11 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "d68f5b7a18775e8fc829640931234fe4961d6c79f7959edd01eff1b1d7cc7a76",
-   "size": 243358
+   "sha256": "938aa2ba6f0ed8cb0b1fba401a620ae64b841ce585baea209590fe7626114c16",
+   "size": 248568
   },
   "sw.js": {
-   "sha256": "6ccaec9975ece36dc66761115cde22e1ecfa579bf4b59fbafe3abb222bf4fcd1",
+   "sha256": "2f76a64f18ae414b60690771771668ca535561ddb42c104f8c340b49b1f1dc5f",
    "size": 9129
   },
   "vendor/LICENSE-supabase-js.txt": {

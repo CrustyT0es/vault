@@ -9,7 +9,11 @@
    A reminder reaches the phone through its calendar: a Google Calendar event filled in from a link (the phone's
    Calendar app, and Samsung Calendar, show Google's events), or an .ics file with an alarm 10 minutes before. While
    Vault is open (or was a few hours ago) it reminds too: a notification when that was allowed, and a toast. The Notes
-   tab's Upcoming list shows the week by day; a bell chip on a note (and on its card) says when, and changes it. */
+   tab's Upcoming list shows the week by day; a bell chip on a note (and on its card) says when, and changes it.
+
+   A reminder (or a due date) can repeat: "Badminton every Tuesday 6pm", "every other Friday", or the sheet's Repeat.
+   It moves on to its next one by itself when one goes by or is ticked done (see "repeating" below; set() is the one
+   call for other parts, such as Chat's tools). */
 'use strict';
 
 V.reminders = (() => {
@@ -85,6 +89,15 @@ V.reminders = (() => {
     let evening = false;
     let weekday = null;       // { day, next }: worked out once the time is known
     let m;
+
+    // "every Tuesday", "every other Friday", "every day", "each weekday", "every 2 weeks", "daily", "on Tuesdays":
+    // taken out of the words first, so the rest gives the time (and maybe the day it starts).
+    const rep = readRepeat(s);
+    if (rep) {
+      said.push(rep.found[0]);
+      s = blank(s, rep.found);
+      if (rep.hint === 'evening') evening = true;
+    }
 
     // "in 2 hours", "in half an hour", "in 3 days", "in a week"
     m = new RegExp(`\\bin\\s+(?:(half\\s+an?\\s+hour)|${COUNT}\\s+(minutes?|mins?|hours?|hrs?|days?|weeks?|wks?)\\b)`).exec(s);
@@ -181,13 +194,15 @@ V.reminders = (() => {
       strong = true;
     } else if ((m = /(?:\bat\s+|@\s*)(\d{1,2})\b(?!\s*(?:%|st\b|nd\b|rd\b|th\b|:|\.\d|,\d))/.exec(s)) && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
       time = [guessHour(Number(m[1]), evening), 0];
-    } else if ((m = /\b(morning|afternoon|evening|night)\b/.exec(s)) && (date || weekday)) {
+    } else if ((m = /\b(morning|afternoon|evening|night)\b/.exec(s)) && (date || weekday || rep)) {
       time = { morning: [9, 0], afternoon: [15, 0], evening: [19, 0], night: [19, 0] }[m[1]];
     } else if (evening) {
       time = [19, 0];  // "tonight"
       m = null;
     } else m = null;
     if (m) said.push(m[0]);
+    if (rep && !time && rep.hint) time = HINT_TIMES[rep.hint];
+    if (rep && rep.hint === 'morning' && time && !strong && time[0] > 12) time = [time[0] - 12, time[1]];  // "every morning at 7"
 
     if (weekday) {
       let ahead = (weekday.day - today.getDay() + 7) % 7;
@@ -197,6 +212,10 @@ V.reminders = (() => {
         ahead = later ? 0 : 7;
       }
       date = plusDays(today, ahead);
+    }
+    if (rep) {
+      if (rep.soft && !date && !time) return null;  // "Daily standup notes": a word, not a reminder
+      return repeating(rep, date, time, now, said);
     }
     if (!date) {
       if (!time || !strong) return null;
@@ -212,6 +231,256 @@ V.reminders = (() => {
     const hhmm = time ? `${pad(time[0])}:${pad(time[1])}` : null;
     return { date: day, time: hhmm, at, past: at <= now, key: day + (hhmm ? 'T' + hhmm : ''),
       words: said.map((w) => w.trim()).filter(Boolean).join(' ') };
+  }
+
+  /* -- repeating (1.16.1): extra.repeat
+
+     "Badminton every Tuesday 6pm", "every day at 7", "every other Friday", "each weekday", "every 2 weeks", "every
+     month", "every year", "daily at 8", "on Tuesdays at 6" (or the Repeat choice in the reminder's sheet) make a note's
+     reminder (or its due date alone) come back. Kept in the note as extra.repeat:
+
+       { every: 'day' | 'weekday' | 'week' | 'month' | 'year',
+         n:      every n of them (2 = every other),
+         days:   a week's days, 0 Sunday ... 6 Saturday (only for 'week'),
+         start:  'YYYY-MM-DD', the first one: "every other" and "every month" count from it,
+         until:  'YYYY-MM-DD', the last day one may fall on (optional),
+         last:   the reminder that went by last (an ISO time), said as missed on a device that wasn't open then }
+
+     The note's own `due` and extra.remind_at are always the next one, so an older Wefty (which doesn't know
+     extra.repeat) shows a plain reminder and never breaks. When one goes by (or is ticked done) the note moves on to the
+     next one still to come, never a pile of missed ones (moveOn). Days are counted in this device's time zone, at the
+     reminder's own clock time, so 6 PM stays 6 PM across a clock change. Where the next one falls is worked out from
+     the note alone, so two devices moving it on at once write the same thing, and one that already moved (here or
+     elsewhere) is never moved again. */
+
+  const KINDS = ['day', 'weekday', 'week', 'month', 'year'];
+  const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const IS_DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const HINT_TIMES = { morning: [9, 0], afternoon: [15, 0], evening: [19, 0] };
+  const PLURAL_DAYS = { sundays: 0, mondays: 1, tuesdays: 2, wednesdays: 3, thursdays: 4, fridays: 5, saturdays: 6 };
+  const DAY_LIST = `(?:${words(DAY_WORDS)})s?(?:\\s*(?:,|&|\\+|\\/|\\band\\b)\\s*(?:${words(DAY_WORDS)})s?)*`;
+  const EVERY = new RegExp(`\\b(?:every|each)\\s+(?:(other)\\s+|${COUNT}\\s+)?(${DAY_LIST}|week\\s*days?|school\\s+days?|weekends?|days?|weeks?|months?|years?|mornings?|afternoons?|evenings?|nights?)(?![a-z])`);
+  const SOFT = /\b(daily|everyday|weekly|fortnightly|biweekly|monthly|yearly|annually)\b/;
+  const PLURAL = new RegExp(`\\b(on\\s+)?((?:${Object.keys(PLURAL_DAYS).join('|')})(?:\\s*(?:,|&|\\band\\b)\\s*(?:${Object.keys(PLURAL_DAYS).join('|')}))*)\\b`);
+  const validDay = (text) => typeof text === 'string' && IS_DAY.test(text) && dayText(fromDay(text)) === text;
+  const atOn = (d, [h, m]) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m);
+  const mondayOf = (d) => plusDays(d, -((d.getDay() + 6) % 7));
+
+  /* The repeat said in the words `s` (lower case), or null: { every, n, days, hint (a time of day), soft, found }. */
+  function readRepeat(s) {
+    let m = EVERY.exec(s);
+    if (m) {
+      const unit = m[3].replace(/\s+/g, ' ');
+      const n = m[1] ? 2 : m[2] ? NUMBER_WORDS[m[2]] || Number(m[2]) : 1;
+      const out = { every: 'week', n: Math.min(Math.max(n || 1, 1), 99), found: m };
+      if (/^(week ?days?|school days?)$/.test(unit)) { out.every = 'weekday'; out.n = 1; }
+      else if (/^weekends?$/.test(unit)) out.days = [0, 6];
+      else if (/^days?$/.test(unit)) out.every = 'day';
+      else if (/^(morning|afternoon|evening|night)s?$/.test(unit)) {
+        out.every = 'day';
+        out.hint = /^(evening|night)/.test(unit) ? 'evening' : unit.replace(/s$/, '');
+      } else if (/^weeks?$/.test(unit)) { /* (its day: the one said with it, or today's) */ }
+      else if (/^months?$/.test(unit)) out.every = 'month';
+      else if (/^years?$/.test(unit)) out.every = 'year';
+      else {
+        const names = unit.match(new RegExp(`(?:${words(DAY_WORDS)})`, 'g')) || [];
+        out.days = [...new Set(names.map((w) => DAY_WORDS[w]))].sort((a, b) => a - b);
+      }
+      return out;
+    }
+    if ((m = PLURAL.exec(s)) && (m[1] || TIME_AHEAD.test(s.slice(m.index + m[0].length)))) {
+      const names = m[2].match(new RegExp(Object.keys(PLURAL_DAYS).join('|'), 'g'));
+      return { every: 'week', n: 1, days: [...new Set(names.map((w) => PLURAL_DAYS[w]))].sort((a, b) => a - b), found: m };
+    }
+    if ((m = SOFT.exec(s))) {
+      const kind = { daily: ['day', 1], everyday: ['day', 1], weekly: ['week', 1], fortnightly: ['week', 2], biweekly: ['week', 2],
+        monthly: ['month', 1], yearly: ['year', 1], annually: ['year', 1] }[m[1]];
+      return { every: kind[0], n: kind[1], soft: true, found: m };
+    }
+    return null;
+  }
+
+  /* A parse() result for repeating words: the first one still to come (from the day said, else today). */
+  function repeating(rep, date, time, now, said) {
+    const today = midnight(now);
+    const base = date || today;
+    const rule = { every: rep.every, n: rep.n };
+    if (rep.every === 'week') rule.days = rep.days || [base.getDay()];
+    const probe = { ...rule, n: 1, start: dayText(base) };  // (the first one fits the days, whatever the n)
+    let first = null;
+    for (let k = 0; k < 400 && !first; k++) {
+      const d = plusDays(base, k);
+      if (fits(probe, d) && atOn(d, time || DEFAULT_TIME) > now) first = d;
+    }
+    if (!first) return null;
+    rule.start = dayText(first);
+    const found = result(first, time, now, said);
+    found.repeat = rule;
+    found.key += '|' + ruleKey(rule);
+    return found;
+  }
+
+  /* A rule as it's kept, tidied (anything odd from another device or version: null, never an error). */
+  function cleanRule(raw) {
+    if (!raw || typeof raw !== 'object' || !KINDS.includes(raw.every)) return null;
+    const rule = { every: raw.every, n: raw.every === 'weekday' ? 1 : Math.min(Math.max(Math.round(Number(raw.n) || 1), 1), 99) };
+    if (rule.every === 'week' && Array.isArray(raw.days)) {
+      const days = [...new Set(raw.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort((a, b) => a - b);
+      if (days.length) rule.days = days;
+    }
+    if (validDay(raw.start)) rule.start = raw.start;
+    if (validDay(raw.until)) rule.until = raw.until;
+    if (typeof raw.last === 'string' && !Number.isNaN(new Date(raw.last).getTime())) rule.last = raw.last;
+    return rule;
+  }
+
+  /* The note's next one: { day (a Date at midnight), at (the reminder, or null for a due date alone), key }. */
+  function occurrence(note) {
+    if (!note) return null;
+    const at = remindAt(note);
+    if (at) return { day: midnight(at), at, key: String(note.extra.remind_at) };
+    return validDay(note.due) ? { day: fromDay(note.due), at: null, key: 'due:' + note.due } : null;
+  }
+
+  /* A note's repeat, ready to use (its start filled in from its next one when missing), or null. */
+  function repeatOf(note) {
+    const rule = cleanRule(note && note.extra && note.extra.repeat);
+    if (!rule) return null;
+    const here = occurrence(note);
+    if (!rule.start) rule.start = here ? dayText(here.day) : V.today();
+    if (rule.every === 'week' && !rule.days) rule.days = [fromDay(rule.start).getDay()];
+    return rule;
+  }
+
+  const ruleKey = (rule) => (rule ? `${rule.every}${rule.n}${rule.days ? ':' + rule.days.join('') : ''}${rule.until ? '-' + rule.until : ''}` : '');
+
+  /* Whether the rule falls on day `d` (a Date at midnight). */
+  function fits(rule, d) {
+    const start = fromDay(rule.start);
+    if (d < start || (rule.until && dayText(d) > rule.until)) return false;
+    if (rule.every === 'day') return daysBetween(start, d) % rule.n === 0;
+    if (rule.every === 'weekday') return d.getDay() >= 1 && d.getDay() <= 5;
+    if (rule.every === 'week') {
+      if (!(rule.days || [start.getDay()]).includes(d.getDay())) return false;
+      return Math.round(daysBetween(mondayOf(start), mondayOf(d)) / 7) % rule.n === 0;
+    }
+    const months = (d.getFullYear() - start.getFullYear()) * 12 + d.getMonth() - start.getMonth();
+    if (months % (rule.every === 'year' ? 12 * rule.n : rule.n) !== 0) return false;
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();  // (the 31st in a short month: its last day)
+    return d.getDate() === Math.min(start.getDate(), last);
+  }
+
+  /* The first day after `day` the rule falls on, or null once it has ended. */
+  function nextAfter(rule, day) {
+    const span = { day: 1, weekday: 3, week: 7, month: 31, year: 366 }[rule.every] * rule.n + 31;
+    for (let k = 1; k <= span; k++) {
+      const d = plusDays(day, k);
+      if (rule.until && dayText(d) > rule.until) return null;
+      if (fits(rule, d)) return d;
+    }
+    return null;
+  }
+
+  /* Where a repeating note goes next: the first one after its current one that's still to come (a reminder's time
+     not gone yet; a due date alone, today or later). { day, at, due, key } or null (no repeat, or it has ended). */
+  function upNext(note, now = new Date()) {
+    const rule = repeatOf(note);
+    const here = occurrence(note);
+    if (!rule || !here) return null;
+    const today = midnight(now);
+    const time = here.at ? [here.at.getHours(), here.at.getMinutes()] : null;
+    let d = here.day;
+    for (let i = 0; i < 20000; i++) {
+      d = nextAfter(rule, d);
+      if (!d) return null;
+      if (time ? atOn(d, time) > now : d >= today) break;
+    }
+    const at = time ? atOn(d, time) : null;
+    const shift = daysBetween(here.day, d);
+    return { day: dayText(d), at, due: validDay(note.due) ? dayText(plusDays(fromDay(note.due), shift)) : null,
+      key: at ? at.toISOString() : 'due:' + dayText(d) };
+  }
+
+  /* A repeating note whose one has gone by (a reminder's time, or a due date's day) and isn't done. */
+  function hasPassed(note, now = new Date()) {
+    if (!note || note.done || !repeatOf(note)) return false;
+    const here = occurrence(note);
+    return !!here && (here.at ? here.at <= now : here.day < midnight(now));
+  }
+
+  /* "Every day", "Every weekday", "Every Tue", "Every Tue and Thu", "Every other Fri", "Every 3 weeks on Mon", "Every
+     month on the 3rd", "Every year on Nov 2", with " until Dec 20" when it ends. */
+  function repeatText(raw) {
+    const rule = raw && raw.every ? raw : null;
+    if (!rule) return '';
+    const n = rule.n || 1;
+    const list = (days) => {
+      const names = [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => SHORT_DAYS[d]);
+      return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+    };
+    const start = validDay(rule.start) ? fromDay(rule.start) : null;
+    let text;
+    if (rule.every === 'day') text = n === 1 ? 'Every day' : n === 2 ? 'Every other day' : `Every ${n} days`;
+    else if (rule.every === 'weekday') text = 'Every weekday';
+    else if (rule.every === 'week') {
+      const days = rule.days || (start ? [start.getDay()] : []);
+      const said = days.length === 7 ? 'day' : days.length === 5 && !days.includes(0) && !days.includes(6) ? 'weekday' : list(days);
+      text = n === 1 ? `Every ${said}` : n === 2 ? `Every other ${said}` : `Every ${n} weeks on ${said}`;
+    } else if (rule.every === 'month') {
+      const on = start ? ` on the ${ordinal(start.getDate())}` : '';
+      text = (n === 1 ? 'Every month' : n === 2 ? 'Every other month' : `Every ${n} months`) + on;
+    } else {
+      const on = start ? ` on ${SHORT_MONTHS[start.getMonth()]} ${start.getDate()}` : '';
+      text = (n === 1 ? 'Every year' : `Every ${n} years`) + on;
+    }
+    if (validDay(rule.until)) {
+      const end = fromDay(rule.until);
+      text += ` until ${SHORT_MONTHS[end.getMonth()]} ${end.getDate()}` + (end.getFullYear() !== new Date().getFullYear() ? `, ${end.getFullYear()}` : '');
+    }
+    return text;
+  }
+  const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+
+  /* When the next one is, said short: "today 6:00 PM", "tomorrow", "next Tue 6:00 PM", "next Tue Nov 10 6:00 PM". */
+  function nextWords(day, at, now = new Date()) {
+    const d = typeof day === 'string' ? fromDay(day) : midnight(day);
+    const days = daysBetween(now, d);
+    const time = at ? ' ' + clock(at) : '';
+    if (days === 0) return 'today' + time;
+    if (days === 1) return 'tomorrow' + time;
+    if (days > 1 && days < 7) return `next ${SHORT_DAYS[d.getDay()]}` + time;
+    return `next ${SHORT_DAYS[d.getDay()]} ${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}`
+      + (d.getFullYear() !== now.getFullYear() ? `, ${d.getFullYear()}` : '') + time;
+  }
+
+  /* A repeating note's line: "Every Tue · next Tue 6:00 PM" ("" when it doesn't repeat). */
+  function repeatLine(note, now = new Date()) {
+    const rule = repeatOf(note);
+    const here = occurrence(note);
+    if (!rule || !here) return '';
+    return `${repeatText(rule)} · ${nextWords(here.day, here.at, now)}`;
+  }
+
+  /* The rule as an iCalendar RRULE (without "RRULE:"), for the calendar's event; `at` is its first one. */
+  function rrule(rule) {
+    const parts = [];
+    const n = rule.n || 1;
+    const start = fromDay(rule.start);
+    if (rule.every === 'day') parts.push('FREQ=DAILY');
+    else if (rule.every === 'weekday') parts.push('FREQ=WEEKLY', 'BYDAY=MO,TU,WE,TH,FR');
+    else if (rule.every === 'week') {
+      parts.push('FREQ=WEEKLY');
+      if (n > 1) parts.push(`INTERVAL=${n}`, 'WKST=MO');
+      parts.push('BYDAY=' + (rule.days || [start.getDay()]).map((d) => BYDAY[d]).join(','));
+    } else if (rule.every === 'month') {
+      parts.push('FREQ=MONTHLY');
+      const day = start.getDate();
+      // The 29th to 31st fall on a short month's last day, as here: the last of those days the month has.
+      parts.push(day <= 28 ? `BYMONTHDAY=${day}` : `BYMONTHDAY=${Array.from({ length: day - 27 }, (_, i) => 28 + i).join(',')};BYSETPOS=-1`);
+    } else parts.push('FREQ=YEARLY');
+    if (n > 1 && rule.every !== 'week' && rule.every !== 'weekday') parts.splice(1, 0, `INTERVAL=${n}`);
+    if (validDay(rule.until)) parts.push(`UNTIL=${rule.until.replace(/-/g, '')}T235959`);
+    return parts.join(';');
   }
 
   /* -- saying when */
@@ -275,6 +544,152 @@ V.reminders = (() => {
     return V.cloud.save('notes', copy);
   }
 
+  /* -- moving a repeating note on, and setting one */
+
+  const TICKED_LINE = /^\s*[-*]\s*\[[xX]\]/m;
+  const untick = (text) => String(text).split('\n').map((line) => line.replace(/^(\s*[-*]\s*\[)[xX](\])/, '$1 $2')).join('\n');
+  const moving = new Set();
+  const askedKey = (day, at, rule) => day + (at ? `T${pad(at.getHours())}:${pad(at.getMinutes())}` : '') + (rule ? '|' + ruleKey(rule) : '');
+
+  /* Moves repeating note `id` on to its next one still to come, but only while it's still at `from` (the key of the
+     one the caller saw: occurrence(note).key): one that has moved already (here, or on another device and synced)
+     is left alone, so a tap and a timer, or two devices, never move it twice. `why`: 'passed' (its time went by:
+     kept as repeat.last, so a device that wasn't open says it as missed) or 'done' (ticked). Its ticked boxes come off
+     for the next one (not a locked note's, nor a repeating checklist's, which has its own days). Resolves to
+     { before, next } (what putBack needs for an Undo), or null when nothing moved. */
+  async function moveOn(id, { from, why = 'done', now = new Date() } = {}) {
+    const note = latest(id);
+    const here = occurrence(note);
+    if (!note || !here || note.done || note.deleted || (from !== undefined && here.key !== from)) return null;
+    const next = upNext(note, now);
+    const flag = `${id}|${here.key}`;
+    if (!next || moving.has(flag)) return null;
+    moving.add(flag);
+    try {
+      const open = V.editor.openId() === id && !!V.editor.current();
+      const words = open ? V.editor.words() : note.body;
+      const fresh = !note.locked && !(note.extra && note.extra.reset) && typeof words === 'string' && TICKED_LINE.test(words)
+        ? untick(words) : null;
+      const before = { due: note.due || null, extra: { ...(note.extra || {}) }, words: fresh === null ? null : words, fresh };
+      if (fresh !== null && open) V.editor.setWords(fresh);
+      await change(id, (row) => {
+        if (fresh !== null && !open) row.body = fresh;
+        row.due = next.due;
+        row.done = false;
+        if (next.at) row.extra.remind_at = next.at.toISOString();
+        const rule = { ...row.extra.repeat };
+        if (!rule.start) rule.start = dayText(here.day);  // (counted from where it was, from now on)
+        if (why === 'passed' && here.at) rule.last = here.key;
+        row.extra.repeat = rule;
+        if (row.extra.remind_asked && row.extra.remind_asked !== 'never') row.extra.remind_asked = askedKey(next.day, next.at, cleanRule(rule));
+      });
+      return { before, next };
+    } finally {
+      moving.delete(flag);
+    }
+  }
+
+  /* Undoes a moveOn (its result): the day, reminder and ticks as they were, if it hasn't moved again since. */
+  async function putBack(id, { before, next }) {
+    const note = latest(id);
+    const here = occurrence(note);
+    if (!note || !here || here.key !== next.key) return false;
+    const open = V.editor.openId() === id && !!V.editor.current();
+    const words = open ? V.editor.words() : note.body;
+    const ticks = before.words !== null && words === before.fresh;
+    if (ticks && open) V.editor.setWords(before.words);
+    await change(id, (row) => {
+      if (ticks && !open) row.body = before.words;
+      row.due = before.due;
+      row.done = false;
+      row.extra = { ...before.extra };
+    });
+    return true;
+  }
+
+  /* A repeating note ticked done: on to its next one, with an Undo. False when it doesn't repeat (or has ended). */
+  async function doneOnce(id) {
+    const here = occurrence(latest(id));
+    const moved = here ? await moveOn(id, { from: here.key, why: 'done' }) : null;
+    if (!moved) return false;
+    V.toast(`Done. Next one: ${dayLabel(moved.next.day)}${moved.next.at ? ' ' + clock(moved.next.at) : ''}`,
+      { action: 'Undo', onAction: () => putBack(id, moved).catch(V.problem) });
+    return true;
+  }
+
+  /* A note's day, reminder and repeat, in one call (the reminder sheet's Save, and Chat's tools):
+
+       V.reminders.set(noteId, { due, at, repeat })   ->  Promise<{ due, remind_at, repeat }>
+       V.reminders.setRepeat(noteId, repeat)          (the same, with the repeat alone)
+
+     due:    'YYYY-MM-DD', or null for none. Left out: the reminder's day when `at` is given, else as it is.
+     at:     the reminder: a Date or an ISO time, or null for none. Left out: as it is.
+     repeat: a rule ({ every: 'day' | 'weekday' | 'week' | 'month' | 'year', n, days, until }: see "repeating"
+             above), words ("every Tuesday 6pm", "every other Friday", "daily": a time or day in them is used when
+             `at` / `due` are left out), or null to stop repeating. Left out: as it is.
+     A repeating one starts on the first day, on or after the one given, that its rule falls on. Rejects with an Error
+     whose message can be shown as it is ("That note isn't here.", "Try words like \"every Tuesday\"."). */
+  async function set(id, options = {}) {
+    const note = latest(id);
+    if (!note || note.deleted || note._purge) throw new Error('That note isn\'t here.');
+    let when = options.at === undefined ? remindAt(note) : options.at === null ? null : new Date(options.at);
+    if (when && Number.isNaN(when.getTime())) throw new Error('That time isn\'t one Wefty understands.');
+    let day = options.due !== undefined ? options.due : options.at !== undefined && when ? dayText(when) : note.due || null;
+    let rule;
+    if (options.repeat === undefined) rule = cleanRule(note.extra && note.extra.repeat);
+    else if (options.repeat === null || options.repeat === false) rule = null;
+    else if (typeof options.repeat === 'string') {
+      const found = parse(options.repeat);
+      if (!found || !found.repeat) throw new Error('Try words like "every Tuesday" or "every other Friday".');
+      rule = found.repeat;
+      // "every week" with a day given: the week's day is that day's, not today's (parse() anchors on today).
+      if ((options.at !== undefined || options.due !== undefined) && rule.every === 'week'
+          && !/\b(mon|tue|wed|thu|fri|sat|sun)/i.test(options.repeat)) delete rule.days;
+      if (options.at === undefined && options.due === undefined) {
+        if (found.time) when = found.at;
+        else if (when) when = atOn(fromDay(found.date), [when.getHours(), when.getMinutes()]);
+        day = when ? dayText(when) : found.date;
+      }
+    } else {
+      rule = cleanRule(options.repeat);
+      if (!rule) throw new Error('That repeat isn\'t one Wefty understands.');
+    }
+    if (day !== null && !validDay(day)) throw new Error('Pick a day like 2026-11-03.');
+    if (rule) {
+      if (!day && !when) throw new Error('A repeat needs a day to start on.');
+      const was = cleanRule(note.extra && note.extra.repeat);
+      const from = when ? midnight(when) : fromDay(day);
+      if (rule.every === 'week' && !rule.days) rule.days = [from.getDay()];
+      // The start: kept when it's the same repeat (so "every month" on the 31st stays the 31st), else the first one.
+      const keep = validDay(rule.start) ? rule.start : was && ruleKey(was) === ruleKey(rule) && was.start && was.start <= dayText(from) ? was.start : null;
+      const probe = { ...rule, start: keep || dayText(from), ...(keep ? {} : { n: 1 }) };
+      let first = null;
+      for (let k = 0; k < 800 && !first; k++) if (fits(probe, plusDays(from, k))) first = plusDays(from, k);
+      rule.start = keep || (first && dayText(first));
+      // Never one that has gone already (it would only ring as missed): the first still to come.
+      const now = new Date();
+      const time = when ? [when.getHours(), when.getMinutes()] : null;
+      for (let i = 0; first && i < 20000 && (time ? atOn(first, time) <= now : first < midnight(now)); i++) first = nextAfter(rule, first);
+      if (!first) throw new Error('That repeat has ended before it starts: pick a later last day.');
+      delete rule.last;
+      const shift = daysBetween(from, first);
+      if (when) when = atOn(first, [when.getHours(), when.getMinutes()]);
+      if (day) day = dayText(plusDays(fromDay(day), shift));
+    }
+    await change(id, (row) => {
+      if (row.due !== day) row.done = false;
+      row.due = day;
+      if (when) {
+        row.extra.remind_at = when.toISOString();
+        row.extra.remind_asked = askedKey(dayText(when), when, rule);
+      } else delete row.extra.remind_at;
+      if (rule) row.extra.repeat = rule;
+      else delete row.extra.repeat;
+    });
+    return { due: day, remind_at: when ? when.toISOString() : null, repeat: rule };
+  }
+  const setRepeat = (id, repeat) => set(id, { repeat });
+
   /* -- the phone's calendar */
 
   const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');  // 20261030T130000Z
@@ -290,11 +705,23 @@ V.reminders = (() => {
     return `${V.noteTitle(note)}\n\nOpen in Wefty: ${noteLink(note.id)}`;
   }
 
-  /* A Google Calendar "new event" page, filled in: the note's title, half an hour from the reminder, and a link back. */
+  /* The same moment as this device's wall-clock time, with no zone: 20261103T180000 (a repeating event's times, so its
+     6 PM stays 6 PM in the calendar across a clock change). */
+  const wall = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  function timeZone() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (error) { return ''; }
+  }
+
+  /* A Google Calendar "new event" page, filled in: the note's title, half an hour from the reminder, and a link back.
+     A repeating one carries its rule (recur=RRULE:...), its times in this device's own time zone (ctz). */
   function calendarLink(note, at = remindAt(note)) {
     const end = new Date(at.getTime() + 30 * 60000);
+    const rule = repeatOf(note);
+    const zone = rule ? timeZone() : '';
     return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-      + `&text=${encodeURIComponent(V.noteTitle(note))}&dates=${stamp(at)}/${stamp(end)}`
+      + `&text=${encodeURIComponent(V.noteTitle(note))}`
+      + (rule ? `&dates=${wall(at)}/${wall(end)}${zone ? `&ctz=${encodeURIComponent(zone)}` : ''}&recur=${encodeURIComponent('RRULE:' + rrule(rule))}`
+        : `&dates=${stamp(at)}/${stamp(end)}`)
       + `&details=${encodeURIComponent(details(note))}`;
   }
 
@@ -303,9 +730,13 @@ V.reminders = (() => {
     const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
     const end = new Date(at.getTime() + 30 * 60000);
     const title = V.noteTitle(note);
+    // A repeating one: its rule, and its times as the clock on the wall (floating, so the rule follows this device's
+    // time zone and its clock changes, the way a calendar app's own repeating event does).
+    const rule = repeatOf(note);
     const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Wefty//Reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
-      'BEGIN:VEVENT', `UID:${note.id}-${stamp(at)}@vault`, `DTSTAMP:${stamp(now)}`, `DTSTART:${stamp(at)}`,
-      `DTEND:${stamp(end)}`, `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(details(note))}`, `URL:${noteLink(note.id)}`,
+      'BEGIN:VEVENT', `UID:${note.id}-${stamp(at)}@vault`, `DTSTAMP:${stamp(now)}`,
+      ...(rule ? [`DTSTART:${wall(at)}`, `DTEND:${wall(end)}`, `RRULE:${rrule(rule)}`] : [`DTSTART:${stamp(at)}`, `DTEND:${stamp(end)}`]),
+      `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(details(note))}`, `URL:${noteLink(note.id)}`,
       'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:-PT10M', 'END:VALARM',
       'END:VEVENT', 'END:VCALENDAR'];
     const encoder = new TextEncoder();
@@ -362,8 +793,10 @@ V.reminders = (() => {
       return null;
     }
     const at = remindAt(note);
+    const rule = repeatOf(note);
     const already = extra.remind_asked === found.key
-      || (note.due === found.date && (!found.time || (at && at.getTime() === found.at.getTime())));
+      || (note.due === found.date && (!found.time || (at && at.getTime() === found.at.getTime()))
+        && (!found.repeat || ruleKey(rule) === ruleKey(found.repeat)));
     if (already || (showing && showing.key === found.key)) return null;
     question(found, id);
     return found;
@@ -374,10 +807,10 @@ V.reminders = (() => {
   }, text);
 
   function question(found, id) {
-    const when = label(found);
+    const when = found.repeat ? `${repeatText(found.repeat)} · ${nextWords(found.date, found.time ? found.at : null)}` : label(found);
     showing = { id, key: found.key, kind: 'question' };
     V.editor.ask(V.h('div.ask-card', { role: 'group', 'aria-label': `${when}: set a reminder?` },
-      V.h('div.ask-top', {}, icon('bell', 'ask-icon'),
+      V.h('div.ask-top', {}, icon(found.repeat ? 'repeat' : 'bell', 'ask-icon'),
         V.h('span.ask-text', {}, V.h('strong', { text: when }), V.h('span', { text: ' · Set a reminder?' })),
         V.h('button.ask-close.keep-caret', { type: 'button', title: 'Not now', 'aria-label': 'Not now',
           onclick: () => answer('no', found, id) }, V.icon('x'))),
@@ -395,12 +828,19 @@ V.reminders = (() => {
     V.editor.update((note) => {
       const extra = { ...(note.extra || {}) };
       extra.remind_asked = kind === 'never' ? 'never' : found.key;
-      if (kind === 'remind' || kind === 'due') { note.due = found.date; note.done = false; }
+      if (kind === 'remind' || kind === 'due') {
+        note.due = found.date;
+        note.done = false;
+        // A repeat said in the words (or none: a one-off date typed over a repeating one ends it).
+        if (found.repeat) extra.repeat = { ...found.repeat };
+        else delete extra.repeat;
+      }
       if (kind === 'remind') extra.remind_at = found.at.toISOString();
+      else if (kind === 'due' && found.repeat) delete extra.remind_at;  // (a repeating due date: no old time moving with it)
       note.extra = extra;
     });
     const note = V.editor.current();
-    if (kind === 'due') V.toast(`Due ${dayLabel(found.date)}`);
+    if (kind === 'due') V.toast(found.repeat ? `${repeatText(found.repeat)}: next due ${dayLabel(found.date)}` : `Due ${dayLabel(found.date)}`);
     else if (kind === 'never') V.toast('Wefty won\'t ask about dates in this note.');
     else if (kind === 'remind') {
       // Opened now, while the tap still counts (a page opened later is stopped as a pop-up).
@@ -413,7 +853,7 @@ V.reminders = (() => {
      asked for here only, the first time). */
   function afterRemind(note, found, opened) {
     const id = note.id;
-    const when = dayLabel(found.date) + ' ' + clock(found.at);
+    const when = found.repeat ? `${repeatText(found.repeat)}, ${nextWords(found.date, found.at)}` : dayLabel(found.date) + ' ' + clock(found.at);
     const canNotify = !V.desktop && 'Notification' in window && Notification.permission === 'default' && !flag(NOTIFY_ASKED);
     showing = { id, key: found.key, kind: 'done' };
     const close = () => {
@@ -473,11 +913,23 @@ V.reminders = (() => {
 
   /* -- changing a note's day and reminder */
 
-  /* The sheet the bell chip, the Upcoming list's day button and the Reminder tool open. */
+  /* The repeat choices in the sheet: [value, words]. A rule none of them is ("every 3 days") shows as itself. */
+  const REPEAT_CHOICES = [['none', 'Doesn\'t repeat'], ['day', 'Every day'], ['weekday', 'Every weekday (Mon to Fri)'],
+    ['week', 'Every week'], ['week2', 'Every 2 weeks'], ['month', 'Every month'], ['year', 'Every year']];
+  function choiceOf(rule) {
+    if (!rule) return 'none';
+    if (rule.n === 1 && ['day', 'weekday', 'week', 'month', 'year'].includes(rule.every)) return rule.every;
+    if (rule.every === 'week' && rule.n === 2) return 'week2';
+    return 'kept';
+  }
+
+  /* The sheet the bell chip, the Upcoming list's day button and the Reminder tool open: the day, the reminder's time,
+     whether it repeats (on which days of the week, until when), and the calendar. */
   function edit(id, { remind = null } = {}) {
     const note = latest(id);
     if (!note) return;
     const at = remindAt(note);
+    const rule = repeatOf(note);
     const today = V.today();
     const weekday = new Date().getDay();
     const day = V.h('input.field', { type: 'date', value: note.due || (at ? dayText(at) : V.addDays(today, 1)), 'aria-label': 'Day' });
@@ -489,33 +941,88 @@ V.reminders = (() => {
     const error = V.h('p.error-text');
     const showTime = () => { time.disabled = !on.checked; timeRow.classList.toggle('off', !on.checked); };
     on.addEventListener('change', showTime);
-    const pick = (value) => { day.value = value; };
     const timeRow = V.h('div.remind-row', {}, V.h('label.remind-row-text', { for: switchId }, V.h('strong', { text: 'Remind me' }),
       V.h('span.hint', { text: 'On the day, at' })), time, on);
+
+    // Repeat: how often, a week's days, and when it ends.
+    const howOften = V.h('select.field.repeat-field', { 'aria-label': 'Repeat' },
+      (choiceOf(rule) === 'kept' ? [['kept', repeatText(rule)]] : []).concat(REPEAT_CHOICES)
+        .map(([value, text]) => V.h('option', { value, text })));
+    howOften.value = choiceOf(rule);
+    let days = rule && rule.every === 'week' ? [...rule.days] : null;  // (null: the picked day's, following it)
+    const weekDays = () => days || (day.value ? [fromDay(day.value).getDay()] : [weekday]);
+    const dayButtons = [1, 2, 3, 4, 5, 6, 0].map((d) => V.h('button.repeat-day', { type: 'button', dataset: { day: String(d) },
+      'aria-label': WEEKDAY_NAMES[d], onclick: () => {
+        const now = weekDays();
+        const next = now.includes(d) ? now.filter((x) => x !== d) : [...now, d];
+        if (next.length) days = next.sort((a, b) => a - b);
+        showRepeat();
+      } }, SHORT_DAYS[d].slice(0, 2)));
+    const daysRow = V.h('div.repeat-days', { role: 'group', 'aria-label': 'On these days' }, dayButtons);
+    const ends = V.h('select.field.repeat-ends', { 'aria-label': 'Ends' },
+      V.h('option', { value: 'never', text: 'Never' }), V.h('option', { value: 'on', text: 'On a day' }));
+    ends.value = rule && rule.until ? 'on' : 'never';
+    const lastDay = V.h('input.field.repeat-until', { type: 'date', 'aria-label': 'Last day', value: (rule && rule.until) || '' });
+    const endRow = V.h('div.repeat-end', {}, V.h('label.label', {}, 'Ends', ends), lastDay);
+    const repeatSays = V.h('p.hint.repeat-says', { 'aria-live': 'polite' });
+    const chosenRule = () => {
+      const value = howOften.value;
+      if (value === 'none') return null;
+      const made = value === 'kept' ? { ...rule } : value === 'week' || value === 'week2'
+        ? { every: 'week', n: value === 'week2' ? 2 : 1, days: weekDays() } : { every: value, n: 1 };
+      delete made.until;
+      delete made.last;
+      if (value !== 'kept') delete made.start;
+      if (ends.value === 'on' && lastDay.value) made.until = lastDay.value;
+      return made;
+    };
+    function showRepeat() {
+      const value = howOften.value;
+      daysRow.hidden = !(value === 'week' || value === 'week2');
+      endRow.hidden = value === 'none';
+      lastDay.hidden = ends.value !== 'on';
+      const picked = weekDays();
+      dayButtons.forEach((b) => b.setAttribute('aria-pressed', String(picked.includes(Number(b.dataset.day)))));
+      const made = chosenRule();
+      repeatSays.textContent = made ? repeatText({ ...made, start: (value === 'kept' && rule.start) || day.value || today }) : '';
+      repeatSays.hidden = !made;
+    }
+    howOften.addEventListener('change', showRepeat);
+    ends.addEventListener('change', () => {
+      if (ends.value === 'on' && !lastDay.value && day.value) lastDay.value = V.addDays(day.value, 28);
+      showRepeat();
+    });
+    lastDay.addEventListener('change', showRepeat);
+    day.addEventListener('change', showRepeat);
+    const pick = (value) => { day.value = value; showRepeat(); };
+
     const chosen = () => {
       if (!day.value) { error.textContent = 'Pick a day.'; return null; }
       const when = on.checked ? new Date(`${day.value}T${time.value || '09:00'}`) : null;
       if (when && Number.isNaN(when.getTime())) { error.textContent = 'Pick a time.'; return null; }
-      return { day: day.value, when };
+      const repeat = chosenRule();
+      if (repeat && ends.value === 'on' && !lastDay.value) { error.textContent = 'Pick the last day, or Never.'; return null; }
+      if (repeat && repeat.until && repeat.until < day.value) { error.textContent = 'The last day is before the first one.'; return null; }
+      return { day: day.value, when, repeat };
     };
-    const apply = (picked) => change(id, (row) => {
-      if (row.due !== picked.day) row.done = false;
-      row.due = picked.day;
-      if (picked.when) {
-        row.extra.remind_at = picked.when.toISOString();
-        row.extra.remind_asked = `${picked.day}T${pad(picked.when.getHours())}:${pad(picked.when.getMinutes())}`;
-      } else delete row.extra.remind_at;
-    });
+    const apply = (picked) => set(id, { due: picked.day, at: picked.when, repeat: picked.repeat });
     const outside = (how) => async () => {
       if (!on.checked) { on.checked = true; showTime(); }  // a calendar event is a reminder: at the time shown
       const picked = chosen();
       if (!picked) return;
-      await apply(picked);
+      try {
+        await apply(picked);
+      } catch (problem) {
+        error.textContent = problem.message;
+        return;
+      }
       const row = latest(id);
-      if (how === 'google') openOutside(calendarLink(row, picked.when));
-      else downloadIcs(row, picked.when);
+      const when = remindAt(row) || picked.when;
+      if (how === 'google') openOutside(calendarLink(row, when));
+      else downloadIcs(row, when);
     };
     showTime();
+    showRepeat();
     const sheet = V.sheet({
       title: 'Due date and reminder',
       content: [
@@ -526,6 +1033,8 @@ V.reminders = (() => {
           V.button('Next week', { onClick: () => pick(V.addDays(today, ((1 - weekday + 7) % 7) || 7)) })),
         V.h('label.label', {}, 'Day', day),
         timeRow,
+        V.h('div.repeat-box', {}, V.h('label.label', {}, V.h('span.repeat-label', {}, icon('repeat'), V.h('span', { text: 'Repeat' })), howOften),
+          daysRow, endRow, repeatSays),
         error,
         V.h('p.hint.remind-hint', { text: 'Wefty reminds you while it\'s open. To have your phone ring even when it isn\'t, add it to your calendar:' }),
         V.h('div.remind-outside', {},
@@ -533,6 +1042,9 @@ V.reminders = (() => {
           V.button('Download .ics', { icon: 'download', onClick: outside('ics') })),
       ],
       actions: [
+        rule ? { label: 'Stop repeating', kind: 'danger-quiet', onClick: () => {
+          set(id, { repeat: null }).then(() => V.toast('It doesn\'t repeat any more.')).catch(V.problem);
+        } } : null,
         at ? { label: 'Remove reminder', kind: 'danger-quiet', onClick: () => {
           change(id, (row) => { delete row.extra.remind_at; });
           V.toast('Reminder removed');
@@ -540,7 +1052,11 @@ V.reminders = (() => {
         { label: 'Save', kind: 'primary', onClick: () => {
           const picked = chosen();
           if (!picked) return true;
-          apply(picked).then(() => V.toast(picked.when ? `Reminder: ${dayLabel(picked.day)} ${clock(picked.when)}` : `Due ${dayLabel(picked.day)}`)).catch(V.problem);
+          apply(picked).then((saved) => {
+            const when = saved.remind_at ? new Date(saved.remind_at) : null;
+            V.toast(saved.repeat ? `${repeatText(saved.repeat)} · ${nextWords(saved.due || dayText(when), when)}`
+              : picked.when ? `Reminder: ${dayLabel(picked.day)} ${clock(picked.when)}` : `Due ${dayLabel(picked.day)}`);
+          }).catch((problem) => V.toast(problem.message || 'That didn\'t save.'));
           if (picked.when) offerNotifications(id);
           return false;
         } },
@@ -555,6 +1071,12 @@ V.reminders = (() => {
 
   V.editor.addMeta((note) => {
     const at = remindAt(note);
+    const line = repeatLine(note);
+    if (line) {  // "Every Tue · next Tue 6:00 PM" (a repeating due date alone too)
+      return V.h('button.chip.remind-chip.remind-repeat', {
+        type: 'button', title: 'Repeats: change it, or stop it', onclick: () => edit(note.id),
+      }, icon('repeat'), V.h('span', { text: line }));
+    }
     if (!at) return null;
     const late = at < new Date() && !note.done;
     return V.h('button.chip.remind-chip' + (late ? '.late' : ''), {
@@ -567,8 +1089,11 @@ V.reminders = (() => {
 
   function cardChip(note) {
     const at = remindAt(note);
+    const rule = !note.done && repeatOf(note);
+    if (rule && !at) return V.h('span.due.remind.repeats', { title: repeatLine(note) }, icon('repeat'), repeatText(rule));
     if (!at || note.done) return null;
-    return V.h('span.due.remind' + (at < new Date() ? '.late' : ''), { title: 'Reminder' }, icon('bell'), remindLabel(note));
+    return V.h('span.due.remind' + (at < new Date() ? '.late' : '') + (rule ? '.repeats' : ''), { title: rule ? repeatLine(note) : 'Reminder' },
+      icon('bell'), remindLabel(note), rule ? icon('repeat', 'repeat-mark-icon') : null);
   }
 
   /* -- the Upcoming list (the Notes tab's "Upcoming") */
@@ -612,6 +1137,8 @@ V.reminders = (() => {
   function toggleDone(id) {
     const note = latest(id);
     if (!note) return;
+    // A repeating one isn't done for good: it moves on to its next one (and says when), with an Undo.
+    if (!note.done && upNext(note)) { doneOnce(id).catch(V.problem); return; }
     const done = !note.done;
     change(id, (row) => { row.done = done; }).catch(V.problem);
     if (done) V.toast('Nice, done.', { action: 'Undo', onAction: () => change(id, (row) => { row.done = false; }).catch(V.problem) });
@@ -628,14 +1155,16 @@ V.reminders = (() => {
         const days = daysBetween(now, fromDay(dayOf(note)));
         const when = at && !note.done ? remindLabel(note, now)
           : part.key === 'later' || part.key === 'overdue' ? dayLabel(dayOf(note), now) : 'Move';
-        return V.h('div.up-row' + (note.done ? '.done' : ''), { dataset: { id: note.id } },
+        const repeats = !note.done && !!repeatOf(note);
+        return V.h('div.up-row' + (note.done ? '.done' : '') + (repeats ? '.repeats' : ''), { dataset: { id: note.id } },
           V.h('button.up-tick', { type: 'button', 'aria-pressed': String(!!note.done),
             'aria-label': note.done ? `${V.noteTitle(note)}: not done` : `${V.noteTitle(note)}: mark done`,
             onclick: () => toggleDone(note.id) }, V.icon('check')),
           make(note),
           V.h('button.up-when' + (days < 0 && !note.done ? '.late' : ''), { type: 'button', title: 'Move it, or change its reminder',
-            'aria-label': `When: ${when}. Change it`, onclick: () => edit(note.id) },
-          icon(at && !note.done ? 'bell' : 'calendar'), V.h('span', { text: when })));
+            'aria-label': `When: ${when}${repeats ? `. ${repeatLine(note, now)}` : ''}. Change it`, onclick: () => edit(note.id),
+            title: repeats ? repeatLine(note, now) : null },
+          icon(repeats ? 'repeat' : at && !note.done ? 'bell' : 'calendar'), V.h('span', { text: when })));
       }),
     ]);
   }
@@ -670,6 +1199,10 @@ V.reminders = (() => {
       .catch(() => {});
   }
 
+  /* Repeating notes are moved on only once this device's copy is the cloud's (not mid-sync, when an older copy here
+     could move on what another device already changed); offline, they're moved on here and merged when back. */
+  const canMove = () => !V.cloud || (V.cloud.status !== 'syncing' && V.cloud.status !== 'idle');
+
   let timer = null;
   function schedule() {
     clearTimeout(timer);
@@ -678,8 +1211,22 @@ V.reminders = (() => {
     const now = Date.now();
     const said = new Set(seen());
     let next = Infinity;
+    const passed = [];
     for (const note of V.data.notes.values()) {
       if (note.deleted || note._purge || note.done || V.organise.isTemplate(note) || V.organise.isArchived(note)) continue;
+      const rule = repeatOf(note);
+      // A repeating one that went by while this device wasn't looking (moved on elsewhere): said once, as missed.
+      if (rule && rule.last && rule.last !== (note.extra && note.extra.remind_at)) {
+        const was = new Date(rule.last);
+        const key = `${note.id}|${rule.last}`;
+        if (now - was.getTime() >= 0 && now - was.getTime() < MISSED_HOURS * 3600000 && !said.has(key)) {
+          markSeen(key);
+          said.add(key);
+          ring(note, was, now - was.getTime() > 2 * 60000);
+        }
+      }
+      if (rule && hasPassed(note, new Date(now))) passed.push(note);
+      if (rule && !remindAt(note)) next = Math.min(next, plusDays(midnight(new Date(now)), 1).getTime() + 1000);  // (a due date alone: at midnight)
       const at = remindAt(note);
       if (!at) continue;
       const when = at.getTime();
@@ -690,11 +1237,19 @@ V.reminders = (() => {
         ring(note, at, now - when > 2 * 60000);
       }
     }
-    if (next < Infinity) timer = setTimeout(schedule, Math.min(next - now + 50, 2 ** 31 - 1));
+    // Gone by: on to the next one (one missed reminder said at most, above; never a pile of them).
+    if (passed.length && canMove()) {
+      for (const note of passed) {
+        const here = occurrence(note);
+        moveOn(note.id, { from: here.key, why: 'passed', now: new Date(now) }).catch((error) => console.error('Wefty: moving a repeating note on:', error));
+      }
+    }
+    if (next < Infinity) timer = setTimeout(schedule, Math.min(Math.max(next - now + 50, 50), 2 ** 31 - 1));
   }
   const scheduleSoon = V.debounce(schedule, 300);
   V.on('data', (table) => { if (table === 'notes') scheduleSoon(); });
   V.on('back', scheduleSoon);
+  V.on('status', (value) => { if (value !== 'syncing') scheduleSoon(); });
 
   /* -- opening a note from a link (the calendar's "Open in Vault") or a notification */
 
@@ -735,6 +1290,9 @@ V.reminders = (() => {
   }
 
   const api = { parse, label, dayLabel, clock, remindAt, remindLabel, dayOf, calendarLink, ics, noteLink, consider, edit,
-    cardChip, inUpcoming, pending, group, groupOf, toggleDone, upcoming, schedule, notify, icon, change, latest, openNote };
+    cardChip, inUpcoming, pending, group, groupOf, toggleDone, upcoming, schedule, notify, icon, change, latest, openNote,
+    // repeating (1.16.1)
+    set, setRepeat, repeatOf, cleanRule, repeatText, repeatLine, nextWords, occurrence, upNext, hasPassed, moveOn, putBack,
+    doneOnce, fits, nextAfter, rrule, ruleKey };
   return api;
 })();

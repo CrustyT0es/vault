@@ -299,19 +299,20 @@ V.editor = (() => {
 
   /* -- the letters drawn over the box being written in
 
-     A text box holds every line between two headings or tick-box items (see parse), so one box is often most of a
-     note. While it's being written in, only the line with the caret (or the lines with the words picked) shows its
-     marks, faintly; every other line shows its words styled, the marks out of sight. A box can only draw all its
-     letters one way, so while it has the caret and its words have marks, it draws none of its own (styles.css:
-     .lettered) and a copy over it draws them all (.block-letters), every letter just where the box puts it: the marks
-     are there too, see-through but taking their room, so the caret, a tap, the words picked, the phone keyboard's word
-     and the spelling lines all stay exactly where the box has them. The copy lies over the box, not under it, so
-     nothing the box paints (the words picked, the keyboard's word, a word found with Ctrl+F) can cover the letters, and
-     it draws nothing behind them, so the caret and all that still show through; what's drawn behind words (highlights,
-     blanks, underlines) is still the copy under the box (see shade). It also draws the line under the word the phone's
-     keyboard is writing: the box draws that line in its letters' colour, see-through now. Its lines are kept by their
-     words, and the ones that changed are made again the moment the words change, before the screen is drawn again, so
-     no letter is ever missing. With Windows' high contrast colours, the box draws its own letters as ever. */
+     A text box holds every line between two headings or tick-box items (see parse), so one box is often most of a note.
+     While it's being written in, only the line with the caret (or the lines with the words picked) shows its marks,
+     faintly (on a touch screen not even that line: styles.css); every other line shows its words styled, the marks out
+     of sight. A box can only draw all its letters one way, so while it has the caret and its words have marks, it draws
+     none of its own (styles.css: .lettered) and a copy over it draws them all (.block-letters), every letter just where
+     the box puts it: the marks are there too, see-through but taking their room, so the caret, a tap, the words picked,
+     the phone keyboard's word and the spelling lines all stay exactly where the box has them. The copy lies over the
+     box, not under it, so nothing the box paints (the words picked, the keyboard's word, a word found with Ctrl+F) can
+     cover the letters, and it draws nothing behind them, so the caret and all that still show through; what's drawn
+     behind words (highlights, blanks, underlines) is still the copy under the box (see shade). It also draws the line
+     under the word the phone's keyboard is writing: the box draws that line in its letters' colour, see-through now.
+     Its lines are kept by their words, and the ones that changed are made again the moment the words change, before the
+     screen is drawn again, so no letter is ever missing. With Windows' high contrast colours, the box draws its own
+     letters as ever. */
   const letters = new WeakMap();  // a text box -> { el, lines: [{ key, node, marks }], words, on, lit, litNodes, ime, imeAt }
   const IME = '\u0001';            // (a line's key with the keyboard's word in it: IME + "start,end" + IME + its key)
   const FORCED = window.matchMedia ? matchMedia('(forced-colors: active)') : null;  // (Windows' high contrast colours)
@@ -2539,7 +2540,11 @@ V.editor = (() => {
       }, V.icon('calendar'), due ? due.label : 'Due date'),
       note.due ? V.h('button.chip.done-chip.keep-caret' + (note.done ? '.on' : ''), {
         type: 'button', title: note.done ? 'Mark as not done' : 'Mark as done', 'aria-pressed': String(!!note.done),
-        onclick: () => { note.done = !note.done; save(); drawBar(); if (note.done) V.toast('Nice, done.'); },
+        onclick: () => {
+          // A repeating one (js/reminders.js) moves on to its next one instead of being done for good.
+          if (!note.done && V.reminders && V.reminders.upNext && V.reminders.upNext(note)) { V.reminders.toggleDone(note.id); return; }
+          note.done = !note.done; save(); drawBar(); if (note.done) V.toast('Nice, done.');
+        },
       }, V.icon('check'), note.done ? 'Done' : 'Mark done') : null);
   }
 

@@ -1158,11 +1158,28 @@ V.ai = (() => {
      further down that list, tried once without being remembered unless it's taken). `timing`, when given, is filled
      in: ms to Google's answer (`answered`, with its `status`) and to the first words (`words`), the `version` that
      answered, the `thinking` setting sent (null: none) and, when Google says, how many tokens it thought for
-     (`thoughts`). */
+     (`thoughts`). `tools`: Gemini's function declarations (the Chat tab's Wefty tools, js/chattools.js): a call the model
+     makes is the answer starting too (`onStart`, as words would), and comes back in answer.calls ({ id, name, args });
+     answer.parts is the model's turn as Google sent it (its words as one part, each call with its thoughtSignature), to
+     go back in the history exactly so (Gemini 3 refuses a call sent back without its signature). */
+  /* `contents` as sent to `model`: a model turn another model answered (`signedBy(entry)`, the Chat tab's rounds: the
+     race asks Flash and Flash-Lite with the same history) has its thought signatures swapped for Google's word for
+     "don't check this one", as a signature is the model's own that made it. */
+  const NO_SIGNATURE = 'skip_thought_signature_validator';
+  function signedFor(contents, signedBy, model) {
+    if (!signedBy || !Array.isArray(contents)) return contents;
+    return contents.map((entry) => {
+      const by = signedBy(entry);
+      if (!by || by === model || !entry || !Array.isArray(entry.parts)) return entry;
+      return { ...entry, parts: entry.parts.map((p) => (p && p.thoughtSignature ? { ...p, thoughtSignature: NO_SIGNATURE } : p)) };
+    });
+  }
+
   async function geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first, use = 'chat', timing = null,
-    step = null }) {
-    const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
+    step = null, tools = null, onStart = null, signedBy = null }) {
+    const body = { contents: signedFor(contents, signedBy, model), generationConfig: { maxOutputTokens: maxTokens } };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
+    if (tools && tools.length) body.tools = [{ functionDeclarations: tools }];
     const levels = levelsFor(model, use);
     const stepKey = `${model} ${use}`;
     const at = step === null ? Math.min(thinkingStep.get(stepKey) || 0, levels.length - 1) : step;
@@ -1185,17 +1202,42 @@ V.ai = (() => {
     let version = '';
     let parsed = 0;  // pieces of an answer read (any shape)
     let usage = {};
+    const calls = [];  // the functions it asked for: { id, name, args }
+    const parts = [];  // its turn as it came: words gathered into one part (with any signature), each call whole
+    const keepPart = (p) => {
+      if (!p || typeof p !== 'object' || p.thought) return;
+      if (p.functionCall && typeof p.functionCall.name === 'string') {
+        parts.push(JSON.parse(JSON.stringify(p)));
+        const args = p.functionCall.args && typeof p.functionCall.args === 'object' ? p.functionCall.args : {};
+        calls.push({ id: typeof p.functionCall.id === 'string' ? p.functionCall.id : '', name: p.functionCall.name, args });
+        return;
+      }
+      if (typeof p.text !== 'string') return;
+      const last = parts[parts.length - 1];
+      if (last && typeof last.text === 'string' && !last.functionCall) {
+        last.text += p.text;
+        if (p.thoughtSignature) last.thoughtSignature = p.thoughtSignature;
+      } else if (p.text || p.thoughtSignature) {
+        parts.push({ text: p.text, ...(p.thoughtSignature ? { thoughtSignature: p.thoughtSignature } : {}) });
+      }
+    };
     const take = (piece) => {
       parsed += 1;
       if (piece.modelVersion) version = String(piece.modelVersion);
       if (piece.promptFeedback && piece.promptFeedback.blockReason) blocked = String(piece.promptFeedback.blockReason);
       const cand = (piece.candidates || [])[0] || {};
       // (only words count: a thought, or a part with only a thoughtSignature, isn't the answer starting)
-      const words = (((cand.content || {}).parts) || []).filter((p) => p && typeof p.text === 'string' && !p.thought)
-        .map((p) => p.text).join('');
+      const all = ((cand.content || {}).parts) || [];
+      const words = all.filter((p) => p && typeof p.text === 'string' && !p.thought).map((p) => p.text).join('');
+      const before = calls.length;
+      all.forEach(keepPart);
       if (cand.finishReason) finish = String(cand.finishReason);
       if (piece.usageMetadata) usage = piece.usageMetadata;
-      if (text || words) keepWaiting();  // once the words have started, only a stalled answer is given up on
+      if (calls.length > before && !text) {  // (a call is the answer starting, as words are)
+        if (timing && timing.words === undefined) timing.words = since();
+        if (onStart) onStart();
+      }
+      if (text || words || calls.length) keepWaiting();  // once the words have started, only a stalled answer is given up on
       if (words) {
         if (!text && timing) timing.words = since();
         text += words;
@@ -1209,7 +1251,8 @@ V.ai = (() => {
         const thoughts = Number(usage && usage.thoughtsTokenCount);
         if (Number.isFinite(thoughts) && thoughts >= 0) timing.thoughts = thoughts;
       }
-      return { answer: { text, finish: stopped() ? 'STOPPED' : finish, usage, model, version, cut, blocked, here } };
+      return { answer: { text, finish: stopped() ? 'STOPPED' : finish, usage, model, version, cut, blocked, here, calls,
+        parts } };
     };
     try {
       let response;
@@ -1237,7 +1280,8 @@ V.ai = (() => {
           const again = (next) => {
             clearTimeout(timer);
             if (signal) signal.removeEventListener('abort', follow);
-            return geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first, use, timing, step: next });
+            return geminiTry(sending, model, { system, contents, maxTokens, signal, onText, first, use, timing, step: next,
+              tools, onStart, signedBy });
           };
           // This model turns that thinking setting down: once more with the next one (and from now on).
           if (/thinking/i.test(said.message)) { thinkingStep.set(stepKey, at + 1); return again(null); }
@@ -1261,7 +1305,7 @@ V.ai = (() => {
           for (const piece of read.pieces) {
             pieces += 1;
             if (piece.error) {  // Google's trouble in the middle of an answer
-              if (text) return answer(true);
+              if (text || calls.length) return answer(true);
               const said = googleError(piece, sending);
               return { trouble: geminiTrouble(Number(piece.error.code) || 500, said), why: said };
             }
@@ -1273,22 +1317,22 @@ V.ai = (() => {
         last.pieces.forEach((piece) => { pieces += 1; if (!piece.error) take(piece); });
       } catch (error) {  // stopped, too slow, or the connection went
         if (stopped()) {
-          if (text) return answer(false);
+          if (text || calls.length) return answer(false);
           throw new AiError('stopped', 'Stopped.');
         }
         // Our own wait running out (no words, or no more words, in time) with the page in sight and online all along is
         // the model's doing; a read that failed by itself (the connection went), or anything while this device was
         // unsettled, is this end's.
         const here = !why || unsettledSince(began);
-        if (text) return answer(true, here);
+        if (text || calls.length) return answer(true, here);
         if (why === 'slow') return { trouble: 'slow', here };
         return { trouble: 'busy', here };
       }
       if (!pieces && buffer.trim()) {  // a plain JSON answer (a list of pieces) rather than events
         try { [].concat(JSON.parse(buffer)).forEach(take); } catch (error) { /* not JSON */ }
       }
-      if (!text && blocked) return answer(false);  // Google won't answer this prompt: final, no other model asked
-      if (!text && !finish) return parsed ? answer(false) : { trouble: 'busy' };  // an empty answer, or nothing at all
+      if (!text && !calls.length && blocked) return answer(false);  // Google won't answer this prompt: final, no other model asked
+      if (!text && !calls.length && !finish) return parsed ? answer(false) : { trouble: 'busy' };  // an empty answer, or nothing at all
       return answer(!finish);
     } finally {
       clearTimeout(timer);
@@ -1323,7 +1367,7 @@ V.ai = (() => {
      model's (none took the key), 'offline' (no answer: no internet, a network that blocks Google), else 'bad' (none
      offered). */
   async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0, onText = null,
-    use = 'chat', tier = 'fast' } = {}) {
+    use = 'chat', tier = 'fast', tools = null, signedBy = null } = {}) {
     if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
     const notes = use === 'notes';
     const first = wait || (notes ? waits.notesFirst : waits.first);
@@ -1357,14 +1401,18 @@ V.ai = (() => {
     const launch = () => {
       const run = { model: order[next++], at: clock(), ctl: new AbortController(), done: false, seen: false, lost: false,
         wordsAt: 0 };
-      geminiTry(sending, run.model, { system, contents, maxTokens, signal: run.ctl.signal, first, use, onText: (text) => {
+      const started = () => {
         if (!run.wordsAt) run.wordsAt = clock();
         if (!winner) {
           winner = run;
           runs.filter((r) => r !== run && !r.done).forEach(drop);
         }
-        if (winner === run && onText) onText(text);
-      }, timing: (run.timing = {}) }).then((result) => { run.result = result; }, (error) => { run.error = error; })
+      };
+      geminiTry(sending, run.model, { system, contents, maxTokens, signal: run.ctl.signal, first, use, tools, signedBy, onStart: started,
+        onText: (text) => {
+          started();
+          if (winner === run && onText) onText(text);
+        }, timing: (run.timing = {}) }).then((result) => { run.result = result; }, (error) => { run.error = error; })
         .finally(() => { run.done = true; if (wake) wake(); });
       runs.push(run);
     };
@@ -1416,7 +1464,7 @@ V.ai = (() => {
           }
           const tried = run.result;
           const answer = tried.answer;
-          if (answer && (answer.text || answer.finish === 'STOPPED')) return taken(run, answer);
+          if (answer && (answer.text || (answer.calls && answer.calls.length) || answer.finish === 'STOPPED')) return taken(run, answer);
           // Turned down, or an answer with nothing in it (empty, or the prompt blocked): this model's own "no". Another
           // one still working on it (asked because this one was slow, so it has had the request all along) carries on,
           // and gives the answer if it has one; nothing new is asked because of it (`held` stops that). A model
@@ -1524,11 +1572,11 @@ V.ai = (() => {
      'busy' (why: 'quota'), so it waits and goes again later like a busy Claude. `tier`: 'fast' (Gemini Fast, the
      quickest here) or 'smart' (Gemini Smart, Flash first). */
   async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal, onText = null, use = 'chat',
-    tier = 'fast' } = {}) {
+    tier = 'fast', tools = null, signedBy = null } = {}) {
     const sending = await getGeminiKey();
     let answer;
     try {
-      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use,
+      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use, tools, signedBy,
         tier: tier === 'smart' ? 'smart' : 'fast' });
     } catch (error) {
       if (error.kind === 'key') geminiKey = null;  // forgotten, so a key set up again elsewhere is read next time
@@ -1536,13 +1584,14 @@ V.ai = (() => {
       throw error;
     }
     const { text, finish, usage, model, version, cut, blocked } = answer;
+    const calls = answer.calls || [];
     // An answer that stopped part-way: the chat shows what came (`onText`); the note-taker waits and asks again later.
     if (cut && !onText && finish !== 'STOPPED') throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });
     const stopReason = finish === 'STOPPED' ? 'stopped' : blocked && !text ? 'refusal' : cut ? 'cut_off'
       : finish === 'MAX_TOKENS' ? 'max_tokens'
       : ['SAFETY', 'IMAGE_SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION', 'SPII'].includes(finish) ? 'refusal'
-      : 'end_turn';
-    return { text, stopReason, usage: { gemini: true, model, ...(version ? { version } : {}),
+      : calls.length ? 'tool_use' : 'end_turn';
+    return { text, stopReason, calls, parts: answer.parts || [], usage: { gemini: true, model, ...(version ? { version } : {}),
       input_tokens: usage.promptTokenCount || 0, output_tokens: usage.candidatesTokenCount || 0 } };
   }
 

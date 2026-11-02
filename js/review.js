@@ -187,6 +187,8 @@ V.review = (() => {
   /* "Bio test" from "Bio test fri 9am": the title without the words that said when. */
   function testName(note) {
     let name = (note.title || '').trim() || (!note.locked && (note.body || '').split('\n')[0].trim()) || '';
+    // (as words: no "**" of a bold word, nor a heading's "#")
+    if (V.format) name = V.format.unmark(name).replace(/^\s{0,3}#{1,6}\s+/, '').trim();
     const found = R.parse(name);
     if (found && found.words) {
       for (const word of found.words.split(/\s+/)) {

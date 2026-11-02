@@ -87,6 +87,8 @@ V.notetaker = (() => {
   };
 
   const wordCount = (text) => (String(text || '').match(/\S+/g) || []).length;
+  // A note's title as it's shown (its bar, the strip, a toast): words, without the marks of bold, highlight...
+  const titleShown = (title) => (V.format ? V.format.unmark(title).trim() : '') || title;
 
   /* -- how it hears */
 
@@ -440,7 +442,7 @@ V.notetaker = (() => {
     session.id = next.id;
     session.aboveLength = 0;
     V.cloud.save('notes', next).catch(V.problem);  // (in V.data.notes at once)
-    V.toast(`"${session.title}" was deleted, so the note-taker carries on in a new note.`, { ms: 6000 });
+    V.toast(`"${titleShown(session.title)}" was deleted, so the note-taker carries on in a new note.`, { ms: 6000 });
     told();
     return V.data.notes.get(next.id) || next;
   }
@@ -1164,7 +1166,7 @@ V.notetaker = (() => {
     if (!parts.el.isConnected) document.getElementById('layers').append(parts.el);
     const [full, brief, said] = stripWords(s);
     const row = V.data.notes.get(s.id);
-    const title = (row && (row.title || '').trim()) || s.title;
+    const title = titleShown((row && (row.title || '').trim()) || s.title);
     const ms = elapsed();
     const minutes = Math.floor(ms / 60000);
     parts.el.dataset.state = s.state === 'paused' ? 'paused' : s.state !== 'listening' || s.waiting ? 'wait'
@@ -1397,7 +1399,7 @@ V.notetaker = (() => {
     const on = live();
     ui.layer.classList.toggle('listening', on);
     drawClock();
-    ui.parts.title.textContent = on ? session.title : 'Note-taker';
+    ui.parts.title.textContent = on ? titleShown(session.title) : 'Note-taker';
     const { close, hide: hideButton, stop } = ui.parts;
     close.hidden = on;
     hideButton.hidden = !on;

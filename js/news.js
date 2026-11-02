@@ -361,8 +361,9 @@ V.news = (() => {
         V.problem(error);
       }
     } });
+    const name = (V.format ? V.format.unmark(note.title || '').trim() : note.title) || 'A note';  // (words, no "**")
     return V.h('div.news-note', {},
-      V.h('div.news-note-head', {}, V.icon('notes'), V.h('strong', { text: note.title || 'A note' })),
+      V.h('div.news-note-head', {}, V.icon('notes'), V.h('strong', { text: name })),
       V.h('div.news-note-body', {}, rendered(lines.slice(0, PREVIEW).join('\n'))),
       lines.length > PREVIEW ? V.h('p.hint.news-note-more', { text: `and ${plural(lines.length - PREVIEW, 'more line')}` }) : null,
       V.h('div.setting-buttons.news-note-buttons', {}, save));

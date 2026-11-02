@@ -162,10 +162,15 @@ button { cursor: pointer; }
 ::selection { background: var(--accent-soft); color: var(--text); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ::placeholder { color: var(--placeholder); opacity: 1; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background-color: var(--control); }
-::-webkit-scrollbar-track { background: transparent; }
+/* Thin scrollbars where a mouse or a trackpad uses them (the PC, a Chromebook). A touch screen keeps its own, which
+   float over the page: Chrome on a phone draws styled ones as old-style bars that take room, with a white square where
+   two meet (1.16.1: a phone's Today lost 10 px to one and showed a sideways bar and that square under it). */
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--control); }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+}
 .num, .count, .when, .head-count, .progress, .t-meta { font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------ the mark and the wordmark */
@@ -2250,6 +2255,30 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .remind-hint { margin: 14px 0 8px; }
 .remind-outside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .remind-outside .btn { min-height: 44px; padding: 0 12px; }
+/* repeating (1.16.1): how often, a week's days as seven round toggles, when it ends, and what that says */
+.repeat-box { margin-top: 2px; }
+.repeat-label { display: inline-flex; align-items: center; gap: 6px; }
+.repeat-label .icon { width: 15px; height: 15px; }
+.repeat-field, .repeat-ends {
+  appearance: none; padding-right: 40px; cursor: pointer;
+  background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f636c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6.5 9.5 5.5 5.5 5.5-5.5'/%3E%3C/svg%3E") no-repeat right 14px center / 16px;
+}
+:root[data-theme="dark"] .repeat-field, :root[data-theme="dark"] .repeat-ends {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a5a5b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6.5 9.5 5.5 5.5 5.5-5.5'/%3E%3C/svg%3E");
+}
+.repeat-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.repeat-day {
+  position: relative; min-width: 0; height: 40px; padding: 0; border: 1px solid var(--line-strong); border-radius: 99px;
+  background: var(--card); color: var(--text-2); font: 600 13px/1 var(--font);
+}
+.repeat-day::after { content: ""; position: absolute; inset: -3px 0; }  /* 44 px to a finger */
+.repeat-day:hover { border-color: var(--accent); }
+.repeat-day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.repeat-end { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
+.repeat-end .repeat-until { align-self: end; }
+.repeat-says { margin: 8px 0 0; }
+.repeat-mark-icon { opacity: .85; }
+.due .repeat-mark-icon .icon, .due .repeat-mark-icon, .today-chip .repeat-mark-icon { width: 13px; height: 13px; }
 
 /* Upcoming: the week by day, a tick before each note and its day (or reminder) after it */
 .list.upcoming { grid-template-columns: minmax(0, 1fr); }
@@ -2409,6 +2438,11 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .block-letters .lt-mark, .block-letters .lt-soft { -webkit-text-stroke-width: 0; }
 .block-letters .lt-mark { color: transparent; }
 .block-letters > .lit .lt-mark, .block-letters .lt-soft { color: var(--faint); }
+/* On a touch screen they stay out of sight on the caret's line too (1.16.1, the owner: "the bold n stuff still has the
+   **these** when it bolds"): there the caret is put by a finger, not walked through the marks with the arrow keys, and
+   the B, U, S and highlighter buttons show what it's in. They keep their room, so the caret and every letter stay just
+   where the box has them. */
+@media (hover: none) and (pointer: coarse) { .block-letters > .lit .lt-mark { color: transparent; } }
 .block-letters .lt-ime { text-decoration: underline var(--ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 @media (forced-colors: active) { .block-letters { display: none; } }
 
@@ -2605,6 +2639,9 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
    column; from 900 px the day's counts sit beside the greeting, the week (Monday to Friday) under the thread, and the
    sections in two columns from 1100 px (one column between, with the right one's quick actions and to-dos first). */
 .page.today { padding-bottom: 32px; }
+/* Today only ever scrolls up and down: Jump back in scrolls sideways inside itself, and nothing a bit too wide (a long
+   word, a rounding at a phone's zoom) can make the whole screen slide sideways or bring a bar in at its foot. */
+.view[data-tab=today] { overflow-x: hidden; }
 .today-greet { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 24px; flex-wrap: wrap; padding: 4px 0 0; }
 .today-hello { min-width: 0; }
 .today-greet h1 { margin: 0; font: 600 26px/32px var(--font-display); letter-spacing: -.02em; }
@@ -2652,10 +2689,22 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   background: var(--accent-wash); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-soft);
 }
 .tile-ic .icon { width: 20px; height: 20px; }
+.today-tile .tile-ic { position: relative; }
+/* (Flash cards: how many are due today, on its icon's corner, so it shows on the smallest phone too) */
+.tile-count {
+  position: absolute; top: -6px; right: -8px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+  border-radius: 9px; background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 2px var(--card);
+  font: 700 11px/18px var(--font); text-align: center; font-variant-numeric: tabular-nums;
+}
 .tile-text { display: grid; min-width: 0; }
-.tile-label { font: 600 14px/18px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A label never cuts off ("Note-ta..." on a phone with bigger text, 1.16.1): one that can't fit goes onto a second line. */
+.tile-label {
+  font: 600 14px/18px var(--font); overflow-wrap: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
 .tile-text small { color: var(--muted); font: 500 12.5px/16px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 359px) { .tile-text small { display: none; } .today-tile { gap: 10px; padding: 8px 10px; } }
+@media (max-width: 419px) { .today-tile { gap: 10px; padding: 8px 10px; } }
+@media (max-width: 359px) { .tile-text small { display: none; } }
 
 /* Due today and Later this week: a row per to-do, its box on the left */
 .today-todo { padding: 4px 0; }
@@ -2745,8 +2794,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 
 /* Jump back in: a row of small note cards to swipe on a phone (never .card: that's Notes' list) */
 .today-jump {
-  display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px 4px; overflow-x: auto; scroll-snap-type: x mandatory;
-  scroll-padding: 0 16px; scrollbar-width: none; overscroll-behavior-x: contain;
+  display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px 4px; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; scroll-padding: 0 16px; scrollbar-width: none; overscroll-behavior-x: contain;
 }
 .today-jump::-webkit-scrollbar { display: none; }
 .today-note {
@@ -3237,6 +3286,26 @@ html:has(#app.gate) .nt-strip { display: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-source:hover { border-color: var(--line-strong); color: var(--text); }
+/* What Chat did in Wefty (js/chattools.js): a small chip each, "Added Higgsfield to Subscriptions · Open · Undo". */
+.chat-actions-done { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.chat-action {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; max-width: 100%; min-height: 34px;
+  padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-2);
+  color: var(--text-2); font: 500 13px/18px var(--font);
+}
+.chat-action-mark { flex: none; width: 15px; height: 15px; color: var(--accent-ink); }
+.chat-action-label { min-width: 0; margin-right: 4px; overflow-wrap: anywhere; }
+.chat-action-btn {
+  min-height: 28px; padding: 0 10px; border: 0; border-radius: 14px; background: none; color: var(--accent-ink);
+  font: 600 13px/18px var(--font); cursor: pointer;
+}
+.chat-action-btn:hover { background: var(--accent-soft); }
+.chat-action-btn:disabled { opacity: .5; cursor: default; }
+.chat-action.undone { background: none; }
+.chat-action.undone .chat-action-label { text-decoration: line-through; color: var(--muted); }
+.chat-action.undone .chat-action-mark { color: var(--muted); }
+.chat-action-done { padding: 0 8px; color: var(--muted); font: 500 12.5px/18px var(--font); }
+@media (pointer: coarse) { .chat-action-btn { min-height: 36px; } }
 .chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: -10px; }
 .chat-actions .btn { min-height: 34px; padding: 0 10px; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
 .chat-actions .btn:hover { color: var(--text); }

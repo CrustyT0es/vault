@@ -212,7 +212,10 @@ V.subs = (() => {
   function change(fn) {
     return V.cloud.changeExtra((extra) => ({ ...extra, subscriptions: tidyAll(fn(tidyAll(extra.subscriptions))) }));
   }
-  const save = (sub) => change((all) => {
+  // `check(all)`: looks at the cloud's newest list first and may throw (the Chat tab's add_subscription: no second one
+  // of the same name, whatever this device's copy says).
+  const save = (sub, check = null) => change((all) => {
+    if (check) check(all);
     const one = tidy(sub);
     const at = all.findIndex((s) => s.id === one.id);
     if (at >= 0) all[at] = one; else all.push(one);
@@ -448,5 +451,7 @@ V.subs = (() => {
     V.today.addMenuItem({ id: 'subs', label: 'Subscriptions', icon: 'restore', onClick: () => open() });
   }
 
-  return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, money, line, monthly };
+  // (save/remove/stored/validDate/MOST: the Chat tab's tools, js/chattools.js, go through the same path and checks)
+  return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, money, line, monthly, save, remove, stored,
+    validDate, safeLink, when, perWords, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
 })();

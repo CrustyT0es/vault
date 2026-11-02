@@ -362,18 +362,25 @@ V.format = (() => {
   const MARKISH = /[*_~+=]/;  // (a line without any of these has no marks to look for)
 
   /* The words without their marks (**, __, _, *, ~~, ++, ==), as a note's card or a title shows them: `code`, links,
-     {{blanks}} and the lines of a ``` block stay as written. */
-  function unmark(text) {
+     {{blanks}} and the lines of a ``` block stay as written. `strict` (a title, which is shown as typed in its box): a
+     mark only counts with a space, a bracket, a quote or the edge outside it, so file and code names ("__init__.py",
+     "x**2 + y**2") keep every letter. */
+  const OPENS = /[\s([{"'“‘]/u;
+  const CLOSES = /[\s)\]}"'”’,;:!?]/u;
+  function unmark(text, strict = false) {
     let fenced = false;
     return String(text || '').split('\n').map((line) => {
       if (/^\s*```/.test(line)) { fenced = !fenced; return line; }
       if (fenced || !MARKISH.test(line)) return line;
+      const bounded = (piece, from, to) => (piece.start === from || OPENS.test(line[piece.start - 1]))
+        && (piece.end === to || CLOSES.test(line[piece.end]));
       const plain = (list, from, to) => {
         let out = '';
         let at = from;
         for (const piece of list) {
           out += line.slice(at, piece.start);
-          out += EMPHASIS.has(piece.kind) ? plain(piece.kids, piece.from, piece.to) : line.slice(piece.start, piece.end);
+          out += EMPHASIS.has(piece.kind) && (!strict || bounded(piece, from, to)) ? plain(piece.kids, piece.from, piece.to)
+            : line.slice(piece.start, piece.end);
           at = piece.end;
         }
         return out + line.slice(at, to);
