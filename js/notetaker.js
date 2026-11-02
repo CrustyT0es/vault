@@ -1383,7 +1383,7 @@ V.notetaker = (() => {
       // (the free Gemini's key: straight to its row in Settings > AI)
       p.settings ? V.button(p.gemini ? 'Set up free Gemini' : 'Open Settings', { onClick: () => {
         closeLayer();
-        if (p.gemini) V.ai.setUp(); else V.go('settings');
+        if (p.gemini) V.ai.setUp(); else V.go('settings', { page: 'ai' });
       } }) : null,
       p.id ? V.button('Open the note', { onClick: () => { closeLayer(); openNote(p.id); } }) : null,
       p.tryAgain && p.id ? V.button('Try again', { kind: 'primary', icon: 'restore', onClick: () => makeNotes(p.id) }) : null);

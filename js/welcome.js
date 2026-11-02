@@ -15,7 +15,7 @@
    (iOS keeps each one's storage apart), so: while this step shows, the address carries #connect= (the cloud and the
    e-mail, never a password), which an icon added from here opens with; and "Copy the sign-in link" puts the same on
    the clipboard for the icon's "Paste my sign-in". Either way the friend signs in there once with their new password.
-   Never on the PC app; Vault on its own on a PC (V.pc.standalone) gets the Gemini step only. Settings > This iPhone
+   Never on the PC app; Vault on its own on a PC (V.pc.standalone) gets the Gemini step only. Settings > Devices
    offers the same link (`markConnect`, `iosIcon`), for an icon added later.
 
    Inside an app's own browser (V.deviceKind.inApp: an invite tapped in Instagram or Snapchat), js/start.js first
@@ -232,7 +232,7 @@ V.welcome = (() => {
     return line(false, 'Home screen: Settings shows how, any time');
   }
 
-  /* -- an iPhone's home screen icon (here and in Settings > This iPhone)
+  /* -- an iPhone's home screen icon (here and in Settings > Devices)
 
      The address carries #connect= (the cloud and the e-mail, never a password) while the steps show, so an icon added
      from Safari's Share > Add to Home Screen opens with it. Returns the way to take it out again. */

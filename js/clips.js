@@ -1,4 +1,4 @@
-/* Vault: the shared clipboard. The newest 30 bits of copied text, from any device (the clips table keeps them).
+/* Vault: the shared clipboard (Share > Clipboard since 1.16). The newest 30 bits of copied text, from any device (the clips table keeps them).
    On the PC the app watches the clipboard itself (vault/desktop.py: never what password managers mark private, or
    anything that looks like a password or a key) and puts what the others share on it; both can be switched off in
    Settings. A phone or a Chromebook (any browser: 'web' in util.js's V.device) can only touch its clipboard while
@@ -18,7 +18,6 @@ V.clips = (() => {
 
   // The newest from another device (the PC, the phone or a Chromebook): what this one may want to paste.
   const latestElsewhere = () => V.data.clips.find((c) => c.from_device !== V.device);
-  const from = (device) => (V.DEVICES.includes(device) ? V.deviceLabel(device) : 'Another device');
   const named = (device) => (V.DEVICES.includes(device) ? V.deviceName(device) : 'another device');
 
   /* -- what's never shared by itself (vault/local.py's may_share, for the phone and the Chromebook): anything that
@@ -93,7 +92,7 @@ V.clips = (() => {
   const stored = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
   const store = (key, value) => { try { localStorage.setItem(key, value); } catch (error) { /* a private window */ } };
   // Never on an iPhone or iPad: Safari only lets a page read the clipboard during a tap (and asks with its own Paste
-  // button even then), so it could never read it by itself on coming back. There the Clipboard tab's buttons do it.
+  // button even then), so it could never read it by itself on coming back. There Share > Clipboard's buttons do it.
   const canStep = () => !V.desktop && !V.deviceKind.ios
     && !!(navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText);
   /* On a phone or a Chromebook it's on unless switched off here (AUTO 'off', kept for good): opening Vault after
@@ -678,31 +677,121 @@ V.clips = (() => {
     }
     store(AUTO, 'on');
     redraw();
+    V.emit('clip-stepping');
     if (!(await take(V.data.clips[0]))) V.toast('On. Copy something on another device, then open Wefty here.');
   }
 
-  // Drawn again only while the Clipboard tab is showing (the tabs share one page).
+  // Drawn again only while Share > Clipboard is showing (its parts share one page).
   const redraw = () => { if (root && root.isConnected && root.dataset.tab === 'clips') render(root); };
 
-  function stepCard() {
+  // "phone", "Chromebook" or "browser": "Keep this phone's clipboard in step" (V.deviceName would say "this your ...").
+  const hereWord = () => (V.device === 'phone' ? 'phone' : V.deviceLabel(V.device) === 'Chromebook' ? 'Chromebook' : 'browser');
+
+  /* The in-step switch of a phone or a Chromebook (Share > Clipboard's foot, and Settings: stepRow). Switching it on
+     reads the clipboard first, so it only ever happens in a tap. */
+  function stepSwitch() {
+    const label = `Keep this ${hereWord()}'s clipboard in step`;
+    return V.h('input.switch', { type: 'checkbox', checked: stepping(), 'aria-label': label, onchange: (event) => {
+      if (event.target.checked) { event.target.checked = false; turnOn(); } else { store(AUTO, 'off'); redraw(); V.emit('clip-stepping'); }
+    } });
+  }
+  function stepHint() {
+    return stepping() ? 'Copy on any device, then open Wefty here: it\'s ready to paste. What you copy here goes to your other devices when you open Wefty (never passwords or codes).'
+      : `Off: after copying, open Wefty and tap Share my clipboard. Switched on, opening Wefty for a second is enough (a ${hereWord()} only lets Wefty use the clipboard while Wefty is open).`;
+  }
+  /* As a row: in Share it's a plain row at the foot (.clip-step); `ui` (Settings' page builder, js/settingsui.js) puts
+     it on a settings page instead, as `ui.line(label, hint, control, key)`. null where it can't work (the PC, an
+     iPhone or iPad). */
+  function stepRow(ui) {
     if (!canStep()) return null;
-    // ("Keep this phone's / Chromebook's / browser's clipboard": V.deviceName would say "this your Chromebook's".)
-    const here = V.device === 'phone' ? 'phone' : V.deviceLabel(V.device) === 'Chromebook' ? 'Chromebook' : 'browser';
-    const on = stepping();
-    return V.h('div.card.switches.clip-step', {},
-      V.h('label.switch-row', {},
-        V.h('span.switch-text', {}, V.h('strong', { text: `Keep this ${here}'s clipboard in step` }),
-          V.h('span', { text: on ? `Copy on any device, then open Wefty here: it's ready to paste. What you copy here goes to your other devices when you open Wefty (never passwords or codes).`
-            : `Off: after copying, open Wefty and tap Share my clipboard. Switched on, opening Wefty for a second is enough (a ${here} only lets Wefty use the clipboard while Wefty is open).` })),
-        V.h('input.switch', { type: 'checkbox', checked: on, 'aria-label': `Keep this ${here}'s clipboard in step`, onchange: (event) => {
-          if (event.target.checked) { event.target.checked = false; turnOn(); } else { store(AUTO, 'off'); redraw(); }
-        } })));
+    const label = `Keep this ${hereWord()}'s clipboard in step`;
+    if (ui && ui.line) return ui.line(label, stepHint(), stepSwitch(), 'clipboard-in-step');
+    return V.h('div.clip-step', {}, V.h('label.switch-row', {},
+      V.h('span.switch-text', {}, V.h('strong', { text: label }), V.h('span', { text: stepHint() })), stepSwitch()));
+  }
+
+  /* -- the PC: one switch for both ways ("Keep this PC's clipboard in step": share what's copied here, and copy what
+     the others share). On = both prefs on, off = both off; with only one of them on (set under Settings' More
+     options, or in .env) it shows on, saying it's one way only. Switching writes both, the second only once the first
+     was taken; if the second fails, the first is put back, so it never ends up one way by accident. */
+  const PC_WAYS = ['clipboardShare', 'clipboardReceive'];
+  function pcStepping() {
+    const on = PC_WAYS.map((name) => !!(V.prefs && V.prefs[name]));
+    return { on: on[0] || on[1], both: on[0] && on[1], share: on[0], receive: on[1] };
+  }
+  const canPcStep = () => !!(V.desktop && V.prefs && V.pc);
+  async function setPcStepping(on) {
+    if (!canPcStep()) return pcStepping();
+    const before = PC_WAYS.map((name) => !!V.prefs[name]);
+    const done = [];
+    try {
+      for (const name of PC_WAYS) {
+        await V.pc.call('setPref', { name, value: !!on });
+        V.prefs[name] = !!on;
+        done.push(name);
+      }
+    } catch (error) {
+      for (const name of done) {  // (put back what was changed: never one way by accident)
+        const value = before[PC_WAYS.indexOf(name)];
+        try { await V.pc.call('setPref', { name, value }); V.prefs[name] = value; } catch (again) { /* said below */ }
+      }
+      V.toast('That wasn\'t changed: Wefty on this PC didn\'t take it. Try again.');
+    }
+    redraw();
+    V.emit('clip-stepping');
+    return pcStepping();
+  }
+  function pcHint(state, inSettings) {
+    if (state.on && !state.both) {
+      return state.share ? 'Only one way now: what you copy here goes to your other devices, but what they share isn\'t copied here. Both ways: Settings > Devices > More options.'
+        : 'Only one way now: what your other devices share is copied here, but what you copy here stays here. Both ways: Settings > Devices > More options.';
+    }
+    return state.on ? 'What you copy here goes to your other devices, and what they share is copied here, ready to paste (never passwords, keys or what password managers hide).'
+      : 'Off: nothing you copy leaves this PC, and nothing is copied onto it.' + (inSettings ? '' : ' Paste into the box above to send something.');
+  }
+  function pcSwitch() {
+    const state = pcStepping();
+    return V.h('input.switch', { type: 'checkbox', checked: state.on, 'aria-label': 'Keep this PC\'s clipboard in step',
+      onchange: async (event) => {
+        const box = event.target;
+        box.disabled = true;
+        const now = await setPcStepping(box.checked);
+        if (box.isConnected) { box.checked = now.on; box.disabled = false; }
+      } });
+  }
+  /* The PC's one switch as a row: Share > Clipboard's foot (.clip-step.pc-step), or a settings line with `ui`. */
+  function pcStepRow(ui) {
+    if (!canPcStep()) return null;
+    const label = 'Keep this PC\'s clipboard in step';
+    const state = pcStepping();
+    if (ui && ui.line) return ui.line(label, pcHint(state, true), pcSwitch(), 'pc-clipboard-in-step');
+    return V.h('div.clip-step.pc-step', { dataset: { ways: state.both ? 'both' : state.on ? 'one' : 'none' } },
+      V.h('label.switch-row', {}, V.h('span.switch-text', {}, V.h('strong', { text: label }), V.h('span', { text: pcHint(state) })),
+        pcSwitch()));
+  }
+  /* The two ways one by one, for Settings' More options (as 1.15's two switches). */
+  function pcDirections(ui) {
+    if (!canPcStep()) return [];
+    const toggle = (name, label, hint) => {
+      const box = V.h('input.switch', { type: 'checkbox', checked: !!V.prefs[name], 'aria-label': label, onchange: async (event) => {
+        V.prefs[name] = event.target.checked;
+        await V.pc.call('setPref', { name, value: event.target.checked }).catch(V.problem);
+        V.emit('clip-stepping');
+      } });
+      return ui && ui.line ? ui.line(label, hint, box, name)
+        : V.h('label.switch-row', {}, V.h('span.switch-text', {}, V.h('strong', { text: label }), V.h('span', { text: hint })), box);
+    };
+    return [
+      toggle('clipboardShare', 'Share what I copy on this PC', 'Not passwords, keys or what password managers hide'),
+      toggle('clipboardReceive', V.send.targets().includes('web') ? `Copy what my phone and ${V.deviceName('web')} share`
+        : 'Copy what my phone shares', 'Straight onto this PC\'s clipboard'),
+    ];
   }
 
   async function share(text) {
     const clean = String(text || '').trim();
     if (!clean) return V.toast('The clipboard is empty.');
-    if (clean.length > 100000) return V.toast('That\'s too much text for the clipboard. Send it from the Send tab.');
+    if (clean.length > 100000) return V.toast('That\'s too much text for the clipboard. Send it from Share > Send.');
     try {
       await V.cloud.insertClip(clean);
       if (mine && mine.text === clean && !mine.flying) mine = null;  // (waiting for the cloud: it's there now)
@@ -725,60 +814,72 @@ V.clips = (() => {
     }
   }
 
+  const copyButton = (clip, label, kind) => V.button(label, { icon: 'copy', kind, onClick: async () => {
+    await V.copy(clip.text, { cloud: true }); V.toast('Copied');
+  } });
+  const openButton = (clip) => (V.isLink(clip.text) ? V.button('Open', { icon: 'open', kind: 'quiet', onClick: () => {
+    if (V.desktop) V.pc.call('openLink', { url: clip.text.trim() }).catch(V.problem);
+    else window.open(clip.text.trim(), '_blank', 'noopener');
+  } }) : null);
+  const shortText = (text) => (text.length > 800 ? text.slice(0, 800) + '...' : text);
+
+  /* "Save as a note": the words as a new note in the Inbox (as the share sheet's Save as a note), opened. */
+  async function saveAsNote(clip) {
+    const text = String((clip && clip.text) || '').trim();
+    if (!text) return null;
+    V.go('notes');
+    return V.notes.create(V.TEMPLATES[0], { body: text }, { fresh: true });
+  }
+
+  /* One of "Earlier": where it came from and when on one line, the words, then Copy here (and Open for a link). */
   function item(clip) {
     const mineHere = clip.from_device === V.device;
     return V.h('div.clip', {},
       V.h('div.clip-from', { dataset: { from: clip.from_device } }, V.icon(V.deviceIcon(clip.from_device)),
-        V.h('span', { text: from(clip.from_device) + ' · ' + V.ago(clip.created_at) })),
-      V.h('div.clip-text', { text: clip.text.length > 800 ? clip.text.slice(0, 800) + '...' : clip.text }),
-      V.h('div.clip-actions', {},
-        V.button(mineHere ? 'Copy' : 'Copy here', { icon: 'copy', kind: mineHere ? 'quiet' : '', onClick: async () => {
-          await V.copy(clip.text, { cloud: true }); V.toast('Copied');
-        } }),
-        V.isLink(clip.text) ? V.button('Open', { icon: 'open', kind: 'quiet', onClick: () => {
-          if (V.desktop) V.pc.call('openLink', { url: clip.text.trim() }).catch(V.problem);
-          else window.open(clip.text.trim(), '_blank', 'noopener');
-        } }) : null));
+        V.h('span.clip-who', { text: mineHere ? 'From here' : `From ${named(clip.from_device)}` }),
+        V.h('span.clip-when', { text: V.ago(clip.created_at) })),
+      V.h('div.clip-text', { text: shortText(clip.text) }),
+      V.h('div.clip-actions', {}, openButton(clip), copyButton(clip, mineHere ? 'Copy' : 'Copy here', 'quiet')));
   }
 
-  function switches() {
-    if (!V.desktop || !V.prefs) return null;
-    const toggle = (name, label, hint) => V.h('label.switch-row', {},
-      V.h('span.switch-text', {}, V.h('strong', { text: label }), V.h('span', { text: hint })),
-      V.h('input.switch', { type: 'checkbox', checked: V.prefs[name], onchange: async (event) => {
-        V.prefs[name] = event.target.checked;
-        await V.pc.call('setPref', { name, value: event.target.checked }).catch(V.problem);
-      } }));
-    return V.h('div.card.switches', {},
-      toggle('clipboardShare', 'Share what I copy on this PC', 'Not passwords, keys or what password managers hide'),
-      toggle('clipboardReceive', V.send.targets().includes('web') ? `Copy what my phone and ${V.deviceName('web')} share`
-        : 'Copy what my phone shares', 'Straight onto this PC\'s clipboard'));
+  /* The newest from elsewhere, first and bigger: "Latest, from your Chromebook · 2 min ago", Save as a note, Copy. */
+  function latestCard(clip) {
+    return V.h('div.card.latest', {},
+      V.h('div.clip', {},
+        V.h('div.clip-from', { dataset: { from: clip.from_device } }, V.icon(V.deviceIcon(clip.from_device)),
+          V.h('span', { text: `Latest, from ${named(clip.from_device)} · ${V.ago(clip.created_at)}` })),
+        V.h('div.clip-text', { text: shortText(clip.text) }),
+        V.h('div.clip-actions', {}, openButton(clip),
+          V.button('Save as a note', { kind: 'quiet', onClick: () => saveAsNote(clip) }),
+          copyButton(clip, 'Copy', ''))));
   }
 
   function draw() {
     if (!parts || !root || !root.isConnected || root.dataset.tab !== 'clips') return;
     const latest = latestElsewhere();
-    V.clear(parts.latest, latest ? V.h('div.card.latest', {},
-      V.h('h2.section', { text: `Latest from ${V.DEVICES.includes(latest.from_device) ? V.deviceName(latest.from_device) : 'another device'}` }),
-      item(latest)) : V.h('div.card.latest.empty-latest', {},
-      V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Wefty > Clipboard > Share my clipboard.'
+    V.clear(parts.latest, latest ? latestCard(latest) : V.h('div.card.latest.empty-latest', {},
+      V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Wefty > Share > Clipboard > Share my clipboard.'
         : 'Nothing from your PC yet. Copy something there and it shows up here.' })));
-    V.clear(parts.history, V.data.clips.length ? V.data.clips.map(item) : null);
+    const earlier = V.data.clips.filter((c) => c !== latest);
+    parts.earlier.hidden = !earlier.length;
+    V.clear(parts.history, earlier.map(item));
   }
 
+  /* Share > Clipboard, top to bottom: the latest from elsewhere, the box to send something to all of them, "Share my
+     clipboard" (only while in step is off, or can't work: an iPhone's one-tap button), Earlier, then the in-step
+     switch at the foot. What each does is as before 1.16; only where it sits moved. */
   function render(container) {
     root = container;
-    const paste = V.h('textarea.field', { rows: 2, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Wefty' : 'Or paste here', 'aria-label': 'Text to share' });
-    parts = { latest: V.h('div'), history: V.h('div.clips'), paste };
-    V.clear(container, V.h('div.page', {},
-      V.h('div.page-head', {}, V.h('h1', { text: 'Shared clipboard' }), V.statusPill()),
-      switches(),
-      stepCard(),
+    const paste = V.h('textarea.field', { rows: 1, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Wefty' : 'Or paste here', 'aria-label': 'Text to share' });
+    parts = { latest: V.h('div.clip-latest'), history: V.h('div.clips'), paste, earlier: V.h('h2.section', { text: 'Earlier' }) };
+    V.clear(container, V.h('div.page.clip-page', {},
+      V.share ? V.share.head('clips') : V.appHead({ title: 'Share' }),  // (js/share.js: Share's top and switch)
       parts.latest,
-      V.desktop ? null : V.button('Share my clipboard with the PC', { kind: 'primary wide-btn', icon: 'upload', onClick: shareMine }),
-      V.h('div.send-row', {}, paste, V.button('Share', { icon: 'send', onClick: () => { share(paste.value); paste.value = ''; } })),
-      V.h('h2.section', { text: 'Recent' }),
-      parts.history));
+      V.h('div.send-row', {}, paste, V.button('Send to all', { kind: 'primary', icon: 'send', onClick: () => { share(paste.value); paste.value = ''; } })),
+      V.desktop || stepping() ? null : V.button('Share my clipboard', { kind: 'wide-btn', icon: 'upload', onClick: shareMine }),
+      parts.earlier,
+      parts.history,
+      V.h('div.clip-foot', {}, V.desktop ? pcStepRow() : stepRow())));
     draw();
   }
 
@@ -828,8 +929,19 @@ V.clips = (() => {
     retryMine();
   });
 
+  /* Whether this device's clipboard is kept in step (Settings' switch and the Clipboard part's read the same), and
+     switching it: on reads the clipboard first, so it's only ever called from a tap. Never on the PC (its two
+     switches are prefs: clipboardShare and clipboardReceive) or an iPhone or iPad (one-tap buttons there). */
+  async function setStepping(on) {
+    if (!canStep()) return false;
+    if (on) await turnOn();
+    else { store(AUTO, 'off'); redraw(); }
+    return stepping();
+  }
+
   return {
-    render, share, mayShare, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
+    render, share, mayShare, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
+    stepping: () => stepping(), setStepping, canStep: () => canStep(),
     quiet: hush,  // (js/editor.js, while a locked note's words show)
     // What's been put on this clipboard (and the look at it on coming back) finished first.
     settled: () => Promise.all([busy, writing]).then(() => {}, () => {}),

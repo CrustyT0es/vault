@@ -1,4 +1,4 @@
-/* Vault: the Files tab. "Almost like a cloud" between the PC and the phone, with nothing new in the cloud's tables:
+/* Vault: Share > Files. "Almost like a cloud" between the PC and the phone, with nothing new in the cloud's tables:
 
    - Your PC (on the phone or a Chromebook): browse the folders the owner shares from the PC, read only. Each request
      is a transfers row named 'vault-files' with deleted=true (so every Vault leaves it out of its lists); the PC app
@@ -851,7 +851,7 @@ V.files = (() => {
     const main = V.h('div.files-main');
     parts = { main };
     V.clear(root, V.h('div.page.files-page', {},
-      V.h('div.page-head', {}, V.h('h1', { text: 'Files' }), V.statusPill()),
+      V.share ? V.share.head('files') : V.appHead({ title: 'Share' }),  // (js/share.js: Share's top and switch)
       V.h('div.files-layout', {}, nav, main)));
     if (source === 'drive') drawDrive();
     else if (source === 'share') drawShare();
@@ -893,9 +893,12 @@ V.files = (() => {
     }
     browse.host = host.id;
     const others = hostsFor(kind);
-    const where = V.h('div.files-host', {}, V.icon(kind === 'pc' ? 'pc' : 'phone'),
+    // ("on now" with a green dot while it answers: the PC running Wefty, or Wefty open on the phone)
+    const live = fresh(host) && host.on;
+    const where = V.h('div.files-host' + (live ? '.live' : ''), {}, V.icon(kind === 'pc' ? 'pc' : 'phone'),
       V.h('div.files-host-text', {}, V.h('strong', { text: kind === 'pc' ? 'Your PC' : 'Your phone' }),
-        V.h('span', { text: [host.label, seenText(host.seen)].filter(Boolean).join(' · ') })),
+        V.h('span', {}, live ? V.h('i.files-dot', { 'aria-hidden': 'true' }) : null,
+          [host.label, live ? (kind === 'pc' ? 'on now' : 'open now') : seenText(host.seen)].filter(Boolean).join(' · '))),
       others.length > 1 ? V.h('select.files-host-pick', { 'aria-label': 'Which one', onchange: (event) => {
         browse.host = event.target.value; browse.root = null; browse.path = []; browse.listing = null; draw();
       } }, others.map((h) => V.h('option', { value: h.id, text: `${h.label || 'Device'} (${seenText(h.seen)})`, selected: h.id === host.id || null })))
@@ -903,8 +906,8 @@ V.files = (() => {
       V.iconButton('restore', 'Look again', refreshHosts, 'quiet'));
     if (!host.on) {
       return V.clear(main, where, kind === 'pc'
-        ? empty('lock', 'Browsing is off on your PC', 'On the PC, open Wefty > Files > Share this PC, turn it on and tick the folders your phone may see.')
-        : empty('lock', 'Your phone isn\'t sharing right now', 'Open Wefty on the phone (Files > This phone): the folder it shares shows here while Wefty is open there.'));
+        ? empty('lock', 'Browsing is off on your PC', 'On the PC, open Wefty > Share > Files > Share this PC, turn it on and tick the folders your phone may see.')
+        : empty('lock', 'Your phone isn\'t sharing right now', 'Open Wefty on the phone (Share > Files > This phone): the folder it shares shows here while Wefty is open there.'));
     }
     if (!fresh(host) && !browse.anyway) {
       return V.clear(main, where, empty('clock', `Last ${seenText(host.seen)}`,
@@ -915,7 +918,7 @@ V.files = (() => {
     const roots = Array.isArray(host.roots) ? host.roots.filter((r) => r && r.id) : [];
     if (!roots.length) {
       return V.clear(main, where, empty('folder', 'No folders are shared yet',
-        kind === 'pc' ? 'On the PC: Wefty > Files > Share this PC, then tick the folders your phone may see.' : ''));
+        kind === 'pc' ? 'On the PC: Wefty > Share > Files > Share this PC, then tick the folders your phone may see.' : ''));
     }
     if (!roots.some((r) => r.id === browse.root)) { browse.root = roots[0].id; browse.path = []; browse.listing = null; }
     const rootLabel = (roots.find((r) => r.id === browse.root) || {}).label || 'Folder';
@@ -950,7 +953,7 @@ V.files = (() => {
         V.h('li', { text: 'Turn on "Show mobile device in File Explorer" and pick your phone (it uses Phone Link, which Samsung phones already have).' }),
         V.h('li', { text: 'Your phone shows up in File Explorer, beside This PC.' })),
       V.pc && V.pc.can('openMobileDevices') ? V.button('Open that setting', { icon: 'open', onClick: () => V.pc.call('openMobileDevices').catch(V.problem) }) : null,
-      V.h('p.hint', { text: 'If your phone\'s browser can share folders, Wefty there (Files > This phone) can show one here while it\'s open. Wefty Drive works either way.' }));
+      V.h('p.hint', { text: 'If your phone\'s browser can share folders, Wefty there (Share > Files > This phone) can show one here while it\'s open. Wefty Drive works either way.' }));
   }
 
   async function refreshHosts() {

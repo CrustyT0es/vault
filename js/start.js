@@ -10,95 +10,156 @@
     useBuiltIn: async () => {}, state: () => ({ version: V.VERSION, ready: '', needsShell: '', checked: '',
       canCheck: false, downloaded: false }) };
   const app = document.getElementById('app');
-  const TABS = [['notes', 'notes', 'Notes'], ['send', 'send', 'Send'], ['files', 'folder', 'Files'], ['clips', 'clip', 'Clipboard'],
-    ['claude', 'spark', 'Chat'], ['settings', 'settings', 'Settings']];  // (the Chat tab's id stays 'claude': older links)
-  let current = 'notes';
+  /* The four tabs (1.16). The Chat tab's id stays 'claude', as older links (#claude), places kept across an update and
+     tests use it. Send, Files and Clipboard are parts of Share now; Settings is behind your picture. */
+  const NAV = [['today', 'today', 'Today'], ['notes', 'notes', 'Notes'], ['share', 'share', 'Share'], ['claude', 'spark', 'Chat']];
+  /* The screens, each a module with render(container, opts). Looked up when one is opened, not now: js/today.js loads
+     after this file (main() waits for the page's scripts before the first one). The view keeps the screen's own id in
+     data-tab ('send', 'files', 'clips' and 'settings' too), which is how each module tells whether it's showing. */
+  const VIEWS = { today: () => V.today, notes: () => V.notes, send: () => V.send, files: () => V.files, clips: () => V.clips,
+    claude: () => V.chat, settings: () => V.settings };
+  const NAV_OF = { today: 'today', notes: 'notes', send: 'share', files: 'share', clips: 'share', claude: 'claude', settings: '' };
+  const NAMES = { today: 'Today', notes: 'your notes', send: 'Share', files: 'Share', clips: 'Share', claude: 'Chat', settings: 'Settings' };
+  // This page's life: history steps it makes carry it, so one left by the page before a reload (an update switching
+  // over, a device change) is never taken for its own.
+  const BOOT = Math.random().toString(36).slice(2, 10);
+  V.pageLife = BOOT;  // (Settings' pages put it on their own steps: { vault: 'settings-page', boot: V.pageLife })
+  let current = 'today';
   let shell = null;
+  let shown = false;           // the first screen is up (until then a tab tapped, or a link opened, is kept for it)
+  let askedFirst = '';
+  let settingsFrom = 'today';  // where Settings was opened from: its back arrow and Back go there again
+  let settingsStep = false;    // Settings has a step in history (on a phone): Back leaves it
 
   /* ---------------------------------------------------------------- the app's frame */
 
-  V.tab = () => current;
-  V.go = (tab) => {
-    if (tab === 'chat') tab = 'claude';  // the Chat tab, by its name since 1.8.3
-    current = tab;
+  V.tab = () => current;  // the screen's own id: 'today', 'notes', 'send', 'files', 'clips', 'claude' or 'settings'
+  V.navTab = () => NAV_OF[current] || '';  // the tab it's under ('' for Settings)
+  V.go = (view, opts = {}) => {
+    if (view === 'chat') view = 'claude';  // the Chat tab, by its name since 1.8.3
+    if (view === 'share') view = sharePart();
+    if (!VIEWS[view]) view = 'notes';  // (an id this version doesn't know)
+    const was = current;
+    current = view;
     if (!shell) return;
-    for (const button of shell.nav.querySelectorAll('.tab')) button.classList.toggle('on', button.dataset.tab === tab);
-    shell.view.dataset.tab = tab;
-    const show = { notes: V.notes, send: V.send, files: V.files, clips: V.clips, claude: V.chat, settings: V.settings }[tab];
-    show.render(shell.view);
+    if (!shown) { askedFirst = view; return; }  // (main() shows it, once this device's notes are loaded)
+    if (view === 'settings' && was !== 'settings') openedSettings(was);
+    else if (view !== 'settings' && was === 'settings') leftSettings();
+    show(view, opts || {});
+  };
+
+  // Share opens on the part used last on this device, or on Send while something sent here hasn't been seen yet.
+  function sharePart() {
+    try { return V.share && V.share.last ? V.share.last() : 'send'; } catch (error) { console.error(error); return 'send'; }
+  }
+
+  /* A screen, drawn. One that throws never takes the app down: your notes show instead, with a line saying so (the
+     first screen at every start is Today, and a phone can't go back to an older Wefty by itself). */
+  function show(view, opts, fallen = false) {
+    shell.view.dataset.tab = view;
+    shell.view.dataset.nav = NAV_OF[view];
+    app.dataset.view = view;
+    for (const button of shell.nav.querySelectorAll('.tab')) {
+      const on = button.dataset.tab === NAV_OF[view];
+      button.classList.toggle('on', on);
+      if (on) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    }
+    if (shell.me) shell.me.classList.toggle('on', view === 'settings');
+    try {
+      VIEWS[view]().render(shell.view, opts);
+    } catch (error) {
+      console.error(error);
+      if (view !== 'notes' && !fallen) {
+        if (view === 'settings') leftSettings();
+        current = 'notes';
+        V.toast(`Couldn't open ${NAMES[view]}: showing your notes`, { kind: 'err', ms: 6000 });
+        show('notes', {}, true);
+        return;
+      }
+      V.clear(shell.view, V.h('div.page.frame-trouble', {},
+        V.h('p', { text: 'Wefty couldn\'t show this just now.' }),
+        V.button('Try again', { kind: 'primary', onClick: () => V.go(current) })));
+    }
     shell.view.scrollTop = 0;
     badge();
-    V.emit('tab', tab);
-  };
+    V.emit('tab', current);
+  }
 
+  /* Settings on a phone is a page of its own, over the tabs: Back (Android's, or an iPhone's swipe) and its arrow take
+     you to where you were. Wide, the rail stays and simply switches. */
+  const settingsState = (state) => !!state && /^settings(-page)?$/.test(state.vault || '') && state.boot === BOOT;
+  function openedSettings(from) {
+    settingsFrom = from;
+    if (V.wide()) return;
+    try {
+      history.pushState({ vault: 'settings', boot: BOOT }, '');
+      settingsStep = true;
+    } catch (error) { /* (its arrow still leaves it) */ }
+  }
+  /* Settings left another way (a toast's Open, a note opened from it, the rail): its step is made a dead one, never
+     gone back over (a step back now could close a note that has just opened). */
+  function leftSettings() {
+    if (!settingsStep) return;
+    settingsStep = false;
+    if (settingsState(history.state)) history.replaceState({ vault: 'settings-left', boot: BOOT }, '');
+  }
+  V.leaveSettings = () => {
+    if (current !== 'settings') return;
+    if (settingsStep && settingsState(history.state)) { history.back(); return; }  // (popstate below does the rest)
+    V.go(settingsFrom || 'today');
+  };
+  window.addEventListener('popstate', () => {
+    // A Settings step left behind (Settings left from one of its pages: only the top step was made a dead one) is
+    // stepped over, so that Back press does something and the next Settings leaves with one.
+    if (current !== 'settings' && settingsState(history.state)) { history.back(); return; }
+    // (Back from a note shown over Settings lands on Settings' own step: Settings stays.)
+    if (current !== 'settings' || settingsState(history.state)) return;
+    settingsStep = false;
+    V.go(settingsFrom || 'today');
+  });
+
+  /* The numbers on the tabs: on Share, what was sent here and not seen yet (js/share.js puts the same on its Send
+     part); on Chat, messages waiting to be sent. */
   function badge() {
     if (!shell) return;
-    const count = V.send.unseen();
-    const dot = shell.nav.querySelector('[data-tab=send] .badge');
-    dot.textContent = count ? String(count) : '';
-    dot.hidden = !count;
-    const waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0;  // chat messages held until they can be sent
-    const cdot = shell.nav.querySelector('[data-tab=claude] .badge');
-    if (cdot) { cdot.textContent = waiting ? String(waiting) : ''; cdot.hidden = !waiting; }
+    let count = 0;
+    let waiting = 0;
+    try { count = V.send && V.send.unseen ? V.send.unseen() : 0; } catch (error) { console.error(error); }
+    try { waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0; } catch (error) { console.error(error); }
+    for (const [id, n] of [['share', count], ['claude', waiting]]) {
+      const dot = shell.nav.querySelector(`[data-tab=${id}] .badge`);
+      if (dot) { dot.textContent = n ? String(n) : ''; dot.hidden = !n; }
+    }
   }
 
-  /* The sync pill: on each page's title row on a phone, at the foot of the rail when the window is wide. Every pill
-     shows the same state (one listener sets them all). */
-  const STATE_WORDS = { synced: 'Synced', syncing: 'Syncing', offline: 'Offline', error: 'Can\'t sync', asleep: 'Cloud asleep',
-    'signed-out': 'Signed out', idle: '' };
-  // "held": everything synced but for a note or two the cloud wouldn't take (too big). The pill says so instead of
-  // pretending all is well, and the tooltip says what to do.
-  const heldLine = (n) => `${n === 1 ? '1 note' : `${n} notes`} can\'t go up to the cloud: too big. Make ${n === 1 ? 'it' : 'them'} shorter.`;
-  function showState(pill, state) {
-    pill.dataset.state = state;
-    const held = state === 'held' ? (V.cloud.held || 1) : 0;
-    pill.querySelector('.status-word').textContent = held ? `${held} not synced` : (STATE_WORDS[state] || '');
-    pill.title = held ? heldLine(held)
-      : state === 'offline' ? 'Offline: everything is saved on this device and goes up when you\'re back online'
-      : state === 'error' || state === 'asleep' ? 'Wefty can\'t reach your cloud: click for what to do' : 'Sync now';
-  }
-  V.statusPill = (cls = '') => {
-    const pill = V.h('button.status' + (cls ? '.' + cls : ''), { type: 'button', onclick: () => {
-      if (V.cloud.status === 'asleep' || V.cloud.status === 'error') explainTrouble(); else V.cloud.sync();
-    } }, V.h('i.dot'), V.h('span.status-word'));
-    showState(pill, V.cloud.status);
-    return pill;
-  };
-  V.on('status', (state) => { for (const pill of document.querySelectorAll('.status')) showState(pill, state); });
-
-  function explainTrouble() {
-    const asleep = V.cloud.status === 'asleep';
-    V.sheet({
-      title: asleep ? 'Your cloud is asleep' : 'Wefty can\'t reach your cloud',
-      content: [
-        V.h('p', { text: asleep
-          ? 'Free Supabase clouds go to sleep after a week with no use. Everything is still there.'
-          : 'If the internet is working, your free cloud may have gone to sleep after a week with no use. Everything is still there.' }),
-        V.h('ol.steps', {}, V.h('li', { text: 'Open supabase.com/dashboard and sign in.' }),
-          V.h('li', { text: 'Click your project (it\'s called vault), then press Restore.' }),
-          V.h('li', { text: 'Wait a few minutes, then press Try again.' })),
-        V.h('p.hint', { text: 'Until then, what you write is kept on this device and goes up once it\'s back.' }),
-      ],
-      actions: [
-        { label: 'Open Supabase', icon: 'open', onClick: () => {
-          if (V.desktop) V.pc.call('openLink', { url: 'https://supabase.com/dashboard' }).catch(V.problem);
-          else window.open('https://supabase.com/dashboard', '_blank', 'noopener');
-          return true;
-        } },
-        { label: 'Try again', kind: 'primary', onClick: () => V.cloud.sync() },
-      ],
-    });
-  }
+  /* Ctrl+N (a new note) and Ctrl+F (search your notes) from any screen: Notes has its own, so these only act while
+     another one shows, and never through a sheet, a note over everything, or a box being typed in. */
+  document.addEventListener('keydown', (event) => {
+    if (!shell || current === 'notes' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    const key = String(event.key || '').toLowerCase();
+    if ((key !== 'n' && key !== 'f') || !app.classList.contains('ready') || app.classList.contains('gate')) return;
+    if (document.querySelector('#layers > .layer:not(.leaving), #layers > .nt-layer.shown')) return;
+    if (V.editor && V.editor.covering && V.editor.covering()) return;
+    const target = event.target;
+    if (target && ((target.matches && target.matches('input, textarea, select')) || target.isContentEditable)) return;
+    event.preventDefault();
+    V.go('notes');
+    if (key === 'n') V.notes.chooseTemplate({ fresh: true });
+    else V.notes.search();
+  });
 
   function buildShell() {
+    let me = null;
+    try { me = V.profileButton('rail-me'); } catch (error) { console.error(error); }
     const nav = V.h('nav.tabs', { 'aria-label': 'Wefty' }, V.mark(30, 'rail-mark', { colour: true }),
-      TABS.map(([id, icon, label]) => V.h('button.tab', {
+      NAV.map(([id, icon, label]) => V.h('button.tab', {
         type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
-      }, V.h('span.pill', {}, V.icon(icon), id === 'send' || id === 'claude' ? V.h('span.badge', { hidden: true }) : null),
-      V.h('span.tab-label', { text: label }))),
-      V.h('span.rail-spacer'), V.statusPill('rail-status'));
+      }, V.h('span.tab-icon', {}, V.icon(icon), id === 'share' || id === 'claude' ? V.h('span.badge', { hidden: true }) : null),
+      V.weave('tab-weave'), V.h('span.tab-label', { text: label }))),
+      V.h('span.rail-spacer'), me);
     const view = V.h('main.view');
-    shell = { nav, view };
+    shell = { nav, view, me };
     V.clear(app, nav, view);
     app.className = 'ready ' + (V.desktop ? 'on-pc' : 'on-phone');
   }
@@ -155,7 +216,7 @@
           : 'Use your Wefty e-mail and password.' }),
         emailRow, passRow, problem, go,
         pasting && offerPass ? pasting.button : null,
-        V.desktop ? null : V.h('p.hint', { text: 'Forgot your password? Change it in Wefty on a device that\'s still signed in (Settings > Change password), then sign in here with the new one.' }),
+        V.desktop ? null : V.h('p.hint', { text: 'Forgot your password? Change it in Wefty on a device that\'s still signed in (Settings > Account > Change password), then sign in here with the new one.' }),
         V.desktop ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different cloud', onclick: () => {
           localStorage.removeItem('vault-config'); location.reload();
         } }));
@@ -208,7 +269,7 @@
       V.button('Connect', { kind: 'primary', onClick: () => {
         const url = urlBox.value.trim().replace(/\/+$/, '');
         if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) || keyBox.value.trim().length < 20) {
-          typed.textContent = 'That doesn\'t look right. Both are on the PC: Wefty > Settings > Connect your phone > Copy the link.';
+          typed.textContent = 'That doesn\'t look right. Both are on the PC: Wefty > Settings > Devices > Add a phone or computer > Copy the link.';
           return;
         }
         localStorage.setItem('vault-config', JSON.stringify({ url, key: keyBox.value.trim() }));
@@ -221,9 +282,9 @@
       paste, linkRow, V.button('Connect', { kind: 'wide-btn', onClick: connect }), problem,
       V.h('p.hint', { text: icon
         // (A scanned code opens in Safari, never in this icon: the link comes from Safari's Vault instead.)
-        ? `In Safari's Wefty, open Settings > This ${V.deviceKind.model} > Copy the sign-in link, then come back and tap Paste my sign-in. `
-          + 'Or on the PC: Wefty > Settings > Connect your phone > Copy the link, and send it to this phone.'
-        : 'Setting up your own phone? In Wefty on your PC, open Settings > Connect your phone and point this phone\'s camera at the code.' }),
+        ? `In Safari's Wefty, open Settings > Devices > Copy the sign-in link, then come back and tap Paste my sign-in. `
+          + 'Or on the PC: Wefty > Settings > Devices > Add a phone or computer > Copy the link, and send it to this phone.'
+        : 'Setting up your own phone? In Wefty on your PC, open Settings > Devices > Add a phone or computer and point this phone\'s camera at the code.' }),
       manual);
   }
 
@@ -410,7 +471,7 @@
       screen(V.h('h1', { text: 'Already signed in' }),
         V.h('p.muted', { text: `This invite is for ${invite.email}, but Wefty in this browser is signed in as ${invite.busy}.` }),
         V.h('ol.steps', {},
-          V.h('li', { text: 'Open Wefty here and go to Settings > Sign out.' }),
+          V.h('li', { text: 'Open Wefty here, tap your picture at the top, then Sign out.' }),
           V.h('li', { text: 'Then open the invite link again.' })),
         V.h('p.hint', { text: 'Or open the link in another browser (or a private window) instead.' }),
         open);
@@ -485,6 +546,10 @@
     handed: 'You already moved your sign-in to the new Wefty icon. If it worked there, remove this old icon (press and '
       + 'hold it, then Remove App). If not, sign in there with your e-mail and password.',
   };
+  // What says everything here reached the cloud, now that there's no Synced pill (1.16): the old icon runs this
+  // version too, so its steps point at the picture's mark (js/profile.js).
+  const NO_DOT = 'wait until the small dot on your picture at the top is gone (tap the picture: while it says Sending, '
+    + 'changes are still going up; with nothing at the top, it\'s all in your cloud)';
   const HANDED = 'vault-handed';  // localStorage: when this old icon handed its sign-in over (a time, nothing secret)
   // Here: an iPhone's or iPad's new home screen icon. (A Safari tab keeps a storage of its own, and the old Vault icon,
   // at the old address, is the one handing its sign-in over: a pass is for the new icon.)
@@ -774,7 +839,7 @@
           ];
         } else if (apple && later) {
           steps = [
-            'Tap Keep using this one for now and wait until it says Synced.',
+            'Tap Keep using this one for now and ' + NO_DOT + '.',
             'Then close this app (swipe it away in the app switcher) and open this old icon again.',
             'Tap Copy my sign-in. No password needed.',
           ];
@@ -784,10 +849,11 @@
             'Tap Open Wefty. It opens in Safari.',
             'In Safari, tap Share, then Add to Home Screen (keep Open as Web App on).',
             link ? 'Open the new Wefty icon, tap Paste my sign-in, then sign in with your e-mail and password.'
-              : 'Open the new Wefty icon and connect it: on the PC, open Wefty > Settings > Connect your phone > Copy the '
-                + 'link, and send it to this phone.',
+              : 'Open the new Wefty icon and connect it: on the PC, open Wefty > Settings > Devices > Add a phone or '
+                + 'computer > Copy the link, and send it to this phone.',
             waiting > 0 ? null : waiting < 0
-              ? 'Once this icon says Synced, remove the old Vault icon: press and hold it, then Remove App.'
+              ? 'Once the small dot on your picture at the top is gone (or there never was one), remove the old Vault icon: '
+                + 'press and hold it, then Remove App.'
               : 'Then remove the old Vault icon: press and hold it, then Remove App.',
           ];
         } else if (how.kind === 'chromebook') {
@@ -831,7 +897,7 @@
           V.h('ol.steps.moved-steps', {}, steps.filter(Boolean).map((text) => V.h('li', { text }))),
           given ? V.h('p.hint.moved-hint', { text: PASS_WORDS.once }) : null,
           waiting > 0 ? V.h('p.moved-waiting', { role: 'note', text: later ? `${things}.`
-            : `${things}. Tap Keep using this one for now and wait until it says Synced. Only then remove the old Vault `
+            : `${things}. Tap Keep using this one for now and ${NO_DOT}. Only then remove the old Vault `
               + 'icon (press and hold it, then Remove App).' }) : null,
           // (Signed out here once the sign-in is handed over: this icon can't carry on without the password.)
           given ? null : V.h('button.link-btn.welcome-skip.moved-keep', { type: 'button', text: 'Keep using this one for now',
@@ -1109,7 +1175,7 @@
       hint.hidden = true;
       if (!hasFiles(event) || !V.data.user) return;
       event.preventDefault();
-      if (V.files.takeDrop(event.dataTransfer.files)) return;  // onto Vault Drive in the Files tab
+      if (V.files.takeDrop(event.dataTransfer.files)) return;  // onto Vault Drive in Share > Files
       if (V.chat && V.chat.takeDrop(event.dataTransfer.files)) return;  // into the message in the Chat tab
       V.go('send');
       V.send.files(event.dataTransfer.files);
@@ -1123,15 +1189,26 @@
     const { firstSync } = await V.cloud.start();
     const kept = V.update.resume();  // where the owner was before Vault reloaded into an update
     const asked = location.hash;  // the home screen icon's shortcuts: "New note", "Send to PC" and "Send clipboard"
-    if (kept && TABS.some(([id]) => id === kept.tab)) current = kept.tab;
-    if (asked === '#send') current = 'send';
-    if (asked === '#clip') current = 'clips';
-    if (asked === '#chat' || asked === '#claude') current = 'claude';  // the Chat tab (#claude: its id, kept working)
-    // The Chat tab's script (and the others after this one) may still be loading: a page opened on it waits for them.
+    // Every device opens on Today, unless an update (or a device change) kept a place, or a shortcut asks for one.
+    // (A kept place from 1.15 is one of its six tabs, all still screens here.)
+    let first = 'today';
+    if (kept && typeof kept.tab === 'string' && Object.prototype.hasOwnProperty.call(VIEWS, kept.tab)) first = kept.tab;
+    if (asked === '#send') first = 'send';
+    if (asked === '#clip') first = 'clips';
+    if (asked === '#chat' || asked === '#claude') first = 'claude';  // the Chat tab (#claude: its id, kept working)
+    if (asked === '#new' || /^#note=/.test(asked)) first = 'notes';  // (a note opened by a link or a reminder: js/reminders.js)
+    // Today's and the Chat tab's scripts (and the others after this one) may still be loading: the first screen
+    // waits for them.
     if (document.readyState === 'loading') await new Promise((done) => document.addEventListener('DOMContentLoaded', done, { once: true }));
-    V.go(current);
-    if (kept && kept.note && current === 'notes' && V.data.notes.has(kept.note)) V.notes.open(kept.note);
-    if (asked === '#new') V.notes.chooseTemplate();
+    if (askedFirst) first = askedFirst;  // (a tab tapped, or a note's link opened, while this device's notes loaded)
+    current = '';  // (so the first screen is opened like any other: Settings gets its step in history)
+    shown = true;
+    V.go(first, first === 'settings' && kept && typeof kept.page === 'string' ? { page: kept.page } : {});
+    // The note that was open goes back too, over whatever screen it was on (a phone opens notes over Today, Share and
+    // Chat; a wide screen shows Notes for it), unless a shortcut or a tab tapped meanwhile asked for something else.
+    if (kept && kept.note && first !== 'settings' && (first === kept.tab || first === 'notes')
+      && !/^#(?:new|send|clip|chat|claude|note=)/.test(asked) && V.data.notes.has(kept.note)) V.notes.open(kept.note);
+    if (asked === '#new') V.notes.chooseTemplate({ fresh: true });
     if (['#new', '#send', '#clip', '#chat', '#claude'].includes(asked)) history.replaceState(null, '', location.pathname + location.search);
     // The icon's "Send clipboard" with Vault already open (the usual way on a phone): Chrome only brings it to the
     // front with #clip in the address, which doesn't start the page again. The same, once Vault is in sight.
@@ -1191,6 +1268,7 @@
         let config = await V.pc.call('config');
         V.theme.system(config.scheme);  // Windows' own light or dark, for Settings > Appearance > System
         V.pc.knows(config);
+        if (V.theme.tellPc) V.theme.tellPc();  // (Pure black too, now that its call is known)
         V.pcWindow(config.shown);
         if (await V.update.atBoot(config)) return;
         if (!config.url) {

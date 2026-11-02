@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.15.0';
+V.VERSION = '1.16.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -94,61 +94,14 @@ V.setDevice = (id) => {
   // (it reloads the page, which would end the note-taker part-way through a class)
   if (V.notetaker && V.notetaker.listening()) { V.toast('The note-taker is listening. Stop it first, then change this.'); return; }
   try { localStorage.setItem('vault-device', id); } catch (error) { /* private browsing: until it closes */ }
+  // Back to Settings' Devices after the reload, not to the first screen (js/start.js reads it like an update's).
+  try { sessionStorage.setItem('vault-update-resume', JSON.stringify({ tab: 'settings', page: 'devices' })); } catch (error) { /* (Today, then) */ }
   location.reload();
 };
 
 /* ---------------------------------------------------------------- light or dark
 
-   Set first, before anything is drawn (the page's rules allow no inline script, so it's here): this device's own
-   choice (Settings > Appearance, kept in localStorage 'vault-theme': system, light or dark), else the system's. In
-   the PC app "system" means Windows' own app theme, which vault/desktop.py hands over (VAULT_SCHEME at the start,
-   then a "scheme" event), as Qt's web view may not pass it on as prefers-color-scheme. */
-V.theme = (() => {
-  const KEY = 'vault-theme';
-  const BARS = { light: '#f5f6f8', dark: '#0e0f12' };  // --bg, for the phone's status bar (the theme-color metas)
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  let system = /^(light|dark)$/.test(window.VAULT_SCHEME || '') ? window.VAULT_SCHEME : '';
-  let shown = '';
-  const choice = () => {
-    try {
-      const saved = localStorage.getItem(KEY);
-      return saved === 'light' || saved === 'dark' ? saved : 'system';
-    } catch (error) {
-      return 'system';
-    }
-  };
-  const resolved = () => (choice() !== 'system' ? choice() : system || (media.matches ? 'dark' : 'light'));
-  function apply() {
-    const now = resolved();
-    document.documentElement.dataset.theme = now;
-    const own = choice() === 'system' && !system;  // each meta keeps its own colour, picked by the system
-    for (const meta of document.querySelectorAll('meta[name=theme-color]')) {
-      meta.content = own ? BARS[/dark/.test(meta.media) ? 'dark' : 'light'] : BARS[now];
-    }
-    if (now !== shown) {
-      shown = now;
-      if (V.emit) V.emit('theme', now);
-    }
-  }
-  media.addEventListener('change', apply);
-  window.addEventListener('storage', (event) => { if (event.key === KEY) apply(); });  // changed in another tab
-  apply();
-  return {
-    choice,
-    current: () => shown,
-    set(value) {
-      try {
-        if (value === 'light' || value === 'dark') localStorage.setItem(KEY, value);
-        else localStorage.removeItem(KEY);
-      } catch (error) { /* private browsing: it lasts until the page closes */ }
-      apply();
-    },
-    system(value) {
-      system = value === 'light' || value === 'dark' ? value : '';
-      apply();
-    },
-  };
-})();
+   V.theme is js/theme.js's: it runs in <head>, before anything is drawn. */
 
 /* ---------------------------------------------------------------- events */
 
@@ -286,6 +239,19 @@ const ICONS = {
   cards: '<rect x="3.5" y="7" width="13" height="13.5" rx="2.5"/><path d="M7.5 7v-.5A2.5 2.5 0 0 1 10 4h8a2.5 2.5 0 0 1 2.5 2.5V16a2.5 2.5 0 0 1-2.5 2.5h-1.5"/>',
   learn: '<path d="M9.5 18.5h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>',
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  // 1.16's frame: Today (a sun coming up), Share (two arrows passing), and the picture's menu
+  today: '<path d="M12 3.5V6M5.4 6.9l1.7 1.7M18.6 6.9l-1.7 1.7M3 16.5h18M7 16.5a5 5 0 0 1 10 0M8 20h8"/>',
+  share: '<path d="M4.5 8h14M15 4.5 18.5 8 15 11.5"/><path d="M19.5 16h-14M9 12.5 5.5 16 9 19.5"/>',
+  'user-plus': '<circle cx="10" cy="8" r="4"/><path d="M2.5 20a7.5 7.5 0 0 1 15 0"/><path d="M19 8.5v6M16 11.5h6"/>',
+  feedback: '<path d="M20.5 15a2.5 2.5 0 0 1-2.5 2.5H9.5L5 21v-3.5h-.5A2.5 2.5 0 0 1 2 15V6.5A2.5 2.5 0 0 1 4.5 4H18a2.5 2.5 0 0 1 2.5 2.5z"/><path d="M7 9h9.5M7 12.5h6"/>',
+  'sign-out': '<path d="M9.5 4.5H7A2.5 2.5 0 0 0 4.5 7v10A2.5 2.5 0 0 0 7 19.5h2.5"/><path d="M15 8l4 4-4 4M19 12H9.5"/>',
+  // Settings' categories (1.16, js/settings.js)
+  contrast: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/>',
+  devices: '<rect x="2.5" y="5" width="13" height="9.5" rx="1.5"/><path d="M1.5 18h11"/><rect x="16" y="9" width="6" height="11" rx="1.5"/><path d="M18.5 17.5h1"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>',
+  chevron: '<path d="M9.5 6l6 6-6 6"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4"/><path d="M10.5 12.5 20 3M16.5 6.5l2.5 2.5M14 9l2 2"/>',
 };
 
 V.icon = function icon(name, cls) {
@@ -370,6 +336,88 @@ V.iconButton = (icon, title, onClick, cls) => V.h('button.icon-btn' + (cls ? '.'
   type: 'button', title, 'aria-label': title, onclick: onClick,
 }, V.icon(icon));
 
+/* ---------------------------------------------------------------- the frame's pieces (1.16)
+
+   The logo's thread as a small wave: under the tab you're on, and in Today's line under the greeting. One period of
+   the logo's own thread at the same proportions (a swing of 2.5 over a half-period of 12). */
+V.weave = (cls = '') => {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 6');
+  svg.setAttribute('class', 'weave' + (cls ? ' ' + cls : ''));
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG, 'path');
+  path.setAttribute('d', 'M1.5 3.5Q6.75 1.1 12 3.5T22.5 3.5');
+  svg.append(path);
+  return svg;
+};
+
+/* The empty folder's drawing (1.16): a small loom with nothing woven on it yet but three rows, the thread rising to a
+   needle. The fourth and last place the logo's thread shows (with the logo, the tab you're on and Today's line). Warp
+   lines in --line-strong, the thread in --accent, the needle in --text-2 (styles.css, .loom); `width` in px, the
+   height follows (160 x 120). Built from paths, never from markup text. */
+V.loom = (width = 176) => {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 160 120');
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(Math.round(width * 0.75)));
+  svg.setAttribute('class', 'loom');
+  svg.setAttribute('aria-hidden', 'true');
+  const add = (tag, cls, attrs) => {
+    const el = document.createElementNS(SVG, tag);
+    el.setAttribute('class', cls);
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, String(value));
+    svg.append(el);
+  };
+  const warps = [36, 52, 68, 84, 100, 116];
+  for (const x of warps) {
+    add('path', 'warp', { d: `M${x} 34V104` });
+    add('circle', 'peg', { cx: x, cy: 31, r: 2 });
+  }
+  // Three rows, back and forth, then up and away through the needle's eye.
+  add('path', 'weft', { d: 'M28 100 L124 100 A4 4 0 0 0 124 92 L28 92 A4 4 0 0 1 28 84 L118 84 C127 84 131 79 132 68 '
+    + 'C133 55 136 40 143.2 31.6' });
+  // Where a warp line goes over the thread, it's drawn again over a gap the page's colour (every other one, row by row).
+  const over = [[96, [52, 84, 116]], [88, [36, 68, 100]], [80, [52, 84, 116]]];
+  for (const [y, xs] of over) {
+    for (const x of xs) {
+      add('path', 'gap', { d: `M${x} ${y}V${y + 8}` });
+      add('path', 'warp', { d: `M${x} ${y - 0.6}V${y + 8.6}` });
+    }
+  }
+  add('path', 'needle', { d: 'M135 80 L142.4 24.4 A2 2 0 0 1 146.4 24.9 Z' });
+  add('ellipse', 'eye', { cx: 143.2, cy: 31.6, rx: 0.9, ry: 3, transform: 'rotate(7.6 143.2 31.6)' });
+  add('path', 'weft', { d: 'M143.2 31.6 C147.6 30.4 152 33.4 152 40.4' });
+  return svg;
+};
+
+/* Your picture (js/profile.js): a circle with your first letter, its mark saying how syncing goes, and a tap opens
+   your menu (Settings, Invite people, Feedback, Sign out). If js/profile.js didn't load, or its picture can't be made,
+   a plain letter that opens Settings: the way there never goes. */
+V.profileButton = (cls = '') => {
+  try {
+    if (V.profile && V.profile.button) return V.profile.button(cls);
+  } catch (error) {
+    console.error(error);
+  }
+  const user = (V.data && V.data.user) || {};
+  const letter = (Array.from(String(user.name || user.email || '').trim())[0] || '?').toUpperCase();
+  return V.h('button.me.plain' + (cls ? '.' + cls : ''), { type: 'button', title: 'Settings', 'aria-label': 'You: Settings',
+    onclick: () => { if (V.go) V.go('settings'); } }, V.h('span.av', { text: letter }));
+};
+
+/* Each screen's one row at the top: its title (or the logo, on Today), its own buttons, and your picture. A back
+   arrow first where the screen has one (`back`: what it does). It pads for the notch and the note-taker's bar
+   (--safe-top), and for a phone's rounded sides in landscape. `.page-head` too, so what looked for a screen's title
+   there still finds it. On a wide screen the picture lives at the foot of the rail instead. */
+V.appHead = ({ title = '', sub = '', back = null, backLabel = 'Back', actions = [], me = true, logo = false, cls = '' } = {}) =>
+  V.h('header.app-head.page-head' + (cls ? '.' + cls : ''), {},
+    back ? V.iconButton('back', backLabel, back, 'head-back') : null,
+    logo ? V.mark(30, 'head-mark', { colour: true }) : null,
+    title || sub ? V.h('div.head-title', {}, title ? V.h('h1', { text: title }) : null, sub ? V.h('p.head-sub', { text: sub }) : null)
+      : V.h('span.head-grow'),
+    actions,
+    me ? V.profileButton('head-me') : null);
+
 /* ---------------------------------------------------------------- dialogs and toasts */
 
 V.sheet = function sheet({ title, content, actions = [], wide = false, onClose, dismissable = true }) {
@@ -441,27 +489,51 @@ V.confirm = (title, text, { ok = 'OK', danger = false } = {}) => new Promise((re
 });
 
 /* A menu of `items` ({ label, icon, onClick, danger }) under `anchor`. An item with `checked` (true or false) is a
-   switch: it says whether it's on, with a tick when it is. */
-V.menu = function menu(anchor, items) {
+   switch: it says whether it's on, with a tick when it is. `{ sep: true }` is a line between groups, and `{ node }`
+   a piece of its own (an element, or a function given the menu's close that makes one: the picture's status line).
+   Options: `align: 'up'` opens it above the anchor, from its left edge (the picture at the foot of the rail);
+   `cls` adds a class; `label` names it; `onClose(how)` hears it close ('item', 'outside' (a press beside it) or
+   'escape'); `returnFocus` puts the keyboard back on the anchor.
+   Returns { close, el }. */
+V.menu = function menu(anchor, items, { align = '', cls = '', label = '', onClose = null, returnFocus = false } = {}) {
   const rect = anchor.getBoundingClientRect();
-  const list = V.h('div.menu', { role: 'menu' }, items.filter(Boolean).map((item) => {
+  let closed = false;
+  const done = (how = 'item') => {
+    if (closed) return;
+    closed = true;
+    wrap.remove();
+    document.removeEventListener('keydown', esc, true);
+    if (returnFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
+    if (onClose) onClose(how);
+  };
+  const row = (item) => {
+    if (item.sep) return V.h('div.menu-sep', { role: 'separator' });
+    if (item.node) return typeof item.node === 'function' ? item.node(done) : item.node;
     const switches = typeof item.checked === 'boolean';
     return V.h('button.menu-item' + (item.danger ? '.danger' : '') + (switches ? '.menu-switch' : ''), {
       type: 'button', role: switches ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': switches ? String(item.checked) : null,
       onclick: () => { done(); item.onClick(); },
     }, item.icon ? V.icon(item.icon) : null, V.h('span', { text: item.label }),
     switches ? V.h('span.menu-state', { text: item.checked ? 'On' : 'Off' }) : null);
-  }));
-  const wrap = V.h('div.layer.menu-layer', { onmousedown: (event) => { if (event.target === wrap) done(); } }, list);
-  const done = () => { wrap.remove(); document.removeEventListener('keydown', esc, true); };
-  const esc = (event) => { if (event.key === 'Escape') { event.stopPropagation(); done(); } };
+  };
+  const list = V.h('div.menu' + (cls ? '.' + cls : ''), { role: 'menu', 'aria-label': label || null }, items.filter(Boolean).map(row));
+  const wrap = V.h('div.layer.menu-layer', { onmousedown: (event) => { if (event.target === wrap) done('outside'); } }, list);
+  const esc = (event) => { if (event.key === 'Escape') { event.stopPropagation(); done('escape'); } };
   document.addEventListener('keydown', esc, true);
   document.getElementById('layers').append(wrap);
   const width = list.offsetWidth, height = list.offsetHeight;
-  list.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-  list.style.top = (rect.bottom + height + 8 > window.innerHeight ? Math.max(8, rect.top - height - 4) : rect.bottom + 4) + 'px';
-  const first = list.querySelector('button');
+  if (align === 'up') {
+    list.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left)) + 'px';
+    list.style.top = Math.max(8, rect.top - height - 8) + 'px';
+  } else {
+    list.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
+    list.style.top = (rect.bottom + height + 8 > window.innerHeight ? Math.max(8, rect.top - height - 4) : rect.bottom + 4) + 'px';
+  }
+  // (Never past the bottom edge: on a short screen the menu, which scrolls past its max-height, sits higher instead.)
+  list.style.top = Math.max(8, Math.min(parseFloat(list.style.top), window.innerHeight - height - 8)) + 'px';
+  const first = list.querySelector('.menu-item') || list.querySelector('button');
   if (first) first.focus();
+  return { close: done, el: list };
 };
 
 V.toast = function toast(text, { kind = '', action, onAction, ms = 3200 } = {}) {
@@ -810,10 +882,16 @@ V.changeSize = (a, b) => {
   return a.length + b.length - 2 * (from + tail);
 };
 
-/* The PC app is told which theme shows (its window, the quick note box), and follows Windows' own. */
+/* The PC app is told which theme shows (its window, the quick note box), and follows Windows' own. A PC app new
+   enough to know Pure black (bridge call pureBlack) hears that too, first, so its window's background matches. */
 if (V.desktop) {
   V.on('pc:scheme', ({ scheme }) => V.theme.system(scheme));
-  const tell = () => { if (V.pc) V.pc.call('theme', { dark: V.theme.current() === 'dark' }).catch(() => {}); };
+  const tell = () => {
+    if (!V.pc) return;
+    if (V.pc.can('pureBlack')) V.pc.call('pureBlack', { on: V.theme.isBlack() }).catch(() => {});
+    V.pc.call('theme', { dark: V.theme.current() === 'dark' }).catch(() => {});
+  };
   V.on('theme', tell);
   window.addEventListener('DOMContentLoaded', tell);  // once cloud.js has made V.pc
+  V.theme.tellPc = tell;  // again once start.js knows which calls the PC app has (config's `can`)
 }

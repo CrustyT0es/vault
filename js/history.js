@@ -551,5 +551,53 @@ V.backup = (() => {
     return ui.card('Backups', ...rows);
   }
 
-  return { zip, crc32, utf8, build, markdown, safeName, download, toPc, card, refresh };
+  /* Settings > Notes & files (1.16): Download everything, and on the PC "Back up every week" (its last backup in its
+     hint, Back up now beside it); the backups folder and Restore under More options. A phone or Chromebook gets a
+     footnote saying where the rest is. Returns { rows, more, says, foot }. */
+  function settingsRows(ui) {
+    const rows = [ui.line('Download everything', 'Every note as a file, in its folder, plus your chats, in one ZIP. '
+      + 'Locked notes stay locked: they need your PIN.', V.button('Download', { icon: 'download', onClick: async () => {
+      if (V.chat) await V.chat.refresh();  // the chats from the other devices too
+      try { download(); } catch (error) { V.problem(error); }
+    } }), 'download-everything')];
+    const more = [];
+    const says = [];
+    let foot = '';
+    if (canBackUp()) {
+      if (!info) refresh().then((got) => { if (got) ui.draw(); });
+      const where = info && info.folder ? info.folder : 'Documents\\Vault backups';
+      const last = working ? 'Backing up...' : info && info.last ? `Last backup ${V.ago(info.last)}` : 'No backup on this PC yet';
+      rows.push(ui.line('Back up every week', `${last}${info && info.count ? ` · ${info.count} kept` : ''}. Into ${where}, `
+        + 'by itself, with your pictures and files; the newest 4 are kept.',
+      V.h('div.setting-buttons', {}, V.button('Back up now', { icon: 'download', disabled: working, onClick: async () => {
+        try { await toPc(); } catch (error) { V.problem(error); }
+        await refresh();
+        ui.draw();
+      } }), ui.toggle('backup')), 'back-up-every-week'));
+      more.push(ui.line('Your backups folder', where, V.button('Open', { icon: 'folder',
+        onClick: () => V.pc.call('showBackups').catch(V.problem) }), 'backups-folder'));
+      says.push('the backups folder');
+    }
+    if (canRestore()) {
+      more.push(ui.line('Restore from a backup', 'Put notes back from a backup on this PC, without losing anything newer.',
+        V.button('Restore', { icon: 'restore', onClick: () => restoreSheet(ui).catch(V.problem) })));
+      says.push('restore from a backup');
+    } else if (!V.desktop) {
+      const records = Object.values(((V.data.settings || {}).extra || {}).devices || {});
+      const pc = records.some((record) => record && record.kind === 'pc');
+      foot = pc ? 'Weekly backups, restoring one and searching inside photos and PDFs are on your PC.'
+        : 'Weekly backups, restoring one and searching inside photos and PDFs need Wefty on a Windows PC.';
+    }
+    return { rows, more, says, foot };
+  }
+
+  /* The PC's backups as the home's Notes & files line needs them: { on, last, count, folder }, or null (not a PC, or
+     not asked yet: asking draws Settings again). */
+  function backupInfo() {
+    if (!canBackUp()) return null;
+    if (!info) { refresh().then((got) => { if (got) V.emit('backup', 'info'); }); return null; }
+    return { on: !!(V.prefs && V.prefs.backup), last: info.last || '', count: info.count || 0, folder: info.folder || '' };
+  }
+
+  return { zip, crc32, utf8, build, markdown, safeName, download, toPc, card, refresh, rows: settingsRows, info: backupInfo };
 })();

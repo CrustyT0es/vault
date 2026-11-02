@@ -735,6 +735,6 @@ V.reminders = (() => {
   }
 
   const api = { parse, label, dayLabel, clock, remindAt, remindLabel, dayOf, calendarLink, ics, noteLink, consider, edit,
-    cardChip, inUpcoming, pending, group, upcoming, schedule, notify, icon, change, latest, openNote };
+    cardChip, inUpcoming, pending, group, groupOf, toggleDone, upcoming, schedule, notify, icon, change, latest, openNote };
   return api;
 })();

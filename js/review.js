@@ -118,8 +118,8 @@ V.review = (() => {
     return row && row.extra && isObject(row.extra.cards) ? keptFor(row.extra.cards, card) : undefined;
   }
 
-  /* -- decks: everything ('all'), a folder (with the folders inside it), a #tag, a note ('note:<id>'), a test
-     ('test:<note id>': what it covers) */
+  /* -- decks: everything ('all'), a folder (with the folders inside it), a folder's own cards ('own:<id>', not the
+     folders inside it: Today's rows), a #tag, a note ('note:<id>'), a test ('test:<note id>': what it covers) */
 
   const squash = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const liveFolder = (id) => { const f = id ? V.data.folders.get(id) : null; return f && !f.deleted ? f : null; };
@@ -129,6 +129,7 @@ V.review = (() => {
     if (!deck || deck === 'all') return () => true;
     if (deck === 'none') return (c) => !liveFolder(c.folder);
     if (deck.startsWith('note:')) { const id = deck.slice(5); return (c) => c.note === id; }
+    if (deck.startsWith('own:')) { const id = deck.slice(4); return (c) => c.folder === id; }  // its own cards only
     if (deck.startsWith('test:')) {
       const plan = planFor(V.data.notes.get(deck.slice(5)));
       return plan ? plan.covers : () => false;
@@ -145,7 +146,7 @@ V.review = (() => {
     if (!deck || deck === 'all') return 'everything';
     if (deck.startsWith('note:') || deck.startsWith('test:')) return V.noteTitle(V.data.notes.get(deck.slice(5)) || {});
     if (deck.startsWith('#')) return '#' + tagKey(deck);
-    const folder = liveFolder(deck);
+    const folder = liveFolder(deck.startsWith('own:') ? deck.slice(4) : deck);
     return folder ? folder.name : 'No folder';
   }
 
@@ -368,6 +369,20 @@ V.review = (() => {
     return { count: due.length, parts: shown };
   }
 
+  /* The cards due today by the folder each one is in (its own folder, not the one above it), in one pass: Today's
+     rows, which add up to the cards due. [{ deck: 'own:<id>' or 'none', folder, name, due }], most due first. */
+  function dueByFolder(at = now()) {
+    const by = new Map();
+    for (const card of at.list) {
+      if (!isDue(card, at)) continue;
+      const folder = liveFolder(card.folder);
+      const deck = folder ? 'own:' + folder.id : 'none';
+      if (!by.has(deck)) by.set(deck, { deck, folder, name: folder ? folder.name : 'No folder', due: 0 });
+      by.get(deck).due++;
+    }
+    return [...by.values()].sort((a, b) => b.due - a.due || a.name.localeCompare(b.name));
+  }
+
   /* "Bio test in 3 days · 42 cards left · ~14 a day" (`named`: false leaves the test's name out). */
   function countdown(plan, named = true) {
     const when = inDays(plan.days);
@@ -423,7 +438,8 @@ V.review = (() => {
           : V.h('strong', { text: 'All done for today' })),
         line ? null : V.h('p.hint.review-later', { text: nextDue(at) }),
         V.h('div.review-go', {},
-          V.button(line ? `Review ${line.count}` : 'Practise', { kind: 'primary', icon: 'cards', onClick: () => start('all') }),
+          // ('tonal': the screen's main iris button is the new-note one beside it; in light it looks the same)
+          V.button(line ? `Review ${line.count}` : 'Practise', { kind: 'tonal', icon: 'cards', onClick: () => start('all') }),
           V.button('Learn', { icon: 'learn', onClick: () => V.learn.forDeck('all') }))),
       tests.length ? [V.h('h2.list-section', {}, V.h('span', { text: 'Tests coming up' }), V.h('span.count', { text: String(tests.length) })),
         tests.map(testRow)] : null,
@@ -608,5 +624,6 @@ V.review = (() => {
 
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
+    dueByFolder, nextDue,
     start, study, session, question, answerOf, shuffle, cardsOf, pending: () => pending };
 })();

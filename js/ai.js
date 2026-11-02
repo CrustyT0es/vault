@@ -1933,40 +1933,16 @@ V.ai = (() => {
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
 
-  /* The free Gemini key row, the AI card's first: paste a free Google key, on any device (on the PC with Jarvis too,
-     1.8.2: only Claude's paid key stays with Jarvis). Every state has .ai-gemini-row (setUp finds it there). */
-  function geminiKeyLine(ui) {
-    const row = (el) => { el.classList.add('ai-gemini-row'); return el; };
-    if (!known) {
-      if (!looking) check().catch(() => {});  // Settings is drawn again when it knows ('ai')
-      return row(ui.line('Gemini key (free)', 'Checking...', null));  // (its box would be drawn again under the typing)
-    }
-    if ((known.failed && !known.gemini) || known.gemini === null) {  // (null: the cloud didn't say in time)
-      return row(ui.line('Gemini key (free)', 'Couldn\'t check just now (are you online?).', V.button('Check again', {
-        onClick: () => { known = null; ui.draw(); } })));
-    }
-    // No key, as the last look found: looked at again now and then (a key set up on another device since shows).
-    if (!known.gemini) recheck();  // (its answer draws Settings again: the 'ai' event)
-    if (known.gemini) {
-      const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
-      const remove = V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
-        const sure = await V.confirm('Remove the Gemini key?', 'Chat and the note-taker stop working on all your devices until '
-          + 'it\'s set up again.', { ok: 'Remove', danger: true });
-        if (!sure) return;
-        try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
-        ui.draw();
-      } });
-      return row(ui.line('Gemini key (free)', (invited() ? 'In your private storage in the Wefty cloud of the person who '
-          + 'invited you, so they could read it: remove it here any time, or delete the key in Google AI Studio. '
-        : 'Kept in your own cloud, never shown. ') + (claudeOn()
-        ? (notesClaude()
-          ? 'New chats start on Gemini; Claude writes your notes.'
-          : 'New chats start on Gemini, and it writes your notes, for free.')
-        : 'Chat and the note-taker use it, for free.'),
-      V.h('div.setting-buttons', {}, ready, remove)));
-    }
-    const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Gemini API key' });
+  /* The free Gemini key's three steps, its box and the school / wifi / 18+ words, in a sheet of their own (Settings >
+     AI's "Set up", and "Set up free Gemini" from Chat and the note-taker). A sheet isn't drawn again when Settings
+     is, so a half-typed key keeps its words and its caret. Saved: the sheet closes and the page says so. */
+  let keySheet = null;
+  function geminiSheet(ui) {
+    if (keySheet) return keySheet;
+    const box = V.h('input.field', { type: 'password', placeholder: 'Paste the key from AI Studio', autocomplete: 'off',
+      spellcheck: 'false', 'aria-label': 'Gemini API key' });
     const save = V.button('Save', { kind: 'primary', onClick: async () => {
+      if (save.disabled) return;
       save.disabled = true;
       save.lastChild.textContent = 'Checking…';  // (with Google: a few seconds at most)
       try {
@@ -1978,6 +1954,7 @@ V.ai = (() => {
             : saved.why === 'slow' ? 'Google didn\'t answer in time to check it'
             : 'Google couldn\'t be reached from this network to check it'}, so it's checked the first time Wefty uses it.`,
         { ms: saved.why === 'bad' ? 9000 : 6000 });
+        if (keySheet) keySheet.close();
         ui.draw();
       } catch (error) {
         V.toast(error.message || String(error), { kind: 'err', ms: 9000 });  // (long enough to read Google's reason)
@@ -1986,26 +1963,65 @@ V.ai = (() => {
         save.lastChild.textContent = 'Save';
       }
     } });
-    box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
+    box.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); save.click(); } });
     const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
-    return row(V.h('div.ai-key.ai-key-gemini', {},
-      ui.line('Gemini key (free)', 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google '
-        + `(new ones start with AQ.): Wefty checks it with Google, then it's ${kept()}.`, null),
-      V.h('ol.steps.ai-steps', {},
-        V.h('li', { text: 'Tap "Get a free key" and sign in with your own Google account (school accounts usually can\'t make keys).' }),
-        V.h('li', { text: 'Tap "Create API key", then copy the key.' }),
-        V.h('li', { text: 'Paste it here and tap Save.' })),
-      V.h('div.ai-key-row', {}, box, save),
-      V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }),
-      V.h('p.hint.ai-school', { text: 'A school Google account usually can\'t make a key (schools switch it off), so use your '
-        + 'own personal one: on a school Chromebook, make the key on your phone, and Wefty uses it on all your devices. If a '
-        + 'wifi blocks Gemini, use mobile data, or let your messages wait and go when you\'re home. Google says you must be '
-        + '18 or older to use the Gemini API.' })));
+    const step = (...bits) => V.h('li', {}, bits.map((bit) => (Array.isArray(bit) ? V.h('strong', { text: bit[0] }) : bit)));
+    keySheet = V.sheet({
+      title: 'Set up the free Gemini',
+      content: V.h('div.ai-key.ai-key-gemini.ai-gemini-sheet', {},
+        V.h('p', { text: 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google (new ones start with AQ.).' }),
+        V.h('ol.steps.ai-steps', {},
+          step('Tap ', ['Get a free key'], ' and sign in with your own Google account.'),
+          step('Tap ', ['Create API key'], ', then copy the key.'),
+          step('Paste it here and tap ', ['Save'], '.')),
+        V.h('div.setting-buttons', {}, V.button('Get a free key', { kind: 'tonal', icon: 'open', onClick: open })),
+        V.h('div.ai-key-row', {}, box, save),
+        V.h('p.hint', { text: `Wefty checks it with Google, then it's ${kept()}.` }),
+        V.h('p.hint.ai-school', { text: 'A school Google account usually can\'t make a key (schools switch it off), so use your '
+          + 'own personal one: on a school Chromebook, make the key on your phone, and Wefty uses it on all your devices. If a '
+          + 'wifi blocks Gemini, use mobile data, or let your messages wait and go when you\'re home. Google says you must be '
+          + '18 or older to use the Gemini API.' })),
+      onClose: () => { keySheet = null; },
+    });
+    return keySheet;
   }
 
-  /* One of the AI card's switches for every device (`name` its label, `cls` its row's class): `set(want)` writes it
-     (V.cloud.changeExtra, given a time limit there); while that's under way the switch waits, and if it can't be
-     written it goes back and says so. */
+  const removeGemini = (ui) => V.button('Remove', { kind: 'danger-quiet', onClick: async () => {
+    const sure = await V.confirm('Remove the Gemini key?', 'Chat and the note-taker stop working on all your devices until '
+      + 'it\'s set up again.', { ok: 'Remove', danger: true });
+    if (!sure) return;
+    try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
+    ui.draw();
+  } });
+
+  /* The Gemini key's row, AI's first: Set up (the sheet) while there's no key; once there is, "✓ Set up" (a friend's
+     with Remove in sight, as their key is in someone else's cloud; the owner's Remove is under More options). Every
+     state has .ai-gemini-row (setUp and Settings' search find it there). */
+  function geminiKeyLine(ui) {
+    const row = (el) => { el.classList.add('ai-gemini-row'); return el; };
+    const line = (hint, control) => row(ui.line('Gemini key', hint, control, 'gemini-key'));
+    if (!known) {
+      if (!looking) check().catch(() => {});  // Settings is drawn again when it knows ('ai')
+      return line('Checking...', null);
+    }
+    if ((known.failed && !known.gemini) || known.gemini === null) {  // (null: the cloud didn't say in time)
+      return line('Couldn\'t check just now (are you online?).', V.button('Check again', {
+        onClick: () => { known = null; ui.draw(); } }));
+    }
+    // No key, as the last look found: looked at again now and then (a key set up on another device since shows).
+    if (!known.gemini) recheck();  // (its answer draws Settings again: the 'ai' event)
+    if (known.gemini) {
+      const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
+      return line(invited() ? 'In your private storage in the Wefty cloud of the person who invited you, so they could '
+        + 'read it: remove it here any time, or delete the key in Google AI Studio.' : 'Kept in your own cloud, never shown.',
+      V.h('div.setting-buttons', {}, ready, invited() ? removeGemini(ui) : null));
+    }
+    return line('Not set up yet. Chat and the note-taker need it. It\'s free, and takes about two minutes.',
+      V.button('Set up', { kind: 'primary', onClick: () => geminiSheet(ui) }));
+  }
+
+  /* "Use Claude too" and "Notes written by" write to the account (V.cloud.changeExtra, given a time limit there);
+     while that's under way the control waits, and if it can't be written it goes back and says so. */
   function accountSwitch(ui, { name, hint, cls, on, set, said }) {
     const box = V.h('input.switch', { type: 'checkbox', checked: on, 'aria-label': name, onchange: async () => {
       const want = box.checked;
@@ -2036,38 +2052,58 @@ V.ai = (() => {
             : 'Claude is on: pick it in Chat. It writes your notes too until the free Gemini is set up.') });
   }
 
-  /* "Write notes with Claude", under "Use Claude too" while it's on (for every device too). */
-  function notesSwitch(ui) {
-    return accountSwitch(ui, { name: 'Write notes with Claude', cls: 'ai-notes-switch', on: notesClaude(),
-      set: setNotesClaude,
-      hint: 'The note-taker\'s notes. When it\'s off, Gemini writes them for free (Claude only when there\'s no Gemini key).',
-      said: (want) => (want ? 'Claude writes your notes now, when its key is set up.'
-        : 'Gemini writes your notes now, for free.') });
+  /* "Notes written by: Fast | Smart | Claude" (Claude only while "Use Claude too" is on): one row for the account's two
+     settings, extra.ai.notes_gemini ('smart' or 'fast') and extra.ai.notes_claude. */
+  let notesBusy = false;
+  const notesBy = () => (claudeOn() && notesClaude() ? 'claude' : notesTier() === 'smart' ? 'smart' : 'fast');
+  async function pickNotes(ui, want) {
+    if (notesBusy || want === notesBy()) return;
+    notesBusy = true;
+    ui.draw();
+    try {
+      if (want === 'claude') {
+        await setNotesClaude(true);
+      } else {
+        if (notesClaude()) await setNotesClaude(false);
+        if ((notesTier() === 'smart') !== (want === 'smart')) await setNotesGemini(want === 'smart');
+      }
+      V.toast(want === 'claude' ? 'Claude writes your notes now, when its key is set up.'
+        : want === 'smart' ? 'Gemini Smart writes your notes now: better, a little slower.'
+          : 'Gemini Fast writes your notes now: quick.', { ms: 5000 });
+    } catch (error) {
+      V.problem(error);
+    } finally {
+      notesBusy = false;
+      ui.draw();
+    }
   }
 
-  /* "Smarter Gemini notes", shown while Gemini writes the notes (for every device too): off, Gemini Fast writes them
-     (the quickest model here); on, Gemini Smart (Flash first). */
-  function notesTierSwitch(ui) {
-    return accountSwitch(ui, { name: 'Smarter Gemini notes', cls: 'ai-notes-tier-switch', on: notesTier() === 'smart',
-      set: setNotesGemini,
-      hint: 'Off: Gemini Fast writes your notes (quick). On: Gemini Smart writes them (better, but slower and busy more often).',
-      said: (want) => (want ? 'Gemini Smart writes your notes now: better, a little slower.'
-        : 'Gemini Fast writes your notes now: quick.') });
+  function notesLine(ui) {
+    const now = notesBy();
+    const choices = [['fast', 'Fast'], ['smart', 'Smart']].concat(claudeOn() ? [['claude', 'Claude']] : []);
+    const pick = V.h('div.segmented.ai-notes-by', { role: 'radiogroup', 'aria-label': 'Notes written by' },
+      choices.map(([value, label]) => V.h('button', { type: 'button', role: 'radio', 'aria-checked': String(now === value),
+        disabled: notesBusy, dataset: { by: value }, onclick: () => pickNotes(ui, value) }, V.h('span', { text: label }))));
+    const waiting = now === 'claude' && known && !known.failed && !has('claude') && has('gemini');
+    return V.h('div.setting.setting-stack.ai-notes-row', { dataset: { setting: 'notes-written-by' } },
+      V.h('div.setting-text', {}, V.h('strong', { text: 'Notes written by' }),
+        V.h('span', { text: 'Fast and Smart are Gemini, and free. Smart writes better notes, a little slower.' + (claudeOn() ? ' Claude is paid.' : '') + (waiting ? ' Claude\'s key isn\'t set up here yet, so Gemini writes them meanwhile.' : '') })),
+      pick);
   }
 
-  /* "Set up free Gemini" (the Chat tab, the note-taker): Settings > AI, at the Gemini key's row (its box ready for the
-     key where there's a keyboard), or (`what` 'claude') at "Use Claude too". */
+  /* "Set up free Gemini" (the Chat tab, the note-taker): Settings > AI at the Gemini key's row, with its sheet open
+     while there's no key; or (`what` 'claude') at "Use Claude too". */
   function setUp(what = 'gemini') {
-    V.go('settings');
-    const card = [...document.querySelectorAll('.settings-card')].find((c) => (c.querySelector('h2') || {}).textContent === 'AI');
-    if (!card) return;
-    const spot = card.querySelector(what === 'claude' ? '.ai-claude-switch' : '.ai-gemini-row') || card;
-    spot.scrollIntoView({ block: 'center' });
-    const box = what === 'gemini' ? spot.querySelector('input[type=password]') : null;
-    if (box && V.device !== 'phone') box.focus({ preventScroll: true });
+    const row = what === 'claude' ? '.ai-claude-switch' : '.ai-gemini-row';
+    if (V.settings && V.settings.open) V.settings.open('ai', { row }); else V.go('settings');
+    if (what === 'claude' || has('gemini')) return;
+    if (known && !known.failed && known.gemini === false) geminiSheet({ draw: () => V.settings.draw() });
   }
 
-  function card(ui) {
+  /* Settings > AI, as three sections (Gemini, Claude, Note-taker), the privacy footnote, and what's rarely needed
+     under More options: Check Gemini, Check Claude and removing a key. Returns { parts, more, says } (js/settings.js
+     puts them on the page with More options at its foot). */
+  function page(ui) {
     if (!owedRead) readOwed().then(() => { if (owed) ui.draw(); });
     const now = tally();
     const limit = V.button('Change limit', { onClick: async () => {
@@ -2078,8 +2114,15 @@ V.ai = (() => {
       if (!Number.isFinite(dollars) || dollars < 0) return V.toast('Type an amount, like 1.00.', { kind: 'err' });
       try { await setLimit(dollars); V.toast(dollars ? `The limit is ${money(dollars)} a month.` : 'No limit.'); } catch (error) { V.problem(error); }
     } });
-    const spent = `${money(now.spent)} of ${now.limit ? money(now.limit) : 'no limit'}`
+    const spent = `${money(now.spent)} of ${now.limit ? `your ${money(now.limit)} limit` : 'no limit'}`
       + (now.calls ? ` · ${now.calls} request${now.calls === 1 ? '' : 's'}` : '');
+    const share = now.limit > 0 ? Math.min(1, now.spent / now.limit) : 0;
+    const month = V.h('div.setting.ai-month', { dataset: { setting: 'this-month' } },
+      V.h('div.setting-text', {}, V.h('strong', { text: `This month (${monthName()})` }), V.h('span', { text: spent }),
+        now.limit > 0 ? V.h('span.ai-meter', { role: 'meter', 'aria-label': 'Spent of the limit', 'aria-valuemin': '0',
+          'aria-valuemax': String(now.limit), 'aria-valuenow': String(Math.min(now.spent, now.limit)), dataset: { full: share >= 1 ? '1' : null } },
+        V.h('span', { style: { width: `${Math.round(share * 1000) / 10}%` } })) : null),
+      limit);
     // "Check Claude": one plain line saying whether this network lets Claude through. The result replaces the hint.
     const check = V.h('span.ai-check', { role: 'status', text: 'See if this network lets Claude through.' });
     const checkBtn = V.button('Check Claude', { onClick: async () => {
@@ -2129,27 +2172,49 @@ V.ai = (() => {
           timeBtn.disabled = false;
         }
       } });
-      geminiRow = V.h('div.ai-gemini-check', {},
-        V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Gemini speed' }), hint), timeBtn), net, times,
-        lead);
+      geminiRow = V.h('div.setting.ai-gemini-check', { dataset: { setting: 'check-gemini' } },
+        V.h('div.setting-text', {}, V.h('strong', { text: 'Gemini speed' }), hint, net, times, lead), timeBtn);
     }
-    // Gemini first (the main thing, and which Gemini writes the notes while Gemini does), then "Use Claude too";
-    // Claude's key, its check and the month's spending (the monthly limit is Claude's alone) only while it's on.
     const on = claudeOn();
-    return ui.card('AI',
-      geminiKeyLine(ui),
+    // Claude's key: on the page while it still needs setting up; once it's in the cloud, under More options.
+    const claudeKey = on ? keyLine(ui) : null;
+    const keySet = !!(known && known.cloud);
+    const tag = (section, word) => {
+      const h2 = section && section.querySelector ? section.querySelector(':scope > h2') : null;
+      if (h2) h2.dataset.tag = word;
+      return section;
+    };
+    const more = [
       geminiRow,
-      has('gemini') && brain() === 'gemini' ? notesTierSwitch(ui) : null,
-      claudeSwitch(ui),
-      on ? notesSwitch(ui) : null,
-      on ? keyLine(ui) : null,
-      on ? V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn) : null,
-      on ? ui.line(`This month (${monthName()})`, spent, limit) : null,
-      V.h('p.hint.ai-privacy', { text: on
-        ? 'Gemini (by Google) and Claude (by Anthropic) only read what you send them: a transcript when you make notes, and '
-          + 'your messages in the Chat tab. Neither hears the sound itself. Gemini is free, so it isn\'t counted here.'
-        : 'Gemini (by Google) only reads what you send it: a transcript when you make notes, and your messages in the Chat '
-          + 'tab. It never hears the sound itself, and it\'s free.' }));
+      on ? V.h('div.setting.ai-reach', { dataset: { setting: 'check-claude' } },
+        V.h('div.setting-text', {}, V.h('strong', { text: 'Reach Claude' }), check), checkBtn) : null,
+      !invited() && has('gemini') && known && known.gemini
+        ? ui.line('Remove the Gemini key', 'Chat and the note-taker stop until it\'s set up again.', removeGemini(ui), 'remove-gemini-key') : null,
+      on && keySet ? claudeKey : null,
+    ].filter(Boolean);
+    const says = [has('gemini') ? 'Check Gemini' : '', on ? 'Check Claude' : '',
+      (!invited() && has('gemini')) || (on && keySet) ? 'remove a key' : ''].filter(Boolean);
+    return {
+      parts: [
+        tag(ui.card('Gemini', geminiKeyLine(ui)), 'free'),
+        tag(ui.card('Claude', claudeSwitch(ui), on ? month : null, on && !keySet ? claudeKey : null), 'paid'),
+        ui.card('Note-taker', notesLine(ui)),
+        V.h('p.hint.set-foot.ai-privacy', { text: on
+          ? 'Gemini (by Google) and Claude (by Anthropic) only read what you send them: your messages in Chat, and a '
+            + 'transcript when you make notes. Neither hears the sound itself. Gemini is free, so it isn\'t counted here.'
+          : 'Gemini (by Google) only reads what you send it: your messages in Chat, and a transcript when you make notes. It '
+            + 'never hears the sound itself, and it\'s free.' }),
+      ],
+      more,
+      says: says.join(' · '),
+    };
+  }
+
+  /* The whole AI page as one list (an older caller of `card`): its sections and More options. */
+  function card(ui) {
+    const built = page(ui);
+    const more = ui.more ? ui.more(built.says, built.more) : built.more;
+    return [built.parts, more];
   }
 
   // Both keys go with the person: the next one to sign in on this device (a friend, say) never uses them.
@@ -2164,7 +2229,7 @@ V.ai = (() => {
 
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, checkGemini, timingLine, networkLine, getGeminiKey, saveGeminiKey, removeGeminiKey,
-    forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2, invited, KEPT_THEIRS,
+    forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2, invited, KEPT_THEIRS, page, geminiSheet,
     // How quickly each Gemini model starts answering here, and the others this key may use (tests, Settings).
     speed: { order: (use = 'chat', tier = 'fast') => ranked(use, { tier }), headFor, typical, extras, failing,
       slow: (model, use = 'chat') => isSlow(model, use), forget: forgetSpeed,

@@ -41,7 +41,7 @@ V.invites = (() => {
   const JOINED_SLACK = 5000;  // the cloud's sign-in service and its helper may not quite agree on the time
   const waits = { tick: 30000, poll: 15000 };  // the join sheet's countdown, and asking who joined (tests shorten them)
   const TOKENS_PAGE = 'https://supabase.com/dashboard/account/tokens';
-  const GONE = 'Wefty\'s helper isn\'t in your cloud any more. Set it up again in Wefty on your PC: Settings > Invite people > Set up.';
+  const GONE = 'Wefty\'s helper isn\'t in your cloud any more. Set it up again in Wefty on your PC: Settings > Friends > Set up.';
   const KIND_NAMES = { pc: 'PC', android: 'Android phone', iphone: 'iPhone', ipad: 'iPad', chromebook: 'Chromebook', browser: 'Browser' };
   // { how: 'pc' | 'old' | 'helper', on, helper (its note), local (the key on this PC), current, version (the helper's
   // own, as it said hello: phones and Chromebooks) }
@@ -517,7 +517,7 @@ V.invites = (() => {
   function helperRow(ui, { since, title, about, button, cant, what }) {
     if (state.how === 'helper') {
       return state.version >= since ? ui.line(title, about, button(false))
-        : ui.line(title, 'Update the helper in Wefty on your PC first (Settings > Invite people > Update). No Update there? '
+        : ui.line(title, 'Update the helper in Wefty on your PC first (Settings > Friends > Update the helper). No Update there? '
           + 'Open Jarvis and click Update first.', null);
     }
     if (state.how !== 'pc') return null;  // (1.8's PC part: a Jarvis update brings the helper first)
@@ -538,15 +538,17 @@ V.invites = (() => {
   }
 
   /* The card's "Join with a QR code" row: it takes the helper, at version 2 or newer. */
-  const joinRow = (ui) => helperRow(ui, { since: JOIN_SINCE, title: 'Join with a QR code',
-    about: 'Anyone who scans it in the next 30 minutes gets their own Wefty here: they type their name, e-mail and a password.',
-    button: (disabled) => V.button('Show QR code', { kind: 'primary', icon: 'qr', disabled, onClick: () => joinSheet(ui) }),
+  const joinRow = (ui, short = false) => helperRow(ui, { since: JOIN_SINCE, title: 'Join with a QR code',
+    about: short ? 'Anyone who scans it in the next 30 minutes gets their own Wefty.'
+      : 'Anyone who scans it in the next 30 minutes gets their own Wefty here: they type their name, e-mail and a password.',
+    button: (disabled) => V.button(short ? 'Show' : 'Show QR code', { kind: short ? '' : 'primary', icon: 'qr', disabled,
+      onClick: () => joinSheet(ui) }),
     cant: 'make join codes', what: 'Join codes' });
 
   /* "Announcements" (js/news.js): an update, a poll or a note that pops up for everyone. The helper's version 3. */
-  const newsRow = (ui) => (V.news ? helperRow(ui, { since: NEWS_SINCE, title: 'Announcements',
-    about: 'Post an update, a poll or a note for everyone in your Wefty cloud.',
-    button: (disabled) => V.button('New announcement', { kind: 'primary', icon: 'plus', disabled, onClick: () => V.news.compose() }),
+  const newsRow = (ui, title = 'Announcements', about = 'Post an update, a poll or a note for everyone in your Wefty cloud.',
+    words = 'New announcement') => (V.news ? helperRow(ui, { since: NEWS_SINCE, title, about,
+    button: (disabled) => V.button(words, { kind: words === 'Write' ? '' : 'primary', icon: 'plus', disabled, onClick: () => V.news.compose() }),
     cant: 'post announcements', what: 'Announcements' }) : null);
 
   async function remove(ui, person) {
@@ -599,7 +601,7 @@ V.invites = (() => {
     }
     // (The phone can't tell how new the PC part is: one from before the helper only offers 1.8's Turn on.)
     return ui.card('Invite people', ui.line('Give friends their own Wefty', 'Set up invites once in Wefty on your PC '
-      + '(Settings > Invite people > Set up). Don\'t see Set up there? Update it first: open Jarvis and click Update. After '
+      + '(Settings > Friends > Set up). Don\'t see Set up there? Update it first: open Jarvis and click Update. After '
       + 'that you can invite people from here too, and see stats.', null));
   }
 
@@ -691,7 +693,178 @@ V.invites = (() => {
       V.h('div.setting-buttons.stats-foot', {}, V.h('span.hint', { text: `Counted ${V.ago(s.at)}` }), again));
   }
 
-  return { card, statsCard, state: () => state, refresh, call, findHelper, linkFor, joinLinkFor, waits };
+  /* -- Settings > Friends (1.16): three sections and More options, built from the same rows as the cards above.
+     "Invite people": Invite someone, Join with a QR code, the newest few people (a tap, or their ⋯, opens their own
+     numbers, New code and Remove), then "All N people". "Announcements" (js/news.js): New announcement and the newest
+     few. "Stats": active today, this week and this month, as three tiles. Under More options: the rest of the stats,
+     feedback from everyone, Invite from your phone too, Update the helper (lifted onto the page: the cloud's helper
+     is older than this PC's), and Turn off invites. Invites off: only what turns them on. */
+
+  const PEOPLE_SHOWN = 5;
+  const newestFirst = (list) => [...list].sort((a, b) => String(b.invitedAt || '').localeCompare(String(a.invitedAt || '')));
+  const statsOf = (person) => (stats && Array.isArray(stats.list) ? stats.list.find((one) => one.id === person.id) : null) || null;
+  const letterOf = (person) => (Array.from(String(person.name || person.email || '?').trim())[0] || '?').toUpperCase();
+
+  /* What a person's line says: how they joined, and when they were last about. */
+  function personWords(person) {
+    const own = statsOf(person);
+    const when = (own && own.active) || person.signedIn || '';
+    if (person.state === 'waiting') {
+      return person.signedIn ? 'Signed in, hasn\'t chosen a password yet' : `Invited ${V.ago(person.invitedAt)} · waiting`;
+    }
+    return `${person.via === 'qr' ? 'Joined with the QR code' : 'Joined'}${when ? ` · active ${V.ago(when)}` : ''}`;
+  }
+
+  async function newCode(person) {
+    try { show(await call('invite', { name: person.name, email: person.email })); } catch (error) { V.problem(error); }
+  }
+
+  /* A person's own sheet: their e-mail, how they joined, their numbers (once the stats are in), New code and Remove. */
+  function personSheet(ui, person) {
+    const own = statsOf(person);
+    const row = (label, words) => V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: label }),
+      V.h('span', { text: words })));
+    const numbers = own ? [plural(own.notes || 0, 'note'), own.bytes !== null && own.bytes !== undefined ? V.size(own.bytes) : '',
+      own.devices ? plural(own.devices, 'device') : ''].filter(Boolean).join(' · ') : '';
+    V.sheet({
+      title: person.name || person.email,
+      content: V.h('div.person-sheet', { dataset: { person: person.id, state: person.state } },
+        row('E-mail', person.email || ''),
+        row(person.state === 'waiting' ? 'Waiting' : 'Joined', personWords(person)),
+        numbers ? row('In their Wefty', numbers) : stats ? null : V.h('p.hint', { text: 'Their numbers show once the stats are counted.' }),
+        V.h('p.hint', { text: 'Removing someone deletes their account and everything in it: their notes, files and clipboard.' })),
+      actions: [
+        person.state === 'waiting' ? { label: 'New code', onClick: () => { newCode(person); } } : null,
+        { label: 'Remove', kind: 'danger', icon: 'trash', onClick: () => { remove(ui, person); } },
+        { label: 'Done' },
+      ].filter(Boolean),
+    });
+  }
+
+  function personRow(ui, person) {
+    const name = person.name || person.email;
+    const row = V.h('div.setting.invite-person', { dataset: { state: person.state, person: person.id || '' },
+      onclick: (event) => { if (!event.target.closest('button')) personSheet(ui, person); } },
+    V.h('span.av', { text: letterOf(person), 'aria-hidden': 'true' }),
+    V.h('div.setting-text', {}, V.h('strong', { text: name }), V.h('span', { text: personWords(person) })),
+    V.h('div.setting-buttons', {},
+      person.state === 'waiting' ? V.button('New code', { kind: 'quiet', onClick: () => newCode(person) }) : null,
+      V.iconButton('more', `${name}: numbers, new code or remove`, () => personSheet(ui, person), 'quiet')));
+    return row;
+  }
+
+  function everyoneSheet(ui) {
+    const list = newestFirst(people || []);
+    V.sheet({
+      title: `All ${plural(list.length, 'person', 'people')}`,
+      content: V.h('div.invite-everyone', {}, list.map((person) => personRow(ui, person))),
+      actions: [{ label: 'Done' }],
+    });
+  }
+
+  /* { joined, waiting } of the people invited, once they've been asked about (the home's Friends line); else null. */
+  function counts() {
+    if (!people) return null;
+    return { joined: people.filter((p) => p.state !== 'waiting').length, waiting: people.filter((p) => p.state === 'waiting').length };
+  }
+
+  /* The rest of the stats (under More options): people, devices, versions, notes and files, feedback, when counted. */
+  function statsRows(ui) {
+    if (!stats) return [];
+    const s = stats;
+    const folks = s.people || {};
+    const again = V.button(statsAsking ? 'Counting...' : 'Refresh', { icon: 'restore', disabled: !!statsAsking,
+      onClick: () => { statsTrouble = ''; loadStats(ui); ui.draw(); } });
+    return [
+      ui.line('People', `${folks.joined || 0} joined · ${folks.waiting || 0} waiting for their invite`, null, 'stats-people'),
+      ui.line('Devices in use', listed(s.devices, KIND_NAMES) || 'None yet: each Wefty checks in once a day.', null, 'stats-devices'),
+      ui.line('Wefty versions', listed(s.versions, { other: 'Other' }) || 'None yet.', null, 'stats-versions'),
+      ui.line('Notes and files', plural(s.notes || 0, 'note') + (s.storage
+        ? ` · ${plural(s.storage.files || 0, 'file')} · ${V.size(s.storage.bytes || 0)}`
+        : ' (files aren\'t counted in this cloud yet: set the helper up again on your PC to add the counter)'), null, 'stats-notes'),
+      s.feedback !== null && s.feedback !== undefined ? ui.line('Feedback waiting', s.feedback
+        ? `${plural(s.feedback, 'piece')}: your PC collects it into your Feedback folder.` : 'None.', null, 'stats-feedback') : null,
+      ui.line(`Counted ${V.ago(s.at)}`, 'Only counts, sizes and times: never what\'s in anyone\'s notes or files. Downloads: '
+        + 'not counted, as Wefty has no trackers. The people who joined are the count that\'s real.', again, 'stats-counted'),
+    ];
+  }
+
+  function statsSection(ui) {
+    if (!owner() || !state || !state.on || state.how === 'old') return null;
+    if (!stats && !statsAsking && !statsTrouble) loadStats(ui);
+    if (!stats) {
+      const again = V.button('Try again', { icon: 'restore', onClick: () => { statsTrouble = ''; loadStats(ui); ui.draw(); } });
+      return ui.card('Stats', ui.line(statsTrouble ? 'Couldn\'t count just now' : 'Counting...',
+        statsTrouble ? (offline(statsTrouble) ? 'You\'re offline.' : statsTrouble) : '', statsTrouble ? again : null));
+    }
+    const active = stats.active || {};
+    const tile = (n, words) => V.h('div.card.stats-tile', {}, V.h('strong', { text: String(n || 0) }), V.h('span', { text: words }));
+    const section = ui.card('Stats', V.h('div.stats-tiles', { role: 'group', 'aria-label': 'Active, you and the people you invited' },
+      tile(active.day, 'active today'), tile(active.week, 'past week'), tile(active.month, 'past month')));
+    section.classList.remove('card');
+    section.classList.add('stats-section');
+    return section;
+  }
+
+  function page(ui) {
+    const lift = ui.lift || ((row) => row);
+    if (!owner()) return { parts: [], more: [], says: '' };
+    if (V.desktop && !newPc() && !oldPc()) return { parts: [], more: [], says: '' };
+    if (!state) {
+      refresh(ui);
+      return { parts: [ui.card('Invite people', ui.line('Checking...', '', null))], more: [], says: '' };
+    }
+    if (state.failed) {
+      return { parts: [ui.card('Invite people', ui.line('Couldn\'t check your invites', offline(trouble) ? 'You\'re offline.' : trouble,
+        tryAgain(ui)))], more: [], says: '' };
+    }
+    const feedback = V.feedback && V.feedback.everyone ? V.feedback.everyone(ui) : null;
+    if (!state.on) return { parts: [offCard(ui)], more: feedback ? [feedback] : [], says: feedback ? 'Feedback from everyone' : '' };
+    // Invite people
+    const top = [ui.line('Invite someone', 'They get a link that signs them in once.',
+      V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) })), joinRow(ui, true)];
+    const list = [];
+    if (trouble) list.push(ui.line('Couldn\'t load the people you invited', offline(trouble) ? 'You\'re offline.' : trouble, tryAgain(ui)));
+    const everyone = newestFirst(people || []);
+    for (const person of everyone.slice(0, PEOPLE_SHOWN)) list.push(personRow(ui, person));
+    if (people && !people.length) list.push(ui.line('Nobody yet', 'The people you invite show here.', null));
+    if (everyone.length > PEOPLE_SHOWN) {
+      list.push(V.h('button.invite-all', { type: 'button', onclick: () => everyoneSheet(ui) },
+        V.h('span', { text: `All ${everyone.length} people` }), V.icon('chevron')));
+    }
+    const peopleCard = ui.card('', ...list);
+    peopleCard.classList.add('invite-people-list');
+    // Announcements (js/news.js): New announcement, then the newest few.
+    const write = newsRow(ui, 'New announcement', 'An update, a poll or a note that pops up for everyone.', 'Write');
+    const news = V.news && V.news.rows ? V.news.rows(ui) : [];
+    const more = [...statsRows(ui), feedback];
+    let says = ['the other stats', feedback ? 'feedback from everyone' : ''];
+    if (state.how === 'pc' && !state.helper) {
+      more.push(ui.line('Invite from your phone too', 'Set up Wefty\'s helper once (with a Supabase access token), and your '
+        + 'phone and Chromebook can invite people and see stats too.', V.button('Set up', { onClick: () => setUpSheet(ui) })));
+      says.push('invite from your phone too');
+    } else if (state.how === 'pc' && Number(state.helper.version) < state.current) {
+      more.push(lift(ui.line('Update the helper', 'This Wefty has a newer helper for your cloud. Paste an access token to put it in.',
+        V.button('Update', { kind: 'primary', onClick: () => setUpSheet(ui, true) }))));
+    }
+    if (state.how === 'old') { more.push(updateLine(ui)); says.push('updates'); }
+    if (state.how === 'helper') more.push(ui.line('Turn off invites', 'To turn invites off, use Wefty on your PC.', null, 'turn-off-invites'));
+    else {
+      more.push(ui.line('Turn off invites', 'Everyone you invited keeps their Wefty; you just can\'t invite or remove anyone '
+        + 'until you turn it on again.', V.button('Turn off invites', { kind: 'danger-quiet', onClick: () => turnOff(ui) }), 'turn-off-invites'));
+    }
+    says.push('turn off invites');
+    says = says.filter(Boolean);
+    return {
+      parts: [ui.card('Invite people', ...top), peopleCard,
+        write || news.length ? ui.card('Announcements', write, news) : null,
+        statsSection(ui)],
+      more: more.filter(Boolean),
+      says: says.join(' · ').replace(/^./, (c) => c.toUpperCase()),
+    };
+  }
+
+  return { card, statsCard, page, counts, state: () => state, refresh, call, findHelper, linkFor, joinLinkFor, waits };
 })();
 
 /* Each device's line in its person's settings row: { kind, label, version, seen }, under an id of its own (each
@@ -862,24 +1035,28 @@ V.feedback = (() => {
     }
   }
 
-  /* Settings' "Send feedback" card; on the owner's PC also where everyone's feedback is collected. */
+  /* Settings' "Send feedback" card (About & feedback). */
   function card(ui) {
-    const rows = [ui.line('Found a bug, or have an idea?', 'Say it here: it only takes a moment.',
-      V.button('Write', { icon: 'send', onClick: sheet }))];
-    if (V.desktop && !(V.data.user || {}).invited && V.pc && V.pc.can('feedbackCollect')) {
-      const invites = V.invites.state();
-      if (invites && invites.on && invites.local) {  // (collected with the secret key on this PC)
-        rows.push(ui.line('Feedback from everyone', 'Your PC collects it into your Feedback folder by itself, every half hour.',
-          V.button(checking ? 'Checking...' : 'Check feedback now', { icon: 'restore', disabled: checking, onClick: () => checkNow(ui) })));
-      } else if (invites && invites.how) {
-        rows.push(ui.line('Feedback from everyone', 'Feedback from the people you invite arrives in a Feedback folder once '
-          + 'invites are turned on (Invite people, above).', null));
-      }
+    return ui.card('Send feedback', ui.line('Found a bug, or have an idea?', 'Say it here: it only takes a moment.',
+      V.button('Write', { icon: 'send', onClick: sheet })));
+  }
+
+  /* "Feedback from everyone" (Friends > More options, the owner's PC): where everyone's feedback is collected. */
+  function everyone(ui) {
+    if (!V.desktop || (V.data.user || {}).invited || !V.pc || !V.pc.can('feedbackCollect')) return null;
+    const invites = V.invites.state();
+    if (invites && invites.on && invites.local) {  // (collected with the secret key on this PC)
+      return ui.line('Feedback from everyone', 'Your PC collects it into your Feedback folder by itself, every half hour.',
+        V.button(checking ? 'Checking...' : 'Check feedback now', { icon: 'restore', disabled: checking, onClick: () => checkNow(ui) }));
     }
-    return ui.card('Send feedback', ...rows);
+    if (invites && invites.how) {
+      return ui.line('Feedback from everyone', 'Feedback from the people you invite arrives in a Feedback folder once '
+        + 'invites are turned on (Invite people, above).', null);
+    }
+    return null;
   }
 
   if (V.desktop) V.on('pc:feedback-in', () => V.cloud.sync());  // the PC just wrote new feedback notes
 
-  return { card, send, sheet };
+  return { card, everyone, send, sheet };
 })();

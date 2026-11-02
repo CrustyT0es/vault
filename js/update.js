@@ -136,9 +136,12 @@ V.update = (() => {
 
   function keep() {
     const old = read('sessionStorage', KEPT) || {};
+    const tab = V.tab ? V.tab() : old.tab || 'notes';
     write('sessionStorage', KEPT, {
-      tab: V.tab ? V.tab() : old.tab || 'notes',
+      tab,
       note: (V.editor && V.editor.openId()) || (started ? null : old.note || null),
+      // (Settings' page, where it says which: js/settings.js's page())
+      page: tab !== 'settings' ? undefined : (V.settings && V.settings.page && V.settings.page()) || old.page || undefined,
       from: old.from || V.VERSION,
     });
   }

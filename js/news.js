@@ -15,7 +15,7 @@
 
    Settings: an "Announcements" card (the newest ones, each opened again with a tap) for anyone who has had one, and
    always for the owner, who also sees how many have seen each one and every poll's counts, and can delete one. The
-   owner posts from Settings > Invite people > Announcements (js/access.js), with the composer here. Every word anyone
+   owner posts from Settings > Friends > Announcements (js/access.js), with the composer here. Every word anyone
    wrote is shown as text only: the message and a note's lines through js/format.js's Read view. */
 'use strict';
 
@@ -241,7 +241,7 @@ V.news = (() => {
   const app = () => document.getElementById('app');
   const onGate = () => !app().classList.contains('ready') || app().classList.contains('gate');  // setup, sign-in...
   // A sheet, a menu, a note over everything, a drawing, the note-taker (not its bar at the top: js/notetaker.js).
-  const layerOpen = () => !!document.querySelector('#layers > :not(.nt-strip)');
+  const layerOpen = () => !!document.querySelector('#layers > :not(.nt-strip):not(.coach[hidden])');
   const NOT_TYPED = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'file', 'color', 'image'];
   function typing() {
     const el = document.activeElement;
@@ -560,7 +560,7 @@ V.news = (() => {
       title: 'New announcement',
       content: [
         V.h('p', { text: 'It pops up once for everyone else in your Wefty cloud the next time they open Wefty. You can '
-          + 'open it again from Settings > Announcements.' }),
+          + 'open it again from Settings > Friends.' }),
         V.h('label.label', {}, 'Title', title), V.h('label.label', {}, 'Message', text),
         V.h('div.setting-buttons.news-compose-add', {}, pollButton, noteButton), pollBox, noteBox, problem],
       actions: [{ label: 'Cancel' }, { label: 'Post', kind: 'primary', icon: 'send', onClick: async () => {
@@ -650,6 +650,53 @@ V.news = (() => {
     return ui.card('Announcements', ...rows);
   }
 
+  /* Settings > Friends' Announcements (the owner's): the newest few (each with its ⋯: Open, Delete), then "All
+     announcements (N)" in a sheet. Rows only (js/access.js puts them under New announcement); [] when there's
+     nothing to show yet, or this device can't ask. */
+  const FEW = 3;
+  function ownerRow(item) {
+    const count = Math.max(0, (Number(answer.seenCounts[item.id]) || 0) - (answer.seen.includes(item.id) ? 1 : 0));
+    const bits = [V.ago(item.at), count ? `Seen by ${count}` : 'Not seen yet'];
+    const results = item.poll ? resultsOf(item) : null;
+    if (results) bits.push(item.poll.options.map((option, i) => `${option} ${results.counts[i]}`).join(' · '));
+    const more = V.iconButton('more', `${item.title}: open or delete`, () => V.menu(more, [
+      { label: 'Open it again', icon: 'open', onClick: () => open(item.id) },
+      { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(item) },
+    ], { label: item.title, returnFocus: true }), 'quiet');
+    return V.h('div.setting.news-row', { dataset: { news: item.id } },
+      V.h('button.news-open', { type: 'button', onclick: () => open(item.id) },
+        V.h('span.setting-text', {}, V.h('strong', { text: item.title }), V.h('span', { text: bits.join(' · ') }))),
+      more);
+  }
+
+  function rows(ui) {
+    settings = ui;
+    if (!can() || !isOwner()) return [];
+    if (!answer) {
+      return [asking || !asked ? ui.line('Checking for announcements...', '', null)
+        : ui.line('Couldn\'t check for announcements', trouble || 'Try again in a minute.',
+          V.button('Try again', { icon: 'restore', onClick: () => { check(true); redraw(); } }))];
+    }
+    const items = answer.items;
+    if (!items.length) {
+      return [ui.line('Nothing posted yet', answer.unavailable ? 'Announcements need Wefty\'s helper in your cloud, at its '
+        + 'newest version: see Invite people, above.' : 'What you post shows here.', null)];
+    }
+    const out = items.slice(0, FEW).map(ownerRow);
+    if (items.length > FEW) {
+      out.push(V.h('button.invite-all.news-all', { type: 'button', onclick: () => V.sheet({
+        title: 'Announcements', content: V.h('div.news-everything', {}, items.map(ownerRow)), actions: [{ label: 'Done' }] }) },
+      V.h('span', { text: `All announcements (${items.length})` }), V.icon('chevron')));
+    }
+    return out;
+  }
+
+  /* How many announcements this person hasn't seen yet (a friend's About & feedback line); 0 until asked. */
+  function unseenCount() {
+    if (!answer || !Array.isArray(answer.items) || !Array.isArray(answer.seen)) return 0;
+    return answer.items.filter((item) => !answer.seen.includes(item.id)).length;
+  }
+
   /* -- starting (js/start.js's main, once the app shows) */
 
   function start() {
@@ -671,5 +718,5 @@ V.news = (() => {
     check(true);
   }
 
-  return { start, check, card, compose, open, waits, state: () => answer, SINCE };
+  return { start, check, card, rows, unseenCount, compose, open, waits, state: () => answer, SINCE };
 })();

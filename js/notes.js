@@ -3,7 +3,11 @@
    Archive, Trash), #tags, search with filters, and the list of notes as a list or a grid. Opening one hands it to
    V.editor: beside the list on a wide screen, over everything on a phone.
 
-   Picking several notes (the Select button by the list's name on the PC, by the search box on a phone; a long press
+   A phone's top row (1.16) is the list's name, a magnifier (which turns the row into the search box, with "Try"
+   buttons under it), a ⋯ (Select notes, Sort, View and an open folder's options) and your picture; wide, the search
+   box, New note, sort, grid and Select stay in sight.
+
+   Picking several notes (the Select button by the list's name on the PC, Select notes in the ⋯ on a phone; a long press
    with a finger or the S Pen; Ctrl/Shift+click on the PC) shows a round tick on every card and a bar to move, pin,
    archive or delete them together (in the Trash: put back or delete for good); on the PC a card can also be dragged
    onto a folder. The Select button starts with nothing picked and stays on until the X, Esc, Back or an action;
@@ -43,6 +47,7 @@ V.notes = (() => {
   const FOLDER_DRAG = 'application/x-vault-folder';
   let filter = 'all';         // all, pinned, due, review, archive, trash, tag:<key> or a folder's id
   let query = '';
+  let searchOpen = false;     // a phone's search row in place of the title row (the magnifier; Ctrl+F)
   let root = null;
   let parts = null;
   let picking = false;        // several notes being picked
@@ -51,6 +56,7 @@ V.notes = (() => {
   let listIds = [];           // every note in the list shown, in order (the ones folded away too)
   let anchor = null;          // where a Shift+click range starts
   let press = null;           // a finger on a card: {id, x, y, timer, fired}
+  let moveTo = null;          // an empty folder's "Move notes here": the folder the pick bar's Move goes straight to
 
   const folders = () => [...V.data.folders.values()].filter((f) => !f.deleted)
     .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
@@ -79,10 +85,12 @@ V.notes = (() => {
       if (/^\s*```/.test(raw)) { fenced = !fenced; continue; }
       let line = raw;
       let box = null;
+      let head = false;
       if (!fenced) {
         const check = CHECK.exec(line);
         if (check) { box = check[2] === ' ' ? 'open' : 'done'; line = check[3]; }
         if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) continue;  // a --- rule
+        head = !box && /^\s{0,3}#{1,6}\s+/.test(line);
         line = line.replace(/^\s{0,3}#{1,6}\s+/, '')  // a heading's #s (a #tag has no space after it, so it stays)
           .replace(/^\s*>\s?/, '')                   // a quote
           .replace(/^\s*[-*+•]\s+/, '')              // a list's dash or star (a numbered list keeps its numbers)
@@ -91,45 +99,81 @@ V.notes = (() => {
           .replace(/\s+::\s+/g, ' → ');              // a flash card
       }
       line = line.replace(/\s+/g, ' ').trim();
-      if (line) out.push({ text: line, box });
+      if (line) out.push({ text: line, box, head });
     }
     return out;
   }
-  function joined(list, boxes) {
+  /* A card's order (1.16): in each run of tick boxes, the ticked ones after the ones still to do (a list's done
+     items go to the end, as Today shows them). The title keeps the note's own order. */
+  function ticksLast(list) {
+    const out = [];
+    let run = [];
+    const flush = () => {
+      out.push(...run.filter((p) => p.box === 'open'), ...run.filter((p) => p.box === 'done'));
+      run = [];
+    };
+    for (const piece of list) {
+      if (piece.box) run.push(piece);
+      else { flush(); out.push(piece); }
+    }
+    flush();
+    return out;
+  }
+  // A card's words also say where a heading's words and a ticked item's words end (HEAD ... END, ● ... END: private
+  // letters no note has, read and dropped by boxed()), so a card draws headings a little darker and ticked items struck.
+  const HEAD = '\uE000', END = '\uE001';
+  const MARKS = /[\uE000\uE001]/g;
+  function joined(list, boxes, card = false) {
     let words = '';
     for (const piece of list) {
       const glyph = boxes && piece.box ? (piece.box === 'open' ? '○ ' : '● ') : '';
-      if (words) words += (glyph || ENDS.test(words.replace(/["'”’)\]]+$/, ''))) ? ' ' : ' · ';
-      words += glyph + piece.text;
+      if (words) words += (glyph || ENDS.test(words.replace(MARKS, '').replace(/["'”’)\]]+$/, ''))) ? ' ' : ' · ';
+      const spanned = card && (piece.head || piece.box === 'done');
+      words += glyph + (card && piece.head ? HEAD : '') + piece.text + (spanned ? END : '');
     }
     return words;
   }
-  function plain(note, boxes = true) {
+  function made(note) {
     const body = note.body || '';
     const kept = plainKept.get(note);
-    let made = kept && kept.body === body ? kept : null;
-    if (!made) {
-      const list = pieces(body);
-      made = { body, words: joined(list, true), title: joined(list, false) };
-      if (V.format && !note.locked) plainKept.set(note, made);
-    }
-    return boxes ? made.words : made.title;
+    if (kept && kept.body === body) return kept;
+    const list = pieces(body);
+    const out = { body, words: joined(list, true), title: joined(list, false), card: joined(ticksLast(list), true, true) };
+    if (V.format && !note.locked) plainKept.set(note, out);
+    return out;
+  }
+  function plain(note, boxes = true) {
+    return boxes ? made(note).words : made(note).title;
   }
 
-  /* A card's words with its tick boxes (○ / ●, from plain()) drawn as small boxes, the ticked ones with a tick. */
+  /* A card's words (made(note).card) with its tick boxes (○ / ●) drawn as small boxes, the ticked ones with a tick and
+     their words grey and struck (span.snip-done), and a heading's words a little darker (span.snip-head). `parts` are
+     strings and search's <mark>s (js/organise.js marked()); a mark inside a struck item stays inside it. */
   function boxed(parts) {
     const out = [];
+    let into = null;  // the span being filled (a heading's or a ticked item's words), or null
+    const put = (node) => (into || out).push(node);
+    const close = () => {
+      if (into && into.length) out.push(V.h('span.' + into.cls, {}, into));
+      into = null;
+    };
+    const open = (cls) => { close(); into = []; into.cls = cls; };
     for (const part of parts) {
-      if (typeof part !== 'string') { out.push(part); continue; }
-      for (const bit of part.split(/([○●] ?)/)) {
+      if (typeof part !== 'string') { put(part); continue; }
+      for (const bit of part.split(/([○●] ?|\uE000|\uE001)/)) {
         if (!bit) continue;
-        if (bit[0] === '○' || bit[0] === '●') {
+        if (bit === HEAD) open('snip-head');
+        else if (bit === END) close();
+        else if (bit[0] === '○' || bit[0] === '●') {
+          close();
           const done = bit[0] === '●';
           out.push(V.h('span.snip-box' + (done ? '.done' : ''), { role: 'img', 'aria-label': done ? 'done' : 'to do' },
             done ? V.icon('check') : null));
-        } else out.push(bit);
+          if (done) open('snip-done');
+        } else put(bit);
       }
     }
+    close();
     return out;
   }
 
@@ -183,9 +227,9 @@ V.notes = (() => {
     const home = inbox();
     await V.cloud.save('notes', blankNote({
       folder_id: home && home.id, pinned: true, title: 'Welcome to Wefty',
-      body: 'Your notes, on your PC and your phone.\n\n- [ ] Open Wefty on your phone (Settings > Connect your phone, on the PC)\n'
-        // (An iPhone can't share into a web app: there it's the Send tab.)
-        + `- [ ] Send a photo from your phone to the PC (${V.deviceKind.ios ? 'the Send tab' : 'Share > Wefty'})\n`
+      body: 'Your notes, on your PC and your phone.\n\n- [ ] Open Wefty on your phone (Settings > Devices, on the PC)\n'
+        // (An iPhone can't share into a web app: there it's Share > Send.)
+        + `- [ ] Send a photo from your phone to the PC (${V.deviceKind.ios ? 'Share > Send' : 'Share > Wefty'})\n`
         + '- [ ] Press Ctrl+Alt+N on the PC for a quick note\n'
         // Only the PC with Jarvis knows he's there (a phone, or Vault on its own, has no Jarvis to ask).
         + (V.desktop && !V.pc.standalone() ? '- [ ] Say "Jarvis, make a note that..."\n' : '')
@@ -207,8 +251,11 @@ V.notes = (() => {
       .replace(/\{longdate\}/gi, now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }));
   }
 
-  async function create(template = V.TEMPLATES[0], extra = {}) {
-    let folderId = filter !== 'all' && V.data.folders.has(filter) ? filter : null;
+  /* `fresh`: made from outside Notes (Today, the icon's New note, Ctrl+N on another screen): whatever Notes was left
+     showing (Pinned, a #tag, a folder) has nothing to do with it, so it goes to its template's folder, else the Inbox. */
+  async function create(template = V.TEMPLATES[0], extra = {}, { fresh = false } = {}) {
+    const from = fresh ? 'all' : filter;
+    let folderId = from !== 'all' && V.data.folders.has(from) ? from : null;
     const own = template.folderId && V.data.folders.get(template.folderId);
     if (!folderId && own && !own.deleted) folderId = own.id;
     if (!folderId && template.folder) {
@@ -218,22 +265,22 @@ V.notes = (() => {
     if (!folderId) folderId = (inbox() || {}).id || null;
     const title = fill(template.title || '');
     let body = fill(template.body || '');
-    if (isTag(filter)) {  // made while looking at a tag: it gets the tag, so it's in the list it was made from
-      const tag = (O.allTags(live()).find((t) => t.key === tagKey(filter)) || { name: tagKey(filter) }).name;
-      if (!O.tagsOf({ title, body }).some((t) => t.key === tagKey(filter))) body += (body.trim() ? '\n\n' : '') + '#' + tag;
+    if (isTag(from)) {  // made while looking at a tag: it gets the tag, so it's in the list it was made from
+      const tag = (O.allTags(live()).find((t) => t.key === tagKey(from)) || { name: tagKey(from) }).name;
+      if (!O.tagsOf({ title, body }).some((t) => t.key === tagKey(from))) body += (body.trim() ? '\n\n' : '') + '#' + tag;
     }
     const note = await V.cloud.save('notes', blankNote({
       folder_id: folderId, title, body,
       due: template.due !== undefined ? V.addDays(V.today(), template.due) : null,
-      pinned: filter === 'pinned', template: template.id === 'blank' || template.own ? '' : template.id, ...extra,
+      pinned: from === 'pinned', template: template.id === 'blank' || template.own ? '' : template.id, ...extra,
     }));
     open(note.id, { focusTitle: true });
     return note;
   }
 
-  function chooseTemplate() {
+  function chooseTemplate({ fresh = false } = {}) {
     stopPicking();  // (as Ctrl+N does: a new note, or the note-taker, isn't picked behind)
-    const here = V.data.folders.get(filter);
+    const here = fresh ? null : V.data.folders.get(filter);
     const list = [...V.TEMPLATES].sort((a, b) => {
       const fit = (t) => (here && t.folder && t.folder.toLowerCase() === here.name.toLowerCase() ? 0 : 1);
       return (a.id === 'blank' ? -1 : b.id === 'blank' ? 1 : fit(a) - fit(b));
@@ -249,7 +296,7 @@ V.notes = (() => {
         V.h('span.t-hint', { text: t.hint || (t.folder ? t.folder : '') })))),
         O.templateSection((t) => { chosen = t; sheet.close(); }, () => sheet.close()),
       ],
-      onClose: () => { if (chosen) create(chosen).catch(V.problem); },
+      onClose: () => { if (chosen) create(chosen, {}, { fresh }).catch(V.problem); },
     });
   }
 
@@ -303,6 +350,7 @@ V.notes = (() => {
     if (!picking) return;
     picking = false;
     held = false;
+    moveTo = null;
     picked.clear();
     anchor = null;
     if (!fromHistory && history.state && history.state.vault === 'select') {
@@ -330,6 +378,16 @@ V.notes = (() => {
     anchor = id;
     if (!picked.size && !held) stopPicking();
     else showPicked();
+  }
+
+  /* An empty folder's "Move notes here": every note, picking on, and the pick bar's Move going straight to that
+     folder. (Leaving Notes, or stopping, puts it back as it was.) */
+  function moveHere(folder) {
+    setFilter('all');
+    moveTo = folder.id;
+    startPicking({ hold: true });
+    showPicked();
+    V.toast(`Pick the notes, then Move to ${folder.name}`);
   }
 
   /* The Select button: picking on (nothing picked yet), or off again. */
@@ -389,6 +447,12 @@ V.notes = (() => {
     V.clear(button, V.icon(picking ? 'x' : 'select'), V.h('span.select-label', { text: picking ? 'Cancel' : 'Select' }));
   }
 
+  /* While picking on a phone, the ⋯ says so (its menu's first line stops it). */
+  function drawMore() {
+    const more = parts && parts.titleTools.querySelector('.notes-more');
+    if (more) more.classList.toggle('on', picking);
+  }
+
   /* The picked cards marked where they are (nothing redrawn, so a finger still on a card stays on it), the folds'
      counts of what's picked inside them, the Select button and the bar. */
   const foldIds = new WeakMap();  // a fold's head: the ids of the notes under it
@@ -411,6 +475,7 @@ V.notes = (() => {
       }
     }
     drawSelect();
+    drawMore();
     drawPickBar();
   }
 
@@ -427,14 +492,16 @@ V.notes = (() => {
       type: 'button', disabled: !ids.length, onclick: () => run(ids).catch(V.problem),
     }, V.icon(icon), V.h('span', { text: label }));
     const done = (fn) => async (list) => { stopPicking(); await fn(list); };
+    const target = moveTo && V.data.folders.get(moveTo);
     const actions = filter === 'trash' ? [
       act('restore', 'Put back', done((l) => O.restore(l))),
       act('trash', 'Delete forever', deleteForever, 'danger'),
     ] : [
-      act('folder-move', 'Move to', async (list) => {
-        const folder = await O.chooseFolder({ title: list.length === 1 ? 'Move to' : `Move ${list.length} notes to` });
-        if (folder) await done((l) => O.move(l, folder.id))(list);
-      }),
+      target ? act('folder-move', `Move to ${target.name}`, done((l) => O.move(l, target.id)), 'move-to')
+        : act('folder-move', 'Move to', async (list) => {
+          const folder = await O.chooseFolder({ title: list.length === 1 ? 'Move to' : `Move ${list.length} notes to` });
+          if (folder) await done((l) => O.move(l, folder.id))(list);
+        }),
       filter === 'archive' ? null : act(allPinned ? 'pin-on' : 'pin', allPinned ? 'Unpin' : 'Pin', done((l) => O.pin(l, !allPinned))),
       act('archive', allArchived ? 'Unarchive' : 'Archive', done((l) => O.archive(l, !allArchived))),
       act('trash', 'Delete', done((l) => O.trash(l)), 'danger'),
@@ -485,6 +552,8 @@ V.notes = (() => {
 
   window.addEventListener('popstate', () => {
     if (picking && !(history.state && history.state.vault === 'select')) stopPicking({ fromHistory: true });
+    // A picking step left under Settings (picking stopped as Settings opened over it): stepped over, not a dead press.
+    else if (!picking && !backing && !V.desktop && history.state && history.state.vault === 'select') history.back();
     backDone();
   });
 
@@ -625,8 +694,10 @@ V.notes = (() => {
     const folder = V.data.folders.get(value);
     if (folder) for (const up of O.ancestors(folder)) if (shutSet().has(up.id)) setShut(up.id, false);  // so it shows
     query = '';
+    searchOpen = false;
     if (parts) parts.search.value = '';
     draw();
+    if (parts) showHelp();
   }
 
   function tagLabel(key) {
@@ -636,7 +707,7 @@ V.notes = (() => {
 
   function filterTitle() {
     if (query) return 'Search';
-    if (filter === 'all') return 'All notes';
+    if (filter === 'all') return 'Notes';
     if (filter === 'pinned') return 'Pinned';
     if (filter === 'due') return 'Upcoming';
     if (filter === 'review') return 'Review';
@@ -644,7 +715,7 @@ V.notes = (() => {
     if (filter === 'trash') return 'Trash';
     if (isTag(filter)) return tagLabel(tagKey(filter));
     const f = V.data.folders.get(filter);
-    return f ? f.name : 'All notes';
+    return f ? f.name : 'Notes';
   }
 
   /* How many notes each folder has (with its own folders' notes), and in the smart lists. */
@@ -749,7 +820,7 @@ V.notes = (() => {
     const prog = note.locked ? null : progress(note);
     const pictures = (note.attachments || []).length;
     const showFolder = filter === 'all' || filter === 'pinned' || filter === 'due' || filter === 'archive' || isTag(filter) || query;
-    const words = note.locked ? '' : plain(note);
+    const words = note.locked ? '' : made(note).card;
     const titled = !!(note.title || '').trim();
     // Searching: the words round the first match, when they're further in than the start shows.
     const around = look.terms.length ? O.snippet(words, look.terms, look.size) : words.slice(0, look.size);
@@ -878,13 +949,19 @@ V.notes = (() => {
     parts.layout.classList.toggle('grid-view', grid);
     parts.list.classList.toggle('grid', grid);
     const folder = V.data.folders.get(filter);
-    // In a folder that's in another: a way up, and the folders it's in (each opens), above its name.
+    const wide = V.wide();
+    // In a folder: a way back first (up to the folder it's in; on a phone, from a top folder back to all your notes),
+    // and the folders it's in (each opens) in a small line above its name.
     const above = folder && !query ? O.ancestors(folder) : [];
     const up = above[above.length - 1];
-    V.clear(parts.crumbs, up ? V.iconButton('back', `Up to ${up.name}`, () => setFilter(up.id), 'quiet folder-up') : null,
-      above.map((f, i) => [i ? V.h('span.crumb-gap', { text: '›', 'aria-hidden': 'true' }) : null,
-        V.h('button.crumb', { type: 'button', onclick: () => setFilter(f.id) }, folderBadge(f), V.h('span', { text: f.name }))]));
+    V.clear(parts.back, up ? V.iconButton('back', `Up to ${up.name}`, () => setFilter(up.id), 'quiet folder-up')
+      : folder && !query && !wide ? V.iconButton('back', 'Back to all your notes', () => setFilter('all'), 'quiet folder-up to-all') : null);
+    V.clear(parts.crumbs, above.map((f) => [
+      V.h('button.crumb', { type: 'button', onclick: () => setFilter(f.id) }, folderBadge(f), V.h('span', { text: f.name })),
+      V.h('span.crumb-gap', { text: '›', 'aria-hidden': 'true' })]));
     parts.crumbs.hidden = !above.length;
+    parts.listColumn.classList.toggle('searching', searchOpen || !!query);
+    parts.found.textContent = query ? (list.length === 1 ? '1 note' : `${list.length} notes`) : '';
     // Review: the flash cards due today, by folder and tag (js/review.js), in place of a list of notes.
     const review = filter === 'review' && q.empty && !!V.review;
     parts.list.classList.toggle('review', review);
@@ -892,26 +969,25 @@ V.notes = (() => {
       const due = V.review.dueCount();
       parts.headCount.textContent = due ? String(due) : '';
       parts.list.classList.remove('upcoming', 'grid');
-      V.clear(parts.titleTools);
-      V.clear(parts.headTools);
+      V.clear(parts.titleTools, wide ? null : searchButton());  // (nothing to sort or pick: the cards are review.js's)
       parts.select = null;
       listIds = [];
       V.clear(parts.list, V.review.page());
       if (picking) stopPicking();
       return;
     }
-    // Select: beside sort and grid on the PC; on a phone (where that row is full) beside the search box. Only when
-    // there's something to pick.
-    parts.select = list.length ? V.h('button.btn.select-btn', { type: 'button', onclick: selectPressed }) : null;
-    V.clear(parts.titleTools,
+    // Wide: the folder's ⋯, sort, grid and Select in sight, beside the title. A phone's row has room for the
+    // magnifier and one ⋯ (Select notes first in it, then Sort, View and the folder's options): moreMenu.
+    parts.select = list.length && wide ? V.h('button.btn.select-btn', { type: 'button', onclick: selectPressed }) : null;
+    V.clear(parts.titleTools, wide ? [
       folder && !query ? V.iconButton('more', `${folder.name} options`, (event) => folderMenu(folder, event.currentTarget), 'folder-options') : null,
       V.iconButton('sort', 'Sort notes', (event) => sortMenu(event.currentTarget)),
       V.iconButton(grid ? 'rows' : 'grid', grid ? 'Show as a list' : 'Show as a grid', () => {
         O.setView(grid ? 'list' : 'grid');
         draw();
       }),
-      V.wide() ? parts.select : null);
-    V.clear(parts.headTools, V.wide() ? null : parts.select);
+      parts.select,
+    ] : [searchButton(), moreButton()]);
     drawSelect();
     const empty = () => {
       const say = (text, ...more) => V.h('div.empty', {}, V.mark(40), V.h('p', { text }), more);
@@ -924,7 +1000,18 @@ V.notes = (() => {
       if (filter === 'pinned') return say('Pin a note to keep it at the top.');
       if (filter === 'archive') return say('Nothing archived. Archive notes you\'re done with: they leave your lists but stay here, and in search with is:archived.');
       if (isTag(filter)) return say(`No notes have ${tagLabel(tagKey(filter))} any more.`);
-      return say('No notes here yet.', V.button('New note', { kind: 'primary', icon: 'plus', onClick: chooseTemplate }));
+      // A folder with nothing in it (no notes, no folders): the loom, and the two ways to fill it. Its New note is the
+      // screen's main iris button on a phone (the round + steps aside for it); wide, New note above the list is.
+      if (folder && !O.children(folder.id).length) {
+        return V.h('div.empty.empty-folder', {}, V.loom(176),
+          V.h('h2', { text: `Nothing in ${folder.name} yet` }),
+          V.h('p', { text: 'Start a note here, or move notes in from other folders.' }),
+          V.button(`New note in ${folder.name}`, { kind: wide ? 'tonal' : 'primary', icon: 'plus',
+            onClick: () => create(V.TEMPLATES[0], { folder_id: folder.id }).catch(V.problem) }),
+          V.h('button.link-btn.move-here', { type: 'button', text: 'Move notes here', onclick: () => moveHere(folder) }));
+      }
+      // ('tonal': the round + or the New note above the list is the screen's main iris button; the same in light)
+      return say('No notes here yet.', V.button('New note', { kind: 'tonal', icon: 'plus', onClick: chooseTemplate }));
     };
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
       kind: 'danger-quiet', icon: 'trash', onClick: async () => {
@@ -957,6 +1044,7 @@ V.notes = (() => {
       list.length ? V.h('h2.list-section', {}, V.h('span', { text: 'Notes' }), V.h('span.count', { text: String(list.length) })) : null,
     ] : null;
     const none = list.length ? null : empty();
+    parts.fab.classList.toggle('aside', !!(none && none.classList.contains('empty-folder')));
     if (none && subRows) none.classList.add('small');  // under its folders, a quieter "nothing here"
     const tests = folder && !query && V.exams ? V.exams.banners(folder) : null;  // tests that cover this folder
     V.clear(parts.list, trashBar, tests, subRows, list.length ? byDay || sections(list, make) || folded(list, make) : none);
@@ -969,28 +1057,106 @@ V.notes = (() => {
     else showPicked();
   }
 
-  function sortMenu(anchorEl) {
+  /* The sorts (a tick on the one in use); wide, Show as a grid too (a phone's ⋯ has its own List | Grid). */
+  function sortMenu(anchorEl, { view = true, returnFocus = false } = {}) {
     const now = O.sort();
     const grid = O.view() === 'grid';
     V.menu(anchorEl, [
       ...O.SORTS.map(([id, label]) => ({ label, icon: now === id ? 'check' : 'blank', onClick: () => { O.setSort(id); draw(); } })),
-      { label: grid ? 'Show as a list' : 'Show as a grid', icon: grid ? 'rows' : 'grid', onClick: () => { O.setView(grid ? 'list' : 'grid'); draw(); } },
-    ]);
+      view ? { label: grid ? 'Show as a list' : 'Show as a grid', icon: grid ? 'rows' : 'grid', onClick: () => { O.setView(grid ? 'list' : 'grid'); draw(); } } : null,
+    ], { label: 'Sort notes', returnFocus });
   }
 
-  /* The filters the search box knows, as buttons that type them in (the keyboard stays up). */
-  function drawHelp() {
+  /* -- a phone's top row: the magnifier and the ⋯ beside the title (your picture after them) */
+
+  const searchButton = () => V.iconButton('search', 'Search notes', () => openSearch(), 'notes-search');
+  function moreButton() {
+    const button = V.iconButton('more', 'More options', () => moreMenu(button), 'notes-more');
+    button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'false');
+    return button;
+  }
+
+  /* The ⋯: Select notes (Stop picking while picking) first, as the long press is hidden; then Sort (the one in use
+     said, its choices in a second menu), View List | Grid, and an open folder's own options. Only what the list shown
+     can use: Upcoming and the Trash keep their own order, and there's nothing to pick in an empty list. */
+  function moreMenu(anchorEl) {
     const folder = V.data.folders.get(filter);
-    const inName = folder ? (/\s/.test(folder.name) ? `in:"${folder.name}"` : `in:${folder.name}`) : 'in:';
+    const grid = O.view() === 'grid';
+    const sorts = filter !== 'due' && filter !== 'trash';
+    const sortName = (O.SORTS.find(([id]) => id === O.sort()) || O.SORTS[0])[1];
+    const setView = (value, done) => { done(); if (O.view() !== value) { O.setView(value); draw(); } };
+    anchorEl.setAttribute('aria-expanded', 'true');
+    V.menu(anchorEl, [
+      picking ? { label: 'Stop picking', icon: 'x', onClick: () => stopPicking() }
+        : listIds.length ? { label: 'Select notes', icon: 'select', onClick: () => selectPressed() } : null,
+      sorts ? { node: (done) => V.h('button.menu-item.menu-more', {
+        type: 'button', role: 'menuitem', 'aria-haspopup': 'menu',
+        onclick: () => { done(); sortMenu(anchorEl, { view: false, returnFocus: true }); },
+      }, V.icon('sort'), V.h('span', { text: 'Sort' }), V.h('span.menu-value', { text: sortName }), V.icon('next', 'menu-go')) } : null,
+      { node: (done) => V.h('div.menu-row.menu-view', { role: 'group', 'aria-label': 'View' },
+        V.icon('grid'), V.h('span', { text: 'View' }),
+        V.h('div.segmented', { role: 'radiogroup', 'aria-label': 'View' },
+          V.h('button', { type: 'button', role: 'radio', 'aria-checked': String(!grid), text: 'List', onclick: () => setView('list', done) }),
+          V.h('button', { type: 'button', role: 'radio', 'aria-checked': String(grid), text: 'Grid', onclick: () => setView('grid', done) }))) },
+      folder && !query ? { sep: true } : null,
+      folder && !query ? { label: 'Folder options…', icon: 'folder', onClick: () => folderMenu(folder, anchorEl) } : null,
+    ], { cls: 'notes-menu', label: 'More options', returnFocus: true,
+      onClose: () => { if (anchorEl.isConnected) anchorEl.setAttribute('aria-expanded', 'false'); } });
+  }
+
+  /* A phone's search row, in place of the title's row: shown before the box is focused, both in the same tap (an
+     iPhone only brings its keyboard up for a focus() made in the tap itself, on a field that's on show). */
+  function openSearch() {
+    if (!parts) return;
+    if (!searchOpen && !V.wide()) stopPicking();  // (the row takes the title's place, and the pick bar's words)
+    searchOpen = true;
+    parts.listColumn.classList.add('searching');
+    parts.search.focus({ preventScroll: true });
+    showHelp();
+  }
+
+  /* Back to the title's row: the box emptied, the whole list again, the keyboard down. */
+  function closeSearch({ refocus = true } = {}) {
+    if (!parts) return;
+    clearTimeout(helpTimer);
+    const was = query;
+    searchOpen = false;
+    parts.search.value = '';
+    query = '';
+    parts.listColumn.classList.remove('searching');
+    if (document.activeElement === parts.search) parts.search.blur();
+    if (was) draw();
+    else parts.found.textContent = '';
+    showHelp();
+    const magnifier = refocus && parts.titleTools.querySelector('.notes-search');
+    if (magnifier) magnifier.focus({ preventScroll: true });
+  }
+
+  /* The x in the box: the words go (the box keeps the keyboard); an empty box's x closes a phone's search row. */
+  function clearSearch() {
+    if (!parts.search.value && !V.wide()) { closeSearch(); return; }
+    parts.search.value = '';
+    query = '';
+    draw();
+    parts.search.focus({ preventScroll: true });
+    showHelp();
+  }
+
+  /* The filters the search box knows, as buttons in plain words that type them in (the keyboard stays up): "In
+     School" (the folder open, else your first folder), "Pinned", "Has a picture", "Due this week"... */
+  function drawHelp() {
+    const folder = V.data.folders.get(filter) || folders().find((f) => !O.isInbox(f) && !O.ancestors(f).length);
+    const named = folder ? (/\s/.test(folder.name) ? `in:"${folder.name}"` : `in:${folder.name}`) : 'in:';
     const pill = (label, token) => V.h('button.filter-pill', {
-      type: 'button', title: `Add ${label} to the search`,
+      type: 'button', title: `Adds ${token.trim() === '#' ? 'a #tag' : token} to the search`,
       onmousedown: (event) => event.preventDefault(),
       onclick: () => addFilter(token),
     }, label);
-    V.clear(parts.help, V.h('span.help-word', { text: 'Filters' }),
-      pill('#tag', '#'), pill(folder ? inName : 'in:folder', inName), pill('has:checklist', 'has:checklist'),
-      pill('has:picture', 'has:picture'), pill('due:week', 'due:week'), pill('due:late', 'due:late'),
-      pill('is:pinned', 'is:pinned'), pill('is:archived', 'is:archived'));
+    V.clear(parts.help, V.h('span.help-word', { text: 'Try' }),
+      pill(folder ? `In ${folder.name}` : 'In a folder', named), pill('Pinned', 'is:pinned'),
+      pill('Has a picture', 'has:picture'), pill('Due this week', 'due:week'), pill('Late', 'due:late'),
+      pill('Has a checklist', 'has:checklist'), pill('#tag', '#'), pill('Archived', 'is:archived'));
   }
 
   function addFilter(token) {
@@ -1011,7 +1177,7 @@ V.notes = (() => {
   function showHelp() {
     clearTimeout(helpTimer);
     if (!parts) return;
-    const on = document.activeElement === parts.search || !!parts.search.value.trim();
+    const on = document.activeElement === parts.search || !!parts.search.value.trim() || (searchOpen && !V.wide());
     parts.help.hidden = !on;
     if (on) drawHelp();
     else V.clear(parts.help);
@@ -1027,13 +1193,29 @@ V.notes = (() => {
     drawList();
   }
 
+  /* A note, opened: over everything on a phone, in the side pane when wide. From another screen (Today, Share, an Undo
+     toast, the picture's held notes) Notes is shown first when wide: the pane it had is off the page once it's left. */
   function open(id, opts = {}) {
     if (backing) { backing.open = [id, opts]; return; }
-    if (V.wide()) V.editor.open(id, { pane: parts.pane, ...opts });
+    if (V.wide() && !showing() && V.go) V.go('notes');
+    if (V.wide() && showing()) V.editor.open(id, { pane: parts.pane, ...opts });
     else V.editor.open(id, opts);
     // (the note the editor really opened: one the note-taker is listening into shows its screen instead)
     const opened = V.editor.openId();
-    for (const el of parts.list.querySelectorAll('.card')) el.classList.toggle('open', el.dataset.id === opened);
+    if (parts) for (const el of parts.list.querySelectorAll('.card')) el.classList.toggle('open', el.dataset.id === opened);
+  }
+
+  /* Searching your notes, from anywhere (Ctrl+F; Today's magnifier): Notes' search box (a phone's search row opened),
+     focused in the same tap (an iPhone only opens its keyboard for that), with `text` in it if given. */
+  function search(text) {
+    if (!showing() && V.go) V.go('notes');
+    if (!parts) return;
+    if (typeof text === 'string') {
+      parts.search.value = text;
+      query = text.trim();
+      draw();
+    }
+    openSearch();
   }
 
   function render(container) {
@@ -1042,38 +1224,57 @@ V.notes = (() => {
     const search = V.h('input.search', {
       type: 'search', placeholder: 'Search notes', 'aria-label': 'Search notes', value: query, enterkeyhint: 'search',
       oninput: V.debounce(() => { query = search.value.trim(); draw(); showHelp(); }, 120),
-      onkeydown: (event) => { if (event.key === 'Escape') { search.value = ''; query = ''; draw(); showHelp(); } },
+      onkeydown: (event) => {
+        if (event.key !== 'Escape') return;
+        if (!V.wide()) { event.preventDefault(); closeSearch(); return; }
+        search.value = ''; query = ''; draw(); showHelp();
+      },
       onfocus: showHelp,
-      // Hidden a moment later, so a tap on a card that blurs the box lands before the list moves up.
-      onblur: () => { clearTimeout(helpTimer); helpTimer = setTimeout(showHelp, 300); },
+      // Hidden a moment later, so a tap on a card that blurs the box lands before the list moves up. A phone's search
+      // row left empty goes back to the title's row then too.
+      onblur: () => {
+        clearTimeout(helpTimer);
+        helpTimer = setTimeout(() => {
+          const away = !parts.listHead.contains(document.activeElement) && !parts.help.contains(document.activeElement);
+          if (searchOpen && !V.wide() && !search.value.trim() && away) closeSearch({ refocus: false });
+          else showHelp();
+        }, 300);
+      },
     });
     parts = {
       search,
       folders: V.h('nav.folders', { 'aria-label': 'Folders' }),
       chips: V.h('div.chips', { role: 'tablist' }),
       help: V.h('div.search-help', { hidden: true }),
+      found: V.h('p.search-found', { role: 'status' }),
       heading: V.h('h1'),
+      back: V.h('span.title-back'),
       crumbs: V.h('nav.crumbs', { 'aria-label': 'The folders this one is in', hidden: true }),
       headCount: V.h('span.head-count'),
       titleTools: V.h('div.list-tools'),
-      headTools: V.h('div.head-tools'),  // (the phone's Select button: drawList)
       select: null,
       list: V.h('div.list'),
       pane: V.h('section.pane'),
       pickBar: V.h('div.pick-bar', { role: 'toolbar', 'aria-label': 'Picked notes', hidden: true }),
       fab: V.h('button.fab', { type: 'button', onclick: chooseTemplate, 'aria-label': 'New note' }, V.icon('plus')),
     };
-    const listColumn = V.h('section.list-column', {},
-      V.h('div.list-head', {},
-        V.h('div.search-box', {}, V.icon('search'), search, V.h('kbd.search-hint', { text: 'Ctrl F' })),
-        parts.headTools,
-        V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: V.appShortcuts ? 'New note (Ctrl+N)' : 'New note' })),
+    parts.listHead = V.h('div.list-head', {},
+      V.iconButton('back', 'Close the search', () => closeSearch(), 'search-back'),
+      V.h('div.search-box', {}, V.icon('search'), search,
+        V.h('button.search-clear', { type: 'button', title: 'Clear the search', 'aria-label': 'Clear the search',
+          onmousedown: (event) => event.preventDefault(), onclick: () => clearSearch() }, V.icon('x')),
+        V.h('kbd.search-hint', { text: 'Ctrl F' })),
+      V.button('New note', { kind: 'primary new-note', icon: 'plus', onClick: chooseTemplate, title: V.appShortcuts ? 'New note (Ctrl+N)' : 'New note' }));
+    parts.listColumn = V.h('section.list-column', {},
+      parts.listHead,
       parts.help,
       parts.chips,
-      parts.crumbs,
-      V.h('div.list-title', {}, parts.heading, parts.headCount, parts.titleTools, V.statusPill()),
+      V.h('div.list-title', {}, parts.back,
+        V.h('div.title-stack', {}, parts.crumbs, V.h('div.title-line', {}, parts.heading, parts.headCount)),
+        parts.titleTools, V.profileButton('head-me')),
+      parts.found,
       parts.list);
-    parts.layout = V.h('div.notes-layout', {}, parts.folders, listColumn, parts.pane, parts.pickBar);
+    parts.layout = V.h('div.notes-layout', {}, parts.folders, parts.listColumn, parts.pane, parts.pickBar);
     V.clear(container, parts.layout, parts.fab);
     draw();
     showHelp();
@@ -1102,6 +1303,8 @@ V.notes = (() => {
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') redraw(); });
   V.on('attach-index', redraw);  // the attachment search index arrived (js/attachsearch.js): matches may change
   V.on('notetaker', redraw);  // the note-taker started or stopped listening into a note: its "Listening" chip
+  // Picking left on (an empty folder's "Move notes here", the Select button) ends when another screen is opened.
+  V.on('tab', (tab) => { if (tab !== 'notes' && picking) stopPicking(); });
   const typing = (target) => !!target && (target.matches('input, textarea, select') || target.isContentEditable);
   document.addEventListener('keydown', (event) => {
     if (!showing()) return;
@@ -1127,10 +1330,10 @@ V.notes = (() => {
     }
     if (ctrl && event.key.toLowerCase() === 'f' && parts) {
       event.preventDefault();
-      parts.search.focus();
+      openSearch();
     }
   });
 
-  return { render, create, chooseTemplate, ensureStarterFolders, blankNote, open, folders, inbox, setFilter, plain,
-    folderBadge, picking: () => picking };
+  return { render, create, chooseTemplate, ensureStarterFolders, blankNote, open, search, folders, inbox, setFilter, plain,
+    folderBadge, picking: () => picking, showing: () => showing() };
 })();

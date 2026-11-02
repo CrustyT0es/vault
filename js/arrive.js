@@ -615,7 +615,7 @@ V.arrive = (() => {
     } else if (main.kind === 'link') {
       list.push({ label: 'Open', icon: 'open', onClick: () => V.send.openLink(String(main.text || '').trim(), main) });
     }
-    list.push({ label: 'Show in Send', onClick: () => { if (V.go) V.go('send'); } });
+    list.push({ label: 'Show in Share', onClick: () => { if (V.go) V.go('send'); } });
     return list;
   }
 
@@ -697,6 +697,21 @@ V.arrive = (() => {
     return copying || folderRow ? box('What arrives here', copying, folderRow) : null;  // (a browser that can do neither)
   }
 
+  /* Settings > Devices (1.16): this Chromebook's (or browser's) two rows, Copy what arrives and Save what arrives to
+     Files, which js/settings.js puts in its "This Chromebook" section. [] where neither can be done. */
+  function settingsRows({ line, draw: redraw }) {
+    if (!here()) return [];
+    settingsDraw = redraw;
+    loadFolder().then(() => {
+      if (!folder || !folder.handle) return;
+      permission(folder.handle, false).then((now) => { if (now !== allowed) { allowed = now; redrawSettings(); } });
+    });
+    return [canWords() ? line('Copy what arrives', 'Pictures, links and words sent here go on the clipboard, ready to paste.',
+      V.h('input.switch', { type: 'checkbox', checked: copyOn(), 'aria-label': 'Copy what arrives',
+        onchange: (event) => { setCopy(event.target.checked); redrawSettings(); } }), 'copy-what-arrives') : null,
+    canPick() ? folderLine(line) : null].filter(Boolean);
+  }
+
   function folderLine(line) {
     const label = V.deviceKind.chromebook ? 'Save what arrives to Files' : 'Save what arrives to a folder';
     const state = read() || {};
@@ -723,6 +738,10 @@ V.arrive = (() => {
     check,
     use,
     card: settingsCard,
+    rows: settingsRows,
+    // (the home's Devices line) whether what arrives is copied here, and the folder it's saved to ('' for none)
+    copyOn: () => here() && canWords() && copyOn(),
+    folderName: () => (folder && folder.name) || '',
     // Saving into Files or copying a picture now: not a moment for an update to reload.
     busy: () => !!saveRun || saving.size > 0 || !!(target && target.state === 'copying'),
   };

@@ -111,8 +111,32 @@ V.attachSearch = (() => {
     return ui.card('Search inside attachments', ...rows);
   }
 
+  /* Settings > Notes & files (1.16): one switch, how many it has read in its hint; Index now under More options.
+     Returns { rows, more, says }, empty off the PC. */
+  function settingsRows(ui) {
+    if (!V.desktop || !V.prefs) return { rows: [], more: [], says: [] };
+    if (status === null) refreshStatus(ui);
+    const on = !!V.prefs.attachIndex;
+    const read = status && status.entries;
+    const counted = V.pc && V.pc.can('indexStatus')
+      ? (!on ? '' : read ? ` ${read} read so far.` : ' Nothing read yet.') : '';
+    const rows = [ui.line('Search inside photos, PDFs and recordings', 'Your PC reads them while it\'s on, so search finds '
+      + `words inside them. The words stay in your own private cloud.${counted}`, ui.toggle('attachIndex'),
+    'search-inside-photos-pdfs-and-recordings')];
+    const more = [];
+    if (V.pc && V.pc.can('indexStatus')) {
+      more.push(ui.line('Read attachments now', on ? 'Photos, PDFs, drawings and voice memos: the PC looks for new ones now.'
+        : 'Turn on "Search inside photos, PDFs and recordings" first.',
+      V.button('Index now', { icon: 'restore', disabled: !on, onClick: async () => {
+        try { status = await V.pc.call('indexNow'); } catch (error) { V.problem(error); }
+        ui.draw();
+      } }), 'index-now'));
+    }
+    return { rows, more, says: more.length ? ['index now'] : [] };
+  }
+
   // Warm the index once the cloud is in step, so the first search is ready (prime() throttles repeat calls).
   V.on('status', (state) => { if (state === 'synced') prime(); });
 
-  return { prime, reload: () => prime(true), hasWord, chip, card, loaded: () => at > 0 };
+  return { prime, reload: () => prime(true), hasWord, chip, card, rows: settingsRows, loaded: () => at > 0 };
 })();

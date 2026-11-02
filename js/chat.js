@@ -1342,7 +1342,7 @@ V.chat = (() => {
       ['offline', 'away', 'busy', 'bad', 'dropped'].includes(problem.kind) ? V.button('Try again', { onClick: () => send() }) : null,
       setUp ? V.button(problem.kind === 'key' ? 'Open Settings' : 'Set up free Gemini', { kind: problem.kind === 'key' ? '' : 'primary',
         onClick: () => V.ai.setUp() })
-        : ['limit', 'nokey', 'key'].includes(problem.kind) ? V.button('Open Settings', { onClick: () => V.go('settings') }) : null] : []);
+        : ['limit', 'nokey', 'key'].includes(problem.kind) ? V.button('Open Settings', { onClick: () => V.go('settings', { page: 'ai' }) }) : null] : []);
     parts.trouble.hidden = !problem;
     parts.trouble.dataset.kind = problem ? problem.kind : '';
     const pdf = draft.files.find((f) => f.kind === 'pdf');
@@ -1436,8 +1436,8 @@ V.chat = (() => {
     parts = { list, head, scroll, thread };
     const pane = V.h('section.chat-pane', {}, head, scroll, buildBox());
     const side = V.h('aside.chat-side', {},
-      V.h('div.page-head.chat-side-head', {}, V.h('h1', { text: 'Chat' }), V.statusPill(),
-        V.button('New chat', { kind: 'primary', icon: 'plus', onClick: () => open(null) })),
+      V.appHead({ title: 'Chat', cls: 'chat-side-head',
+        actions: [V.button('New chat', { kind: 'primary', icon: 'plus', onClick: () => open(null) })] }),
       list);
     parts.app = V.h('div.chat-app', {}, side, pane);
     V.clear(container, parts.app);

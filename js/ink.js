@@ -51,7 +51,8 @@ V.ink = (() => {
   };
   const LOOKS = {
     light: { theme: 'light', page: '#ffffff', line: '#d3dbe8', grid: '#e3e8ef', margin: '#f1c4c1', hiAlpha: 0.38 },
-    dark: { theme: 'dark', page: '#17191c', line: '#2f333b', grid: '#262a31', margin: '#4d2c2e', hiAlpha: 0.42 },
+    // (the dark paper is styles.css's dark --page, kept in Pure black too: a sheet on the black page; lines --line, grid --line-soft)
+    dark: { theme: 'dark', page: '#212133', line: '#37374c', grid: '#2c2c3e', margin: '#4d2c2e', hiAlpha: 0.42 },
   };
   const PAPERS = [['lined', 'Lined paper'], ['grid', 'Squared paper'], ['blank', 'Blank paper']];
 

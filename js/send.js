@@ -1,4 +1,4 @@
-/* Vault: the Send tab. Files, links and bits of text between the owner's devices: the PC app, the phone, and any other
+/* Vault: Share > Send. Files, links and bits of text between the owner's devices: the PC app, the phone, and any other
    browser ('web': a school Chromebook). See util.js's V.device.
 
    Picked, dropped or shared files wait in a tray first ("Ready to send": a preview of each, an x to take one out) and
@@ -41,7 +41,7 @@ V.send = (() => {
   let queueAgain = false;
   let retry = null;
 
-  /* Rows of the Send tab: those addressed to one of the three devices (not Vault Drive's or other parts' own rows), and
+  /* Rows of Share > Send: those addressed to one of the three devices (not Vault Drive's or other parts' own rows), and
      of those only what this device sent or was sent. */
   const sendable = (t) => V.DEVICES.includes(t.to_device);
   const ours = (t) => sendable(t) && (t.from_device === V.device || t.to_device === V.device);
@@ -71,8 +71,6 @@ V.send = (() => {
   }
   const targets = () => V.DEVICES.filter(known);
   const where = () => (targets().includes(target) ? target : V.other);
-  const hint = (to) => (to === 'pc' ? 'Files you send are saved in Downloads\\Vault on the PC by themselves.'
-    : `Files wait in Wefty on ${V.deviceName(to)} until you open them there.`);
 
   /* A Chromebook (or other browser) says so in the settings row's extra, so the PC and the phone can offer it in "Send
      to" before it has sent anything. Only extra is written (never the PIN's columns), straight to the cloud. */
@@ -257,6 +255,7 @@ V.send = (() => {
     } finally {
       for (const item of items) if (preparing.includes(item)) preparing.splice(preparing.indexOf(item), 1);
       draw();
+      V.emit('outgoing');  // (your picture's dot counts what's waiting to go up: js/profile.js)
     }
     runQueue();
   }
@@ -285,6 +284,7 @@ V.send = (() => {
           } catch (error) {
             if (/50 MB/.test(error.message)) {
               await V.db.del('outgoing', item.id);
+              V.emit('outgoing');
               V.problem(error);
               continue;
             }
@@ -339,6 +339,7 @@ V.send = (() => {
       created_at: item.at,
     });
     await V.db.del('outgoing', item.id);
+    V.emit('outgoing');
     local.delete(item.id);
     trouble.delete(item.id);
     return true;
@@ -645,7 +646,7 @@ V.send = (() => {
           V.go('notes');
           await V.notes.create(V.TEMPLATES[0], {
             title: (shared[0].title || '').slice(0, 200), body: [shared[0].text, shared[0].url].filter(Boolean).join('\n'),
-          });
+          }, { fresh: true });
           if (all.length) await V.editor.addFiles(all);  // pictures and other files alike (a shared PDF is kept too)
         } },
         ...(words && !all.length && copied !== 'sent'
@@ -972,6 +973,7 @@ V.send = (() => {
           why ? V.h('span.t-status', { text: why }) : null)),
       getting ? null : V.h('div.t-actions', {}, V.iconButton('x', 'Don\'t send', async () => {
         await V.db.del('outgoing', item.id);
+        V.emit('outgoing');
         const own = local.get(item.id);
         if (own) URL.revokeObjectURL(own);
         local.delete(item.id);
@@ -988,28 +990,40 @@ V.send = (() => {
     });
   }
 
-  /* "Send to": a choice of devices when there's more than one, else the one there is, and what happens there. */
+  /* "Send to [Your PC] ⌄": one row. With more than one device to send to it's a button opening a menu of them; with one
+     it only says where. The PC's own folder ("Downloads › Vault") is only ever said on the PC itself, where it's known
+     (V.prefs.downloads): a phone can't know it, and never shows a guess. The folder keeps its old name (Vault). */
+  const folderWords = (path) => String(path || '').split(/[\\/]+/).filter(Boolean).slice(-2).join(' › ');
+  function hereFolder() {
+    return V.desktop && V.prefs && typeof V.prefs.downloads === 'string' ? folderWords(V.prefs.downloads) : '';
+  }
+
+  function pickTarget(anchor) {
+    const to = where();
+    V.menu(anchor, targets().map((d) => ({ node: (close) => V.h('button.menu-item.send-to-choice', {
+      type: 'button', role: 'menuitemradio', 'aria-checked': String(d === to), dataset: { to: d },
+      onclick: () => { close(); target = d; drawTo(); drawTray(); },
+    }, V.icon(V.deviceIcon(d)), V.h('span', { text: cap(V.deviceName(d)) }), d === to ? V.icon('check') : null) })),
+    { cls: 'send-to-menu', label: 'Send to', returnFocus: true });
+  }
+
   function drawTo() {
     if (!parts) return;
     const to = where();
     const choices = targets();
-    const key = [to, ...choices.map((d) => d + V.deviceLabel(d))].join('|');
-    parts.title.textContent = `Send to ${V.deviceName(to)}`;
-    parts.area.placeholder = `Text or a link for ${V.deviceName(to)}`;
+    const folder = hereFolder();
+    const key = [to, folder, ...choices.map((d) => d + V.deviceLabel(d))].join('|');
+    parts.area.placeholder = 'Text or a link';
     if (key === parts.key) return;
     parts.key = key;
-    if (choices.length < 2) {
-      V.clear(parts.to, V.h('div.device-card', {}, V.icon(V.deviceIcon(to)), V.h('div.device-text', {},
-        V.h('strong', { text: cap(V.deviceName(to)) }), V.h('span', { text: hint(to) }))));
-      return;
-    }
-    V.clear(parts.to, V.h('div.send-to', {},
-      V.h('div.send-to-row', {}, V.h('span.send-to-label', { text: 'Send to' }),
-        V.h('div.segmented.send-to-pick', { role: 'radiogroup', 'aria-label': 'Send to' }, choices.map((d) => V.h('button', {
-          type: 'button', role: 'radio', 'aria-checked': String(d === to), dataset: { to: d },
-          onclick: () => { target = d; drawTo(); drawTray(); },
-        }, V.icon(V.deviceIcon(d)), V.h('span', { text: V.deviceLabel(d) }))))),
-      V.h('p.send-hint', { text: hint(to) })));
+    const inside = [V.h('span.send-to-label', { text: 'Send to' }), V.icon(V.deviceIcon(to)),
+      V.h('strong.send-to-name', { text: cap(V.deviceName(to)) }), V.h('span.send-to-grow')];
+    const row = choices.length < 2 ? V.h('div.send-to-row', {}, inside)
+      : V.h('button.send-to-row.send-to-btn', { type: 'button', 'aria-haspopup': 'menu',
+        'aria-label': `Send to ${V.deviceName(to)}. Change where`, onclick: (event) => pickTarget(event.currentTarget) },
+      inside, V.icon('down'));
+    V.clear(parts.to, row,
+      folder ? V.h('p.send-hint', {}, V.icon('download'), V.h('span', { text: `What's sent to this PC is saved in ${folder}.` })) : null);
   }
 
   function draw() {
@@ -1059,7 +1073,7 @@ V.send = (() => {
     const take = (input) => () => { files(input.files); input.value = ''; };
     const picker = V.h('input', { type: 'file', multiple: true, hidden: true });
     picker.addEventListener('change', take(picker));
-    parts = { title: V.h('h1'), to: V.h('div.send-to-wrap'), tray: V.h('div.tray', { hidden: true }), area, key: '',
+    parts = { to: V.h('div.send-to-wrap'), tray: V.h('div.tray', { hidden: true }), area, key: '',
       queue: V.h('div.queue'), list: V.h('div.transfers'), space: V.h('div.space-row') };
     let choose;
     if (V.desktop) {
@@ -1072,13 +1086,13 @@ V.send = (() => {
       const camera = V.device === 'phone' ? V.h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true }) : null;
       photos.addEventListener('change', take(photos));
       if (camera) camera.addEventListener('change', take(camera));
-      const tile = (icon, label, small, input) => V.h('button.tile', { type: 'button', onclick: () => input.click() },
-        V.icon(icon), V.h('span', {}, V.h('strong', { text: label }), V.h('small', { text: small })));
-      choose = [V.h('div.tiles' + (camera ? '' : '.two'), {}, tile('image', 'Photos', camera ? 'Gallery' : 'Pictures and videos', photos),
-        tile('file', 'Files', 'Any type', picker), camera ? tile('camera', 'Camera', 'Snap one', camera) : null), photos, camera];
+      const tile = (icon, label, what, input) => V.h('button.tile', { type: 'button', 'aria-label': `${label}: ${what}`, onclick: () => input.click() },
+        V.icon(icon), V.h('strong', { text: label }));
+      choose = [V.h('div.tiles' + (camera ? '' : '.two'), {}, tile('image', 'Photo', 'photos and videos from the gallery', photos),
+        tile('file', 'A file', 'any type', picker), camera ? tile('camera', 'Camera', 'take a photo now', camera) : null), photos, camera];
     }
     V.clear(container, V.h('div.page', {},
-      V.h('div.page-head', {}, parts.title, V.statusPill()),
+      V.share ? V.share.head('send') : V.appHead({ title: 'Share' }),  // (js/share.js: Share's top and switch)
       V.h('div.send-card', {},
         picker,
         parts.to,
