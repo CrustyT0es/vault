@@ -1,8 +1,8 @@
-# Vault (phone app)
+# Vault is now Wefty
 
-The web app behind Vault on the phone, served by GitHub Pages at https://crustyt0es.github.io/vault/, and where Vault on the PC gets its
-updates from.
+Vault was renamed Wefty, and the app moved to https://crustyt0es.github.io/wefty/ (the CrustyT0es/wefty repo). Opening https://crustyt0es.github.io/vault/
+in a browser takes you there, with the same notes and the same sign-in.
 
-It's only the app itself: the notes, files and keys are in the owner's own Supabase project, behind their sign-in.
-Made from `vault/web` in the owner's Jarvis repo by `python -m vault.publish`; don't edit it here. `version.json`
-lists every file with its sha256, and both devices check each file against it before using a new version.
+This repo still holds the full app, kept up to date with every Wefty release: Wefty on the PC gets its updates from
+here, and home-screen apps installed from the old address still open it. Made by `python -m vault.publish`; don't
+edit it here.

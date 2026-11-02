@@ -234,7 +234,7 @@ V.dictation = (() => {
     const ios = V.notetaker && V.notetaker.iosWhyNot ? V.notetaker.iosWhyNot() : '';  // an iPhone: Safari only
     if (ios) return { kind: null, why: ios };
     return Recognition() ? { kind: 'web' }
-      : { kind: null, why: 'This browser can\'t turn speech into words. Dictate in Chrome on your phone or Chromebook, or in Vault on your PC.' };
+      : { kind: null, why: 'This browser can\'t turn speech into words. Dictate in Chrome on your phone or Chromebook, or in Wefty on your PC.' };
   }
 
   /* Python listening on the PC: its words come as "dictate-text" events (the note-taker's are "listen-text"). */

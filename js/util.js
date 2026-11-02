@@ -4,8 +4,13 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.14.1';
+V.VERSION = '1.15.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
+/* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
+   Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
+   shown in the new name. Only "Vault" as a word before a space or an apostrophe, never inside an e-mail address. The
+   same as vault/helper.py's in_our_words. */
+V.weftyWords = (text) => String(text == null ? '' : text).replace(/(^|[^\w@.+'\\-])Vault(?=[\s'’])/g, '$1Wefty');
 // Ctrl+N (new note) only reaches the page in the PC app or an installed PWA; in a browser tab Chrome keeps it for a
 // new window, so the hints mention it only where it actually works.
 V.appShortcuts = V.desktop || (() => { try { return window.matchMedia('(display-mode: standalone)').matches; } catch (e) { return false; } })();
@@ -291,33 +296,71 @@ V.icon = function icon(name, cls) {
   return span;
 };
 
-/* Vault's mark: a rounded square split by a V-shaped seam (the wedge it frees is the note kept inside). One flat
-   colour (currentColor; .mark makes it --brand). */
-const MARK = [
-  'M8 0L21.022 0A3.2 3.2 0 0 1 23.999 2.027L48.511 64.223A1.6 1.6 0 0 0 51.489 64.223L76.001 2.027A3.2 3.2 0 0 1 78.978 0L92 0A8 8 0 0 1 100 8L100 78A22 22 0 0 1 78 100L22 100A22 22 0 0 1 0 78L0 8A8 8 0 0 1 8 0Z',
-  'M35.081 0L64.919 0A2.6 2.6 0 0 1 67.338 3.553L52.782 40.487A2.99 2.99 0 0 1 47.218 40.487L32.662 3.553A2.6 2.6 0 0 1 35.081 0Z',
-];
+/* Wefty's mark: a rounded iris tile with a white W, and a light thread woven through it (over the two outside strokes
+   of the W, under the two middle ones: where it goes over, the W is cut along it with a small gap each side).
+   Two looks: `colour` (the brand: iris gradient, white W, lavender thread) for the rail and the start screens, and
+   one colour (the default; currentColor, .mark makes it --brand and empty states --faint): the tile with the W and
+   the thread cut out of it, the weave kept by the gaps (the W is cut where the thread goes over, the thread where it
+   goes under). Each mark gets its own ids, as two marks on a page would otherwise share one gradient and mask. */
+const MARK = {
+  tile: 'M18 0H46C56 0 64 8 64 18V46C64 56 56 64 46 64H18C8 64 0 56 0 46V18C0 8 8 0 18 0Z',
+  w: 'M14 20L23 46L32 26L41 46L50 20',
+  outer: 'M14 20L23 46M41 46L50 20',
+  mid: 'M23 46L32 26L41 46',
+  thread: 'M8 35.5Q20 30.5 32 35.5T56 35.5',
+};
 const SVG = 'http://www.w3.org/2000/svg';
-V.mark = (size = 40, cls = '') => {
+let marks = 0;
+const markParts = (id, colour) => {
+  const { tile, w, outer, mid, thread } = MARK;
+  const line = 'fill="none" stroke-linecap="round" stroke-linejoin="round"';
+  if (colour) {
+    return '<defs><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d50f0"/>'
+      + '<stop offset="1" stop-color="#493cdd"/></linearGradient>'
+      + '<mask id="' + id + 'm" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/>'
+      + '<path d="' + thread + '" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/></mask></defs>'
+      + '<path d="' + tile + '" fill="url(#' + id + 'g)"/>'
+      + '<path d="' + thread + '" fill="none" stroke="#e6e3ff" stroke-width="4.4" stroke-linecap="round"/>'
+      + '<path d="' + w + '" mask="url(#' + id + 'm)" ' + line + ' stroke="#fff" stroke-width="6"/>'
+      + '<path d="' + mid + '" ' + line + ' stroke="#fff" stroke-width="6"/>';
+  }
+  return '<defs><mask id="' + id + 'u" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/>'
+    + '<path d="' + mid + '" ' + line + ' stroke="#000" stroke-width="8.6"/><path d="' + mid + 'Z" fill="#000"/></mask>'
+    + '<mask id="' + id + 'k" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/>'
+    + '<path d="' + outer + '" ' + line + ' stroke="#000" stroke-width="6"/>'
+    + '<path d="' + thread + '" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>'
+    + '<path d="' + thread + '" mask="url(#' + id + 'u)" fill="none" stroke="#000" stroke-width="4.4" stroke-linecap="round"/>'
+    + '<path d="' + mid + '" ' + line + ' stroke="#000" stroke-width="6"/></mask></defs>'
+    + '<path d="' + tile + '" fill="currentColor" mask="url(#' + id + 'k)"/>';
+};
+V.mark = (size = 40, cls = '', { colour = false } = {}) => {
   const svg = document.createElementNS(SVG, 'svg');
-  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('viewBox', '0 0 64 64');
   svg.setAttribute('width', size);
   svg.setAttribute('height', size);
-  svg.setAttribute('class', 'mark' + (cls ? ' ' + cls : ''));
+  svg.setAttribute('class', 'mark' + (colour ? ' colour' : '') + (cls ? ' ' + cls : ''));
   svg.setAttribute('aria-hidden', 'true');
-  for (const d of MARK) {
-    const path = document.createElementNS(SVG, 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('fill', 'currentColor');
-    svg.append(path);
-  }
+  svg.innerHTML = markParts('mark' + ++marks, colour);
   return svg;
 };
 
-/* The mark with "vault" beside it, for the start and the screens before the app: the one drawn in index.html's boot
-   screen (outlined letters, so no font is needed), copied before the app replaces that screen. */
+/* The mark with "wefty" beside it, for the start and the screens before the app: the one drawn in index.html's boot
+   screen (outlined letters, so no font is needed), copied before the app replaces that screen. Each copy's ids are
+   made its own (its gradient and mask), so copies never lean on one that has gone. */
 const WORDMARK = document.querySelector('#boot .wordmark');
-V.wordmark = () => (WORDMARK ? WORDMARK.cloneNode(true) : V.mark(40));
+V.wordmark = () => {
+  if (!WORDMARK) return V.mark(40, '', { colour: true });
+  const copy = WORDMARK.cloneNode(true);
+  const tag = '-' + ++marks;
+  for (const el of copy.querySelectorAll('[id]')) el.id += tag;
+  for (const el of copy.querySelectorAll('[fill^="url(#"], [mask^="url(#"]')) {
+    for (const name of ['fill', 'mask']) {
+      const value = el.getAttribute(name);
+      if (value && value.startsWith('url(#')) el.setAttribute(name, value.slice(0, -1) + tag + ')');
+    }
+  }
+  return copy;
+};
 
 V.button = (label, opts = {}) => V.h('button.btn' + (opts.kind ? '.' + opts.kind : ''), {
   type: 'button', onclick: opts.onClick, title: opts.title, disabled: opts.disabled, 'aria-label': opts.aria || (label ? null : opts.title),
@@ -483,7 +526,7 @@ V.notice = (() => {
         V.clear(parts.picture, state.picture || V.icon(drawn.icon));
       }
       setText(parts.title, state.title || '');
-      el.setAttribute('aria-label', state.title || 'Vault');
+      el.setAttribute('aria-label', state.title || 'Wefty');
       setText(parts.text, state.text || '');
       setText(parts.more, state.more > 0 ? `and ${state.more} more` : '');
       const lines = (state.lines || []).filter(Boolean);

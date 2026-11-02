@@ -370,7 +370,7 @@ V.backup = (() => {
      has. A locked note's words stay sealed (in vault.json only). */
   function markdown(note, folderName) {
     const lines = [`# ${(note.title || '').trim() || V.noteTitle(note)}`, ''];
-    if (note.locked) lines.push('_This note is locked. Its words are only in vault.json, sealed: Vault opens them with your PIN._');
+    if (note.locked) lines.push('_This note is locked. Its words are only in vault.json, sealed: Wefty opens them with your PIN._');
     else lines.push(note.body || '');
     const facts = [];
     if (folderName) facts.push(`Folder: ${folderName}`);
@@ -382,14 +382,14 @@ V.backup = (() => {
       + (a.kind === 'voice' ? ' (voice memo)' : /^image\//.test(a.mime || '') ? ' (picture)' : ''));
     if (facts.length || files.length) lines.push('', '---', '');
     if (facts.length) lines.push(facts.join(' · '));
-    if (files.length) lines.push('', 'Attachments (in Vault, not in this file):', ...files);
+    if (files.length) lines.push('', 'Attachments (in Wefty, not in this file):', ...files);
     return lines.join('\n').replace(/\n{3,}$/, '\n') + '\n';
   }
 
   /* Everything this device has (it's kept in step with the cloud) as one ZIP: a folder per Vault folder (one inside
      another as Vault has it) with a Markdown file per note, and vault.json with every row. */
   function build(now = new Date()) {
-    const root = `Vault ${dateText(now)}`;
+    const root = `Wefty ${dateText(now)}`;
     const folders = [...V.data.folders.values()].filter((f) => !f.deleted);
     const pathOf = (f) => V.organise.pathOf(f);
     const folderName = new Map(folders.map((f) => [f.id, pathOf(f).map((each) => safeName(each.name, 'Folder')).join('/')]));
@@ -412,7 +412,7 @@ V.backup = (() => {
     const everything = {
       format: 1, app: 'Vault', version: V.VERSION, made: now.toISOString(), device: V.device,
       account: (V.data.user && V.data.user.email) || '',
-      about: 'Every note, folder and sent item as your cloud keeps them. Locked notes stay sealed (secret): Vault opens '
+      about: 'Every note, folder and sent item as your cloud keeps them. Locked notes stay sealed (secret): Wefty opens '
         + 'them with your PIN, using pin_salt below.',
       folders: [...V.data.folders.values()].map(clean),
       notes: notes.map(clean),
@@ -521,8 +521,8 @@ V.backup = (() => {
 
   /* Settings' "Backups" card. `ui` is Settings' own { card, line, toggle, draw }. */
   function card(ui) {
-    const rows = [ui.line('Download everything', 'Every note as a Markdown file, in its folder, plus all of Vault in '
-      + 'vault.json, and your chats, in one ZIP. Your pictures and files stay in Vault (the PC\'s weekly backup '
+    const rows = [ui.line('Download everything', 'Every note as a Markdown file, in its folder, plus all of Wefty in '
+      + 'vault.json, and your chats, in one ZIP. Your pictures and files stay in Wefty (the PC\'s weekly backup '
       + 'copies them too). Locked notes stay locked.', V.button('Download', { icon: 'download', onClick: async () => {
       if (V.chat) await V.chat.refresh();  // the chats from the other devices too
       try { download(); } catch (error) { V.problem(error); }

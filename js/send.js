@@ -72,7 +72,7 @@ V.send = (() => {
   const targets = () => V.DEVICES.filter(known);
   const where = () => (targets().includes(target) ? target : V.other);
   const hint = (to) => (to === 'pc' ? 'Files you send are saved in Downloads\\Vault on the PC by themselves.'
-    : `Files wait in Vault on ${V.deviceName(to)} until you open them there.`);
+    : `Files wait in Wefty on ${V.deviceName(to)} until you open them there.`);
 
   /* A Chromebook (or other browser) says so in the settings row's extra, so the PC and the phone can offer it in "Send
      to" before it has sent anything. Only extra is written (never the PIN's columns), straight to the cloud. */
@@ -629,8 +629,8 @@ V.send = (() => {
     // Where to paste it, never naming the device in hand: the PC has it already; a Chromebook's tab and the phone's
     // Vault need opening first ("Keep this clipboard in step").
     const where = ['Paste it on your PC now',
-      V.device !== 'web' ? 'on the Chromebook, click Vault\'s tab first' : '',
-      V.device !== 'phone' ? 'on your phone, open Vault first' : ''].filter(Boolean).join('; ') + '.';
+      V.device !== 'web' ? 'on the Chromebook, click Wefty\'s tab first' : '',
+      V.device !== 'phone' ? 'on your phone, open Wefty first' : ''].filter(Boolean).join('; ') + '.';
     const content = [
       copied === 'sent' ? V.h('p.hint', { text: where }) : null,
       copied === 'later' ? V.h('p.hint', { text: 'Couldn\'t copy it right now: it goes when you\'re back online.' }) : null,
@@ -639,7 +639,7 @@ V.send = (() => {
       words ? V.h('p.shared-text', { text: words.slice(0, 500) }) : null,
     ];
     V.sheet({
-      title: copied === 'sent' ? 'Copied on all your devices' : 'Shared with Vault', content,
+      title: copied === 'sent' ? 'Copied on all your devices' : 'Shared with Wefty', content,
       actions: [
         { label: 'Save as a note', onClick: async () => {
           V.go('notes');
@@ -1021,8 +1021,8 @@ V.send = (() => {
       : V.h('div.empty.small', {}, V.mark(36), V.h('p', { text: V.desktop ? 'Nothing sent yet. Drop a file here and it goes to your phone.'
         // (iPhones and iPads have no "share to Vault": Safari's pages can't be share targets there.)
         : V.deviceKind.ios ? 'Nothing sent yet. Pick files or photos above.'
-        : V.device === 'phone' ? 'Nothing sent yet. Share a photo to Vault, or pick files above.'
-          : 'Nothing sent yet. Pick files above, or drop them anywhere in Vault.' })));
+        : V.device === 'phone' ? 'Nothing sent yet. Share a photo to Wefty, or pick files above.'
+          : 'Nothing sent yet. Pick files above, or drop them anywhere in Wefty.' })));
     // "More" only where the words didn't fit in their four lines.
     requestAnimationFrame(() => {
       for (const box of parts.list.querySelectorAll('.t-text:not(.open)')) {
@@ -1065,7 +1065,7 @@ V.send = (() => {
     if (V.desktop) {
       choose = V.h('button.drop-zone', { type: 'button', onclick: () => picker.click() },
         V.icon('upload', 'big'), V.h('strong', { text: 'Choose files' }),
-        V.h('span', { text: 'or drop them anywhere in Vault (up to 50 MB each)' }));
+        V.h('span', { text: 'or drop them anywhere in Wefty (up to 50 MB each)' }));
     } else {
       // Photos from the gallery, any file, or (on the phone) a photo taken now.
       const photos = V.h('input', { type: 'file', multiple: true, accept: 'image/*,video/*', hidden: true });

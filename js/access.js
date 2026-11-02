@@ -35,13 +35,13 @@
 
 V.invites = (() => {
   const SLUG = 'vault-admin';
-  const PHONE_URL = 'https://crustyt0es.github.io/vault/';  // vault/__init__.py's, for a device that doesn't say
+  const PHONE_URL = 'https://crustyt0es.github.io/wefty/';  // vault/__init__.py's, for a device that doesn't say
   const JOIN_SINCE = 2;  // the helper's first version that makes join codes (vault/helper.py's JOIN_SINCE)
   const NEWS_SINCE = 3;  // ...and the first with announcements (vault/helper.py's NEWS_SINCE)
   const JOINED_SLACK = 5000;  // the cloud's sign-in service and its helper may not quite agree on the time
   const waits = { tick: 30000, poll: 15000 };  // the join sheet's countdown, and asking who joined (tests shorten them)
   const TOKENS_PAGE = 'https://supabase.com/dashboard/account/tokens';
-  const GONE = 'Vault\'s helper isn\'t in your cloud any more. Set it up again in Vault on your PC: Settings > Invite people > Set up.';
+  const GONE = 'Wefty\'s helper isn\'t in your cloud any more. Set it up again in Wefty on your PC: Settings > Invite people > Set up.';
   const KIND_NAMES = { pc: 'PC', android: 'Android phone', iphone: 'iPhone', ipad: 'iPad', chromebook: 'Chromebook', browser: 'Browser' };
   // { how: 'pc' | 'old' | 'helper', on, helper (its note), local (the key on this PC), current, version (the helper's
   // own, as it said hello: phones and Chromebooks) }
@@ -83,14 +83,15 @@ V.invites = (() => {
         body: JSON.stringify({ ...args, action }) });
     } catch (error) {
       if (error && error.kind === 'signed-out') throw error;
-      throw new Error(navigator.onLine ? 'Vault couldn\'t reach your cloud\'s helper just now. Try again in a minute.' : 'You\'re offline.');
+      throw new Error(navigator.onLine ? 'Wefty couldn\'t reach your cloud\'s helper just now. Try again in a minute.' : 'You\'re offline.');
     } finally {
       clearTimeout(timer);
     }
     const answer = await response.json().catch(() => ({}));
     if (response.ok) return answer;
     const message = response.status === 404 ? GONE
-      : answer && typeof answer.message === 'string' && answer.message ? answer.message : `Your cloud's helper said ${response.status}.`;
+      : answer && typeof answer.message === 'string' && answer.message ? V.weftyWords(answer.message)
+        : `Your cloud's helper said ${response.status}.`;
     throw Object.assign(new Error(message), { status: response.status, code: (answer && answer.error) || '' });
   }
 
@@ -166,12 +167,12 @@ V.invites = (() => {
     V.sheet({
       title: update ? 'Update the helper' : 'Set up invites',
       content: [
-        V.h('p', { text: 'Vault puts a small helper in your own free cloud, so you can invite friends and see stats from your '
+        V.h('p', { text: 'Wefty puts a small helper in your own free cloud, so you can invite friends and see stats from your '
           + 'phone, Chromebook or this PC. Your cloud\'s secret key stays in the cloud and on this PC: never on a phone.' }),
         V.h('ol.steps', {},
           V.h('li', { text: 'Open the tokens page (sign in to Supabase if it asks).' }),
-          V.h('li', { text: 'Choose "Create legacy token", call it Vault, create it, then Copy.' }),
-          V.h('li', { text: `Paste it here and press ${update ? 'Update' : 'Set up'}. Vault uses it once and never keeps it: you can delete it afterwards.` })),
+          V.h('li', { text: 'Choose "Create legacy token", call it Wefty, create it, then Copy.' }),
+          V.h('li', { text: `Paste it here and press ${update ? 'Update' : 'Set up'}. Wefty uses it once and never keeps it: you can delete it afterwards.` })),
         V.h('div.setting-buttons', {}, tokensButton()),
         box, log, problem,
         update ? null : V.h('p.hint', { text: 'Got your cloud\'s secret key (sb_secret_...) instead? Paste it to turn invites on for this PC only.' })],
@@ -213,16 +214,16 @@ V.invites = (() => {
     V.sheet({
       title: 'Turn on invites',
       content: [
-        V.h('p', { text: 'To make accounts for friends, Vault needs your cloud\'s secret key once. It stays on this PC, in '
+        V.h('p', { text: 'To make accounts for friends, Wefty needs your cloud\'s secret key once. It stays on this PC, in '
           + 'Jarvis\'s settings file, and is never shown again.' }),
         V.h('ol.steps', {},
-          V.h('li', { text: 'Open your vault project\'s API keys page in Supabase.' }),
+          V.h('li', { text: 'Open the API keys page of your project called vault in Supabase.' }),
           V.h('li', { text: 'Under Secret keys, copy the key (it starts with sb_secret_). On an older project it\'s the service_role key.' }),
           V.h('li', { text: 'Paste it here.' })),
         V.h('div.setting-buttons', {}, V.button('Open Supabase', { icon: 'open',
           onClick: () => V.pc.call('openLink', { url: page }).catch(V.problem) })),
         box,
-        V.h('p.hint', { text: 'An access token (sbp_...) works too: Vault fetches the key with it once and doesn\'t keep the '
+        V.h('p.hint', { text: 'An access token (sbp_...) works too: Wefty fetches the key with it once and doesn\'t keep the '
           + 'token. Never give the secret key to anyone: it opens everything in your cloud.' }),
         problem],
       actions: [{ label: 'Cancel' }, { label: 'Turn on', kind: 'primary', onClick: async () => {
@@ -255,10 +256,10 @@ V.invites = (() => {
     V.sheet({
       title: 'Turn off invites',
       content: [
-        V.h('p', { text: 'Vault takes its helper out of your cloud and this PC forgets the secret key. Everyone you invited '
-          + 'keeps their Vault; you just can\'t invite or remove anyone, see stats or collect feedback until you set it up again.' }),
+        V.h('p', { text: 'Wefty takes its helper out of your cloud and this PC forgets the secret key. Everyone you invited '
+          + 'keeps their Wefty; you just can\'t invite or remove anyone, see stats or collect feedback until you set it up again.' }),
         V.h('p.hint', { text: 'Supabase wants an access token for this, like setting it up: make one on the tokens page and paste it '
-          + 'here. Vault uses it once and never keeps it.' }),
+          + 'here. Wefty uses it once and never keeps it.' }),
         V.h('div.setting-buttons', {}, tokensButton()),
         box, problem],
       actions: [{ label: 'Cancel' }, { label: 'Turn off', kind: 'danger', onClick: async () => {
@@ -286,7 +287,7 @@ V.invites = (() => {
   async function turnOff(ui) {
     if (state && state.how === 'pc' && state.helper) { turnOffSheet(ui); return; }
     const sure = await V.confirm('Turn off invites?', 'This PC forgets your cloud\'s secret key. Everyone you invited keeps '
-      + 'their Vault; you just can\'t invite or remove anyone, or collect feedback, until you turn it on again.', { ok: 'Turn off' });
+      + 'their Wefty; you just can\'t invite or remove anyone, or collect feedback, until you turn it on again.', { ok: 'Turn off' });
     if (!sure) return;
     try { await V.pc.call('invitesTurnOff'); } catch (error) { V.problem(error); }
     reset();
@@ -348,14 +349,14 @@ V.invites = (() => {
       wide: true,
       content: [
         V.h('p.invite-what', { text: `Send ${first} this link in a message or an e-mail (or let them scan the code). It opens `
-          + 'Vault and signs them in once with the code below; then they choose their own password and the code stops working.' }),
+          + 'Wefty and signs them in once with the code below; then they choose their own password and the code stops working.' }),
         V.h('div.connect', {}, V.qr(link), V.h('div.invite-code-box', {},
           V.h('span.label', { text: 'One-time code' }),
           V.h('div.invite-code', { text: made.code }),
-          V.h('p.hint', { text: `For ${made.email}. On a PC, they paste the link into Vault's first screen: "Join with an invite".` }))),
+          V.h('p.hint', { text: `For ${made.email}. On a PC, they paste the link into Wefty's first screen: "Join with an invite".` }))),
         V.h('div.setting-buttons', {},
           !V.desktop && navigator.share ? V.button('Share', { kind: 'primary', icon: 'share', onClick: () => {
-            navigator.share({ title: 'Your Vault invite', text: `${first}, here's your invite to Vault:`, url: link }).catch(() => {});
+            navigator.share({ title: 'Your Wefty invite', text: `${first}, here's your invite to Wefty:`, url: link }).catch(() => {});
           } }) : null,
           V.button('Copy link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Link copied.'); } }),
           V.button('Copy code', { icon: 'copy', onClick: async () => { await V.copy(made.code); V.toast('Code copied.'); } }))],
@@ -400,10 +401,10 @@ V.invites = (() => {
         return;
       }
       const link = code.link;
-      V.clear(qrBox, V.qr(link, 300, 'QR code to join your Vault'));
+      V.clear(qrBox, V.qr(link, 300, 'QR code to join your Wefty'));
       V.clear(buttons,
         !V.desktop && navigator.share ? V.button('Share', { icon: 'share', onClick: () => {
-          navigator.share({ title: 'Join my Vault', text: 'Make your own Vault with this link (it only works for a little while):',
+          navigator.share({ title: 'Join my Wefty', text: 'Make your own Wefty with this link (it only works for a little while):',
             url: link }).catch(() => {});
         } }) : null,
         V.button('Copy link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Link copied.'); } }),
@@ -457,7 +458,7 @@ V.invites = (() => {
     async function stop() {
       if (busy || !code || code.over) return;
       const sure = await V.confirm('Stop this code?', 'Nobody can join with it any more (nor with a code you showed before '
-        + 'it). Everyone who already joined keeps their Vault.', { ok: 'Stop it', danger: true });
+        + 'it). Everyone who already joined keeps their Wefty.', { ok: 'Stop it', danger: true });
       if (!sure || busy || !code) return;
       busy = true;
       try {
@@ -498,7 +499,7 @@ V.invites = (() => {
           V.h('p.join-how', { text: 'Point your phone\'s camera at this code.' }), left, joined)),
         buttons, problem,
         V.h('p.hint.join-hint', { text: 'Closing this keeps the code working until it runs out. Only show it to people you '
-          + 'want in your Vault cloud.' })],
+          + 'want in your Wefty cloud.' })],
       actions: [{ label: 'Done', kind: 'primary' }],
       onClose: () => {
         closed = true;
@@ -516,18 +517,18 @@ V.invites = (() => {
   function helperRow(ui, { since, title, about, button, cant, what }) {
     if (state.how === 'helper') {
       return state.version >= since ? ui.line(title, about, button(false))
-        : ui.line(title, 'Update the helper in Vault on your PC first (Settings > Invite people > Update). No Update there? '
+        : ui.line(title, 'Update the helper in Wefty on your PC first (Settings > Invite people > Update). No Update there? '
           + 'Open Jarvis and click Update first.', null);
     }
     if (state.how !== 'pc') return null;  // (1.8's PC part: a Jarvis update brings the helper first)
     if (!(Number(state.current) >= since)) {
       // This page is newer than the PC's own Vault part, which can't do it or put in a helper that can.
       return ui.line(title, V.pc && V.pc.standalone && V.pc.standalone()
-        ? `Install the newest Vault on this PC (its setup-vault.bat) first: this Vault can't ${cant} yet.`
-        : `Update Jarvis first (open Jarvis and click Update): this Vault can't ${cant} yet.`, button(true));
+        ? `Install the newest Wefty on this PC (its setup-wefty.bat) first: this Wefty can't ${cant} yet.`
+        : `Update Jarvis first (open Jarvis and click Update): this Wefty can't ${cant} yet.`, button(true));
     }
     if (!state.helper) {
-      return ui.line(title, `${what} need Vault's helper in your cloud: press Set up below (once, with a Supabase access `
+      return ui.line(title, `${what} need Wefty's helper in your cloud: press Set up below (once, with a Supabase access `
         + 'token).', null);
     }
     if (Number(state.helper.version) < since) {
@@ -538,13 +539,13 @@ V.invites = (() => {
 
   /* The card's "Join with a QR code" row: it takes the helper, at version 2 or newer. */
   const joinRow = (ui) => helperRow(ui, { since: JOIN_SINCE, title: 'Join with a QR code',
-    about: 'Anyone who scans it in the next 30 minutes gets their own Vault here: they type their name, e-mail and a password.',
+    about: 'Anyone who scans it in the next 30 minutes gets their own Wefty here: they type their name, e-mail and a password.',
     button: (disabled) => V.button('Show QR code', { kind: 'primary', icon: 'qr', disabled, onClick: () => joinSheet(ui) }),
     cant: 'make join codes', what: 'Join codes' });
 
   /* "Announcements" (js/news.js): an update, a poll or a note that pops up for everyone. The helper's version 3. */
   const newsRow = (ui) => (V.news ? helperRow(ui, { since: NEWS_SINCE, title: 'Announcements',
-    about: 'Post an update, a poll or a note for everyone in your Vault cloud.',
+    about: 'Post an update, a poll or a note for everyone in your Wefty cloud.',
     button: (disabled) => V.button('New announcement', { kind: 'primary', icon: 'plus', disabled, onClick: () => V.news.compose() }),
     cant: 'post announcements', what: 'Announcements' }) : null);
 
@@ -582,22 +583,22 @@ V.invites = (() => {
   const tryAgain = (ui) => V.button('Try again', { icon: 'restore', onClick: () => { reset(); ui.draw(); } });
   // An older PC part (1.8's invites, no helper): what brings the rest.
   const updateLine = (ui) => ui.line('Invite from your phone too', V.pc && V.pc.standalone && V.pc.standalone()
-    ? 'Install the newest Vault on this PC (its setup-vault.bat) to invite people from your phone or Chromebook and see stats.'
+    ? 'Install the newest Wefty on this PC (its setup-wefty.bat) to invite people from your phone or Chromebook and see stats.'
     : 'Open Jarvis and click Update to invite people from your phone or Chromebook and see stats.', null);
 
   function offCard(ui) {
     if (state.how === 'pc') {
-      return ui.card('Invite people', ui.line('Give friends their own Vault', 'Each friend gets a private Vault in your free '
+      return ui.card('Invite people', ui.line('Give friends their own Wefty', 'Each friend gets a private Wefty in your free '
         + 'cloud: nobody sees anyone else\'s notes. Set it up once here, then invite people from your phone, Chromebook or this PC.',
       V.button('Set up', { kind: 'primary', onClick: () => setUpSheet(ui) })));
     }
     if (state.how === 'old') {
-      return ui.card('Invite people', ui.line('Give friends their own Vault', 'Each friend gets a private Vault in your free '
+      return ui.card('Invite people', ui.line('Give friends their own Wefty', 'Each friend gets a private Wefty in your free '
         + 'cloud: nobody sees anyone else\'s notes in the app. Turn this on once with your cloud\'s secret key.',
       V.button('Turn on', { onClick: () => turnOnSheet(ui) })), updateLine(ui));
     }
     // (The phone can't tell how new the PC part is: one from before the helper only offers 1.8's Turn on.)
-    return ui.card('Invite people', ui.line('Give friends their own Vault', 'Set up invites once in Vault on your PC '
+    return ui.card('Invite people', ui.line('Give friends their own Wefty', 'Set up invites once in Wefty on your PC '
       + '(Settings > Invite people > Set up). Don\'t see Set up there? Update it first: open Jarvis and click Update. After '
       + 'that you can invite people from here too, and see stats.', null));
   }
@@ -623,14 +624,14 @@ V.invites = (() => {
     for (const person of people || []) rows.push(personLine(ui, person));
     if (people && !people.length) rows.push(ui.line('Nobody yet', 'The people you invite show here.', null));
     if (state.how === 'pc' && !state.helper) {
-      rows.push(ui.line('Invite from your phone too', 'Set up Vault\'s helper once (with a Supabase access token), and your '
+      rows.push(ui.line('Invite from your phone too', 'Set up Wefty\'s helper once (with a Supabase access token), and your '
         + 'phone and Chromebook can invite people and see stats too.', V.button('Set up', { onClick: () => setUpSheet(ui) })));
     } else if (state.how === 'pc' && Number(state.helper.version) < state.current) {
-      rows.push(ui.line('Update the helper', 'This Vault has a newer helper for your cloud. Paste an access token to put it in.',
+      rows.push(ui.line('Update the helper', 'This Wefty has a newer helper for your cloud. Paste an access token to put it in.',
         V.button('Update', { onClick: () => setUpSheet(ui, true) })));
     }
     if (state.how === 'old') rows.push(updateLine(ui));
-    if (state.how === 'helper') rows.push(V.h('p.hint', { text: 'To turn invites off, use Vault on your PC.' }));
+    if (state.how === 'helper') rows.push(V.h('p.hint', { text: 'To turn invites off, use Wefty on your PC.' }));
     else rows.push(V.h('div.setting-buttons', {}, V.button('Turn off invites', { kind: 'danger-quiet', onClick: () => turnOff(ui) })));
     return ui.card('Invite people', ...rows);
   }
@@ -676,14 +677,14 @@ V.invites = (() => {
       ui.line('People', `${people.joined || 0} joined · ${people.waiting || 0} waiting for their invite`, null),
       ui.line('Active', `${active.day || 0} in the last day · ${active.week || 0} this week · ${active.month || 0} this month `
         + '(you and the people you invited)', null),
-      ui.line('Devices in use', listed(s.devices, KIND_NAMES) || 'None yet: each Vault checks in once a day.', null),
-      ui.line('Vault versions', listed(s.versions, { other: 'Other' }) || 'None yet.', null),
+      ui.line('Devices in use', listed(s.devices, KIND_NAMES) || 'None yet: each Wefty checks in once a day.', null),
+      ui.line('Wefty versions', listed(s.versions, { other: 'Other' }) || 'None yet.', null),
       ui.line('Notes and files', plural(s.notes || 0, 'note') + (s.storage
         ? ` · ${plural(s.storage.files || 0, 'file')} · ${V.size(s.storage.bytes || 0)}`
         : ' (files aren\'t counted in this cloud yet: set the helper up again on your PC to add the counter)'), null),
       s.feedback !== null && s.feedback !== undefined ? ui.line('Feedback waiting', s.feedback
         ? `${plural(s.feedback, 'piece')}: your PC collects it into your Feedback folder.` : 'None.', null) : null,
-      ui.line('Downloads', 'Not counted: the app\'s page and the PC download keep no counts, and Vault has no trackers. '
+      ui.line('Downloads', 'Not counted: the app\'s page and the PC download keep no counts, and Wefty has no trackers. '
         + 'The people who joined are the count that\'s real.', null),
       (s.list || []).length ? V.h('ul.stats-people', {}, s.list.map(personStats)) : null,
       V.h('p.hint.stats-privacy', { text: 'Only counts, sizes and times: never what\'s in anyone\'s notes or files.' }),
@@ -813,7 +814,7 @@ V.feedback = (() => {
         } }, V.h('span', { text: label }))));
     const count = V.h('span.feedback-count');
     const box = V.h('textarea.field.feedback-text', { rows: '6', maxlength: String(MOST), 'aria-label': 'Your feedback',
-      placeholder: 'What went wrong, or what would make Vault better?', oninput: () => { draft.text = box.value; counted(); } });
+      placeholder: 'What went wrong, or what would make Wefty better?', oninput: () => { draft.text = box.value; counted(); } });
     box.value = draft.text;
     const counted = () => { count.textContent = box.value.length > MOST - 500 ? `${box.value.length} / ${MOST}` : ''; };
     counted();
@@ -825,8 +826,8 @@ V.feedback = (() => {
       title: 'Send feedback',
       content: [kinds, box, count,
         V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Include device info' }),
-          V.h('span', { text: 'Vault\'s version, which kind of device, and the browser\'s name. Never your notes.' })), device),
-        V.h('p.hint', { text: owner ? 'It lands in your Feedback folder.' : 'It goes to the person who runs your Vault cloud.' })],
+          V.h('span', { text: 'Wefty\'s version, which kind of device, and the browser\'s name. Never your notes.' })), device),
+        V.h('p.hint', { text: owner ? 'It lands in your Feedback folder.' : 'It goes to the person who runs your Wefty cloud.' })],
       actions: [{ label: 'Cancel' }, { label: 'Send', kind: 'primary', onClick: async () => {
         if (busy) return true;
         if (!box.value.trim()) { V.toast('Write something first.', { kind: 'err' }); return true; }

@@ -29,10 +29,10 @@ V.files = (() => {
   const PICTURE = /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|avif)$/i;
   const THUMBABLE = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const NO_PC = 'Your PC didn\'t answer. Is it awake, with Vault by the clock?';
-  const NO_PHONE = 'Your phone didn\'t answer. Is Vault open on it?';
+  const NO_PC = 'Your PC didn\'t answer. Is it awake, with Wefty by the clock?';
+  const NO_PHONE = 'Your phone didn\'t answer. Is Wefty open on it?';
   const OFFLINE = 'No internet just now. Try again when you\'re back online.';
-  const FULL = 'Your free cloud is full (1 GB). Delete things from Vault Drive or Send first.';
+  const FULL = 'Your free cloud is full (1 GB). Delete things from Wefty Drive or Send first.';
   const canShareHere = !V.desktop && 'showDirectoryPicker' in window;
 
   let root = null;
@@ -144,7 +144,7 @@ V.files = (() => {
      (or "didn't answer" after a while, when the request is withdrawn so it's never run late). */
   async function ask(op, args, target) {
     const sb = V.cloud.sb;
-    if (!sb) throw new Error('Vault isn\'t connected yet.');
+    if (!sb) throw new Error('Wefty isn\'t connected yet.');
     if (!navigator.onLine) throw Object.assign(new Error(OFFLINE), { code: 'offline' });
     const id = V.uuid();
     const request = { v: 1, host: target.host, op, ...args };
@@ -201,7 +201,7 @@ V.files = (() => {
         hostsAt = Date.now();
         hostsTrouble = '';
       } catch (error) {
-        hostsTrouble = navigator.onLine ? 'Vault couldn\'t look for your devices just now.' : OFFLINE;
+        hostsTrouble = navigator.onLine ? 'Wefty couldn\'t look for your devices just now.' : OFFLINE;
         if (!hosts) hosts = [];  // shown as "can't look" (with Try again), never asked again in a loop
         hostsAt = Date.now();
       } finally {
@@ -305,7 +305,7 @@ V.files = (() => {
       return;
     }
     await use(handle);
-    V.toast(`Your PC can see ${handle.name} while Vault is open here`);
+    V.toast(`Your PC can see ${handle.name} while Wefty is open here`);
   }
 
   async function allowAgain() {
@@ -314,7 +314,7 @@ V.files = (() => {
       here.state = 'on';
       await announceHere(true);
       listen();
-    } else V.toast('Vault wasn\'t allowed to see that folder.', { kind: 'err' });
+    } else V.toast('Wefty wasn\'t allowed to see that folder.', { kind: 'err' });
     draw();
   }
 
@@ -413,12 +413,12 @@ V.files = (() => {
         stored = `${V.data.user.id}/phonefiles/${row.id}/${V.storageName(file.name)}`;
         await V.cloud.upload(stored, file, { mime: file.type || 'application/octet-stream' });
         reply = { state: 'done', result: { file: { path: stored, name: file.name, size: file.size, mime: file.type || 'application/octet-stream' } } };
-      } else throw refusal('Vault on the phone doesn\'t know that yet: it updates by itself soon.');
+      } else throw refusal('Wefty on the phone doesn\'t know that yet: it updates by itself soon.');
       if (here) here.looked = Date.now();
     } catch (error) {
       reply = error.refused ? { state: 'refused', error: error.message }
         : { state: 'error', error: error.name === 'NotFoundError' || error.name === 'TypeError' ? 'That isn\'t there any more.'
-          : error.name === 'NotAllowedError' ? 'Vault on the phone needs its permission again: open Files there.'
+          : error.name === 'NotAllowedError' ? 'Wefty on the phone needs its permission again: open Files there.'
             : 'The phone couldn\'t read that.' };
     }
     try {
@@ -476,7 +476,7 @@ V.files = (() => {
   async function newFolder() {
     const folder = drive;
     const name = await V.ask('New folder', { placeholder: 'Folder name', ok: 'Make it',
-      hint: folder ? `In ${folder.split('/').pop()}` : 'In Vault Drive' });
+      hint: folder ? `In ${folder.split('/').pop()}` : 'In Wefty Drive' });
     if (name === null) return;
     try {
       const clean = cleanName(name, folder);
@@ -545,7 +545,7 @@ V.files = (() => {
       for (const r of all) await V.cloud.save('transfers', { ...r, deleted: true });
       if (drive === inside || drive.startsWith(inside + '/')) drive = String(driveInfo(t).folder || '');
     } else {
-      const sure = await V.confirm(`Delete ${t.name}?`, 'It goes from Vault Drive on both devices. Copies already saved stay.',
+      const sure = await V.confirm(`Delete ${t.name}?`, 'It goes from Wefty Drive on both devices. Copies already saved stay.',
         { ok: 'Delete', danger: true });
       if (!sure) return;
       if (t.path) V.cloud.remove([t.path]).catch(() => {});
@@ -665,7 +665,7 @@ V.files = (() => {
       }
     }
     for (const [label, icon, job, kind, plain] of extra) actions.push(act(label, icon, job, kind, plain));
-    const meta = [size || size === 0 ? V.size(size) : '', mtime ? when(mtime) : '', from ? `On ${from}` : 'In Vault Drive']
+    const meta = [size || size === 0 ? V.size(size) : '', mtime ? when(mtime) : '', from ? `On ${from}` : 'In Wefty Drive']
       .filter(Boolean).join(' · ');
     const sheet = V.sheet({
       title: name,
@@ -694,9 +694,9 @@ V.files = (() => {
       thumb: thumbs.get(placeKey(host, where.root, where.path, entry)),
       get: () => bringUp(where, entry),
       start,
-      extra: [['Copy to Vault Drive', 'cloud', async (file) => {
+      extra: [['Copy to Wefty Drive', 'cloud', async (file) => {
         await copyToDrive(file);
-        V.toast('Copied to Vault Drive', { action: 'Show', onAction: () => { drive = ''; show('drive'); } });
+        V.toast('Copied to Wefty Drive', { action: 'Show', onAction: () => { drive = ''; show('drive'); } });
       }]],
     });
   }
@@ -800,8 +800,8 @@ V.files = (() => {
   }
 
   function sources() {
-    if (V.desktop) return [['phone', 'phone', 'Your phone'], ['drive', 'cloud', 'Vault Drive'], ['share', 'pc', 'Share this PC']];
-    return [['pc', 'pc', 'Your PC'], ['here', 'phone', hereLabel()], ['drive', 'cloud', 'Vault Drive']];
+    if (V.desktop) return [['phone', 'phone', 'Your phone'], ['drive', 'cloud', 'Wefty Drive'], ['share', 'pc', 'Share this PC']];
+    return [['pc', 'pc', 'Your PC'], ['here', 'phone', hereLabel()], ['drive', 'cloud', 'Wefty Drive']];
   }
 
   function show(which) {
@@ -887,8 +887,8 @@ V.files = (() => {
     const host = currentHost();
     if (!host) {
       if (hostsTrouble) return V.clear(main, empty('alert', 'Can\'t look just now', hostsTrouble, V.button('Try again', { kind: 'primary', onClick: refreshHosts })));
-      return V.clear(main, kind === 'pc' ? empty('pc', 'Update Vault on your PC',
-        'Browsing your PC from here needs the newest Vault there. On the PC, open Jarvis and click Update, then open Vault.',
+      return V.clear(main, kind === 'pc' ? empty('pc', 'Update Wefty on your PC',
+        'Browsing your PC from here needs the newest Wefty there. On the PC, open Jarvis and click Update, then open Wefty.',
         V.button('Look again', { icon: 'restore', onClick: refreshHosts })) : phoneTip());
     }
     browse.host = host.id;
@@ -903,19 +903,19 @@ V.files = (() => {
       V.iconButton('restore', 'Look again', refreshHosts, 'quiet'));
     if (!host.on) {
       return V.clear(main, where, kind === 'pc'
-        ? empty('lock', 'Browsing is off on your PC', 'On the PC, open Vault > Files > Share this PC, turn it on and tick the folders your phone may see.')
-        : empty('lock', 'Your phone isn\'t sharing right now', 'Open Vault on the phone (Files > This phone): the folder it shares shows here while Vault is open there.'));
+        ? empty('lock', 'Browsing is off on your PC', 'On the PC, open Wefty > Files > Share this PC, turn it on and tick the folders your phone may see.')
+        : empty('lock', 'Your phone isn\'t sharing right now', 'Open Wefty on the phone (Files > This phone): the folder it shares shows here while Wefty is open there.'));
     }
     if (!fresh(host) && !browse.anyway) {
       return V.clear(main, where, empty('clock', `Last ${seenText(host.seen)}`,
-        kind === 'pc' ? 'Your PC is off or asleep, or Vault isn\'t running on it (it lives by the clock).'
-          : 'Vault isn\'t open on your phone right now.',
+        kind === 'pc' ? 'Your PC is off or asleep, or Wefty isn\'t running on it (it lives by the clock).'
+          : 'Wefty isn\'t open on your phone right now.',
         V.button('Try anyway', { onClick: () => { browse.anyway = true; draw(); } })));
     }
     const roots = Array.isArray(host.roots) ? host.roots.filter((r) => r && r.id) : [];
     if (!roots.length) {
       return V.clear(main, where, empty('folder', 'No folders are shared yet',
-        kind === 'pc' ? 'On the PC: Vault > Files > Share this PC, then tick the folders your phone may see.' : ''));
+        kind === 'pc' ? 'On the PC: Wefty > Files > Share this PC, then tick the folders your phone may see.' : ''));
     }
     if (!roots.some((r) => r.id === browse.root)) { browse.root = roots[0].id; browse.path = []; browse.listing = null; }
     const rootLabel = (roots.find((r) => r.id === browse.root) || {}).label || 'Folder';
@@ -940,8 +940,8 @@ V.files = (() => {
     const apple = V.phoneModel();  // (the owner's phone, from its own records: 'iPhone', 'iPad' or 'Phone')
     if (apple !== 'Phone') {
       return V.h('div.files-tip', {},
-        empty('phone', `See your ${apple}'s files here`, `An ${apple} doesn't let a PC browse its files. Send them from Vault on `
-          + `the ${apple}, or put them in Vault Drive: both come here.`));
+        empty('phone', `See your ${apple}'s files here`, `An ${apple} doesn't let a PC browse its files. Send them from Wefty on `
+          + `the ${apple}, or put them in Wefty Drive: both come here.`));
     }
     return V.h('div.files-tip', {},
       empty('phone', 'See your phone\'s files here', 'Windows 11 can show your phone in File Explorer by itself, over Wi-Fi, with nothing open on the phone:'),
@@ -950,7 +950,7 @@ V.files = (() => {
         V.h('li', { text: 'Turn on "Show mobile device in File Explorer" and pick your phone (it uses Phone Link, which Samsung phones already have).' }),
         V.h('li', { text: 'Your phone shows up in File Explorer, beside This PC.' })),
       V.pc && V.pc.can('openMobileDevices') ? V.button('Open that setting', { icon: 'open', onClick: () => V.pc.call('openMobileDevices').catch(V.problem) }) : null,
-      V.h('p.hint', { text: 'If your phone\'s browser can share folders, Vault there (Files > This phone) can show one here while it\'s open. Vault Drive works either way.' }));
+      V.h('p.hint', { text: 'If your phone\'s browser can share folders, Wefty there (Files > This phone) can show one here while it\'s open. Wefty Drive works either way.' }));
   }
 
   async function refreshHosts() {
@@ -1048,7 +1048,7 @@ V.files = (() => {
       name: entry.n, dir: !!entry.d, size: entry.s, mtime: entry.m, cloudOnly: !!entry.c,
       thumb: thumbs.get(placeKey(host, spot.root, spot.path, entry)),
       open: () => (entry.d ? go(browse.root, [...browse.path, entry.n]) : remoteSheet(entry)),
-      menu: entry.d ? null : (anchor) => V.menu(anchor, [...actionsFor(), ['Copy to Vault Drive', 'cloud']].map(([label, icon]) => ({
+      menu: entry.d ? null : (anchor) => V.menu(anchor, [...actionsFor(), ['Copy to Wefty Drive', 'cloud']].map(([label, icon]) => ({
         label, icon, onClick: () => remoteSheet(entry, label) }))),
     }))] : empty('folder', words ? 'Nothing here by that name' : 'This folder is empty', words ? '' : null));
     const left = Math.max(0, (listing.total || 0) - listing.entries.length);
@@ -1062,7 +1062,7 @@ V.files = (() => {
   function drawDrive() {
     const main = parts.main;
     const crumbs = V.h('nav.files-crumbs', { 'aria-label': 'Folder' },
-      ['Vault Drive', ...(drive ? drive.split('/') : [])].map((name, i, all) => [i ? V.h('span.files-crumb-gap', { text: '›', 'aria-hidden': 'true' }) : null,
+      ['Wefty Drive', ...(drive ? drive.split('/') : [])].map((name, i, all) => [i ? V.h('span.files-crumb-gap', { text: '›', 'aria-hidden': 'true' }) : null,
         V.h('button.files-crumb' + (i === all.length - 1 ? '.here' : ''), { type: 'button', text: name,
           onclick: () => { drive = all.slice(1, i + 1).join('/'); draw(); } })]));
     const picker = V.h('input', { type: 'file', multiple: true, hidden: true });
@@ -1071,7 +1071,7 @@ V.files = (() => {
     parts.list = V.h('div.files-list');
     parts.space = V.h('div.space-row.files-space');
     V.clear(main,
-      V.h('div.files-host.files-wraps', {}, V.icon('cloud'), V.h('div.files-host-text', {}, V.h('strong', { text: 'Vault Drive' }),
+      V.h('div.files-host.files-wraps', {}, V.icon('cloud'), V.h('div.files-host-text', {}, V.h('strong', { text: 'Wefty Drive' }),
         V.h('span', { text: 'In your own cloud: both devices see it, even with the other one off.' }))),
       drive ? V.h('div.files-bar', {}, V.iconButton('back', 'Up a folder', () => { drive = drive.split('/').slice(0, -1).join('/'); draw(); }, 'quiet'),
         crumbsAt(crumbs)) : null,
@@ -1100,7 +1100,7 @@ V.files = (() => {
       return fileRow({ name: t.name || 'file', dir: isDir(t), size: t.size,
         mtime: Date.parse(t.created_at || t._edited || 0) / 1000,
         open: () => { if (isDir(t)) { drive = joined(drive, t.name); draw(); } else driveSheet(t); }, menu });
-    })] : empty('cloud', drive ? 'This folder is empty' : 'Vault Drive is empty',
+    })] : empty('cloud', drive ? 'This folder is empty' : 'Wefty Drive is empty',
       V.desktop ? 'Upload files, or drop them here: your phone sees them too, even when this PC is off.'
         : 'Upload files here and your PC sees them too, even when this phone is off.'));
     const total = used();
@@ -1124,22 +1124,22 @@ V.files = (() => {
     if (!canShareHere && V.deviceKind.ios) {  // (Windows' "Mobile devices" is for Android phones only)
       return V.clear(main, V.h('div.files-tip', {},
         empty('phone', `Your PC can't browse this ${V.deviceKind.model}`, 'iPhones and iPads don\'t let the PC look at their '
-          + 'files. Send them, or put them in Vault Drive.'),
-        V.button('Open Vault Drive', { icon: 'cloud', onClick: () => show('drive') })));
+          + 'files. Send them, or put them in Wefty Drive.'),
+        V.button('Open Wefty Drive', { icon: 'cloud', onClick: () => show('drive') })));
     }
     if (!canShareHere) {
       return V.clear(main, V.h('div.files-tip', {},
-        empty('phone', 'Browse this phone from your PC', 'Phone browsers can\'t share folders with Vault, but Windows 11 can see this phone by itself, over Wi-Fi:'),
+        empty('phone', 'Browse this phone from your PC', 'Phone browsers can\'t share folders with Wefty, but Windows 11 can see this phone by itself, over Wi-Fi:'),
         V.h('ol.steps', {},
           V.h('li', { text: 'On the PC: Settings > Bluetooth & devices > Mobile devices.' }),
           V.h('li', { text: 'Turn on "Show mobile device in File Explorer" and pick this phone (it uses Link to Windows, which Samsung phones already have).' }),
           V.h('li', { text: 'This phone shows up in File Explorer on the PC.' })),
-        V.h('p.hint', { text: 'To put files from here on your PC, use Send, or upload them to Vault Drive.' }),
-        V.button('Open Vault Drive', { icon: 'cloud', onClick: () => show('drive') })));
+        V.h('p.hint', { text: 'To put files from here on your PC, use Send, or upload them to Wefty Drive.' }),
+        V.button('Open Wefty Drive', { icon: 'cloud', onClick: () => show('drive') })));
     }
     if (!here) {
       return V.clear(main, V.h('div.files-tip', {},
-        empty('folder', 'Let your PC see a folder here', 'Pick a folder (like Camera or Documents). Your PC can look in it and take copies while Vault is open on this phone.'),
+        empty('folder', 'Let your PC see a folder here', 'Pick a folder (like Camera or Documents). Your PC can look in it and take copies while Wefty is open on this phone.'),
         V.button('Share a folder', { kind: 'primary wide-btn', icon: 'folder', onClick: pickHere }),
         V.h('p.hint', { text: 'Read only: your PC never changes or deletes anything here. Android doesn\'t allow sharing the whole storage or Download itself.' })));
     }
@@ -1150,7 +1150,7 @@ V.files = (() => {
         V.button('Stop sharing', { kind: 'danger-quiet', onClick: stopHere })));
     }
     V.clear(main, V.h('div.files-tip', {},
-      empty('folder', `Sharing ${here.name} with your PC`, 'Your PC can see it while Vault is open here. Keep Vault in front while it looks.'),
+      empty('folder', `Sharing ${here.name} with your PC`, 'Your PC can see it while Wefty is open here. Keep Wefty in front while it looks.'),
       here.looked ? V.h('p.hint.center', { text: `Your PC looked ${seenText(new Date(here.looked).toISOString()).replace('seen ', '')}.` }) : null,
       V.h('div.files-empty-actions', {},
         V.button('Change folder', { icon: 'folder', onClick: pickHere }),
@@ -1192,7 +1192,7 @@ V.files = (() => {
     V.clear(main, V.h('div.settings.files-share', {},
       V.h('section.card.settings-card', {}, V.h('h2', { text: 'Your phone and this PC' }),
         V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Let my phone see files on this PC' }),
-          V.h('span', { text: s.on ? `On: your phone sees it as ${s.label || 'your PC'}, while Vault runs here.` : 'Off: nothing on this PC can be seen from the phone.' })), master)),
+          V.h('span', { text: s.on ? `On: your phone sees it as ${s.label || 'your PC'}, while Wefty runs here.` : 'Off: nothing on this PC can be seen from the phone.' })), master)),
       V.h('section.card.settings-card' + (s.on ? '' : '.muted-card'), {}, V.h('h2', { text: 'Folders your phone can see' }),
         (s.folders || []).length ? s.folders.map(folderLine) : V.h('p.hint', { text: 'This PC has none of Windows\' usual folders.' })),
       V.h('section.card.settings-card', {}, V.h('h2', { text: 'What your phone can do' }),
@@ -1200,7 +1200,7 @@ V.files = (() => {
           V.h('li', { text: 'Look in the folders ticked above, and take copies of files (up to 50 MB each).' }),
           V.h('li', { text: 'Never change, move or delete anything on this PC.' }),
           V.h('li', { text: 'Never see hidden files, programs\' own folders or password and key files.' }),
-          V.h('li', { text: 'Only while this PC is on with Vault by the clock. You get a notice when the phone takes a file.' })))));
+          V.h('li', { text: 'Only while this PC is on with Wefty by the clock. You get a notice when the phone takes a file.' })))));
   }
 
   /* ---------------------------------------------------------------- starting, and the rest of the app */
@@ -1242,7 +1242,7 @@ V.files = (() => {
       addToDrive(list);
       return true;
     },
-    dropText: () => (V.tab() === 'files' && source === 'drive' ? 'Drop to add to Vault Drive' : ''),
+    dropText: () => (V.tab() === 'files' && source === 'drive' ? 'Drop to add to Wefty Drive' : ''),
     busy: () => uploads.size > 0 || busyCount > 0,
     // For tests and the PC app's check: look for requests now, ask directly, share a folder, timings.
     checkRequests,

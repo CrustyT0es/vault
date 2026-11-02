@@ -94,7 +94,7 @@ V.reading = (() => {
   }
 
   /* The plain sentence for a change that didn't go through. */
-  const NOT_CHANGED = 'That reading setting wasn\'t changed: Vault couldn\'t reach your cloud. Check you\'re online and try again.';
+  const NOT_CHANGED = 'That reading setting wasn\'t changed: Wefty couldn\'t reach your cloud. Check you\'re online and try again.';
 
   /* One of the switches turned on or off (a note's ⋯ menu), with a line saying so either way. */
   const NAMES = { quick: 'Quick read', quickHighlight: 'Quick read\'s colour', dyslexia: 'Dyslexia-friendly text' };

@@ -280,13 +280,14 @@ V.reminders = (() => {
   const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');  // 20261030T130000Z
 
   function noteLink(id) {
-    const own = location.protocol === 'https:' || location.protocol === 'http:' ? location.origin + location.pathname : '';
-    const base = (V.config && V.config.phoneUrl) || own || 'https://crustyt0es.github.io/vault/';
+    const page = location.origin + location.pathname;
+    const own = location.protocol === 'https:' || location.protocol === 'http:' ? (V.moved ? V.moved.address(page) : page) : '';
+    const base = (V.config && V.config.phoneUrl) || own || 'https://crustyt0es.github.io/wefty/';
     return `${base.replace(/#.*$/, '')}#note=${id}`;
   }
 
   function details(note) {
-    return `${V.noteTitle(note)}\n\nOpen in Vault: ${noteLink(note.id)}`;
+    return `${V.noteTitle(note)}\n\nOpen in Wefty: ${noteLink(note.id)}`;
   }
 
   /* A Google Calendar "new event" page, filled in: the note's title, half an hour from the reminder, and a link back. */
@@ -302,7 +303,7 @@ V.reminders = (() => {
     const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
     const end = new Date(at.getTime() + 30 * 60000);
     const title = V.noteTitle(note);
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Vault//Reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Wefty//Reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
       'BEGIN:VEVENT', `UID:${note.id}-${stamp(at)}@vault`, `DTSTAMP:${stamp(now)}`, `DTSTART:${stamp(at)}`,
       `DTEND:${stamp(end)}`, `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(details(note))}`, `URL:${noteLink(note.id)}`,
       'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:-PT10M', 'END:VALARM',
@@ -400,7 +401,7 @@ V.reminders = (() => {
     });
     const note = V.editor.current();
     if (kind === 'due') V.toast(`Due ${dayLabel(found.date)}`);
-    else if (kind === 'never') V.toast('Vault won\'t ask about dates in this note.');
+    else if (kind === 'never') V.toast('Wefty won\'t ask about dates in this note.');
     else if (kind === 'remind') {
       // Opened now, while the tap still counts (a page opened later is stopped as a pop-up).
       const opened = openOutside(calendarLink(note, found.at));
@@ -425,7 +426,7 @@ V.reminders = (() => {
           V.h('span', { text: opened ? ` Save the event in Google Calendar (it opened in ${V.desktop ? 'your browser' : 'a new tab'}) so your phone rings.`
             : ' Add it to your calendar so your phone rings:' })),
         V.h('button.ask-close.keep-caret', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, V.icon('x'))),
-      canNotify ? V.h('p.ask-line', { text: 'Vault can also show a notification at that time while it\'s open.' }) : null,
+      canNotify ? V.h('p.ask-line', { text: 'Wefty can also show a notification at that time while it\'s open.' }) : null,
       V.h('div.ask-actions', {},
         opened ? null : askButton('Open Google Calendar', 'primary', () => openOutside(calendarLink(latest(id) || note, found.at))),
         askButton('Download .ics instead', '', () => downloadIcs(latest(id) || note, found.at)),
@@ -434,7 +435,7 @@ V.reminders = (() => {
           close();
           let answerGiven = 'default';
           try { answerGiven = await Notification.requestPermission(); } catch (error) { /* an old browser */ }
-          V.toast(answerGiven === 'granted' ? 'Notifications on: Vault pings you while it\'s open.'
+          V.toast(answerGiven === 'granted' ? 'Notifications on: Wefty pings you while it\'s open.'
             : 'No notifications, then. Your calendar still reminds you.');
         }) : null,
         askButton('Done', canNotify ? 'quiet' : opened ? 'primary' : '', close))));
@@ -449,7 +450,7 @@ V.reminders = (() => {
     const close = () => { if (showing && showing.kind === 'done') { V.editor.ask(null); showing = null; } };
     V.editor.ask(V.h('div.ask-card.after', { role: 'status' },
       V.h('div.ask-top', {}, icon('bell', 'ask-icon'),
-        V.h('span.ask-text', { text: 'Vault can also show a notification at that time while it\'s open.' }),
+        V.h('span.ask-text', { text: 'Wefty can also show a notification at that time while it\'s open.' }),
         V.h('button.ask-close.keep-caret', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, V.icon('x'))),
       V.h('div.ask-actions', {},
         askButton('Allow notifications', 'primary', async () => {
@@ -457,7 +458,7 @@ V.reminders = (() => {
           close();
           let given = 'default';
           try { given = await Notification.requestPermission(); } catch (error) { /* an old browser */ }
-          V.toast(given === 'granted' ? 'Notifications on: Vault pings you while it\'s open.'
+          V.toast(given === 'granted' ? 'Notifications on: Wefty pings you while it\'s open.'
             : 'No notifications, then. Your calendar still reminds you.');
         }),
         askButton('Not now', 'quiet', () => { setFlag(NOTIFY_ASKED); close(); }))));
@@ -526,7 +527,7 @@ V.reminders = (() => {
         V.h('label.label', {}, 'Day', day),
         timeRow,
         error,
-        V.h('p.hint.remind-hint', { text: 'Vault reminds you while it\'s open. To have your phone ring even when it isn\'t, add it to your calendar:' }),
+        V.h('p.hint.remind-hint', { text: 'Wefty reminds you while it\'s open. To have your phone ring even when it isn\'t, add it to your calendar:' }),
         V.h('div.remind-outside', {},
           V.button('Google Calendar', { icon: 'calendar', onClick: outside('google') }),
           V.button('Download .ics', { icon: 'download', onClick: outside('ics') })),
@@ -665,7 +666,7 @@ V.reminders = (() => {
     V.toast(`${late ? 'Missed reminder' : 'Reminder'}: ${title} (${clock(at)})`, { ms: 12000, action: 'Open', onAction: () => openNote(note.id) });
     try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (error) { /* no buzz */ }
     Promise.resolve(api.notify(title, { body: `${late ? 'Missed reminder' : 'Reminder'} · ${clock(at)}`, tag: 'vault-' + note.id,
-      data: { url: noteLink(note.id), id: note.id }, icon: 'icons/seam-192.png', badge: 'icons/seam-mono-512.png' }))
+      data: { url: noteLink(note.id), id: note.id }, icon: 'icons/wefty-192.png', badge: 'icons/wefty-mono-512.png' }))
       .catch(() => {});
   }
 
@@ -718,7 +719,7 @@ V.reminders = (() => {
     }
     if (++hashTries > 480) {  // two minutes (signing in first): it isn't here
       history.replaceState(history.state, '', location.pathname + location.search);
-      if (ready) V.toast('That note isn\'t in Vault on this device.');
+      if (ready) V.toast('That note isn\'t in Wefty on this device.');
       hashTries = 0;
       return;
     }

@@ -124,7 +124,7 @@ V.notetaker = (() => {
   function engine() {
     if (V.desktop) {
       return V.pc && V.pc.can('listenStart') ? { kind: 'pc' }
-        : { kind: null, why: 'Use your phone or Chromebook for the note-taker (this PC\'s Vault needs an update for it: open Jarvis and click Update).' };
+        : { kind: null, why: 'Use your phone or Chromebook for the note-taker (this PC\'s Wefty needs an update for it: open Jarvis and click Update).' };
     }
     const ios = iosWhyNot();
     if (ios) return { kind: null, why: ios };
@@ -138,10 +138,10 @@ V.notetaker = (() => {
     const kind = V.deviceKind || {};
     if (!kind.ios) return '';
     if (kind.iosBrowser && kind.iosBrowser !== 'safari') {
-      return `On an ${kind.model}, this works in Safari: open Vault in Safari to use it.`;
+      return `On an ${kind.model}, this works in Safari: open Wefty in Safari to use it.`;
     }
     if (!Recognition()) {
-      return `On an ${kind.model}, open Vault in Safari (not from the home screen icon) for this, with Siri or Dictation turned on in Settings.`;
+      return `On an ${kind.model}, open Wefty in Safari (not from the home screen icon) for this, with Siri or Dictation turned on in Settings.`;
     }
     return '';
   }
@@ -237,8 +237,8 @@ V.notetaker = (() => {
         if (what === 'not-allowed' || what === 'service-not-allowed') {
           wanted = false;
           on.fail(V.deviceKind && V.deviceKind.ios
-            ? `Vault can't use speech here. On your ${V.deviceKind.model}: Settings > Apps > Safari > Microphone (Allow), and turn on Siri or Dictation (Settings > General > Keyboard > Enable Dictation). Then try again in Safari.`
-            : 'Vault can\'t use the microphone. Allow it for Vault in the browser\'s site settings, then try again.');
+            ? `Wefty can't use speech here. On your ${V.deviceKind.model}: Settings > Apps > Safari > Microphone (Allow), and turn on Siri or Dictation (Settings > General > Keyboard > Enable Dictation). Then try again in Safari.`
+            : 'Wefty can\'t use the microphone. Allow it for Wefty in the browser\'s site settings, then try again.');
         } else if (what === 'audio-capture') {
           wanted = false;
           on.fail('No microphone was found.');
@@ -476,7 +476,7 @@ V.notetaker = (() => {
       if (yes) session.wasAway = true;
       else {  // the note about missed words goes once it has been listening a while again
         // (with its screen put away, that note can't be seen: a line says it instead)
-        if (!live()) V.toast('Vault was off the screen for a moment, so the note-taker missed what was said then.', { ms: 7000 });
+        if (!live()) V.toast('Wefty was off the screen for a moment, so the note-taker missed what was said then.', { ms: 7000 });
         const now = session;
         setTimeout(() => { if (session === now && !now.waiting) { now.wasAway = false; drawStatus(); } }, 20000);
       }
@@ -1141,7 +1141,7 @@ V.notetaker = (() => {
     if (s.state === 'starting') return ['Starting...', 'Starting...', 'starting'];
     if (s.state === 'stopping') return ['Saving...', 'Saving...', 'saving'];
     if (s.state === 'paused') return ['Paused', 'Paused', 'paused'];
-    if (s.waiting) return ['Waiting', 'Waiting', 'waiting for Vault to be on the screen'];
+    if (s.waiting) return ['Waiting', 'Waiting', 'waiting for Wefty to be on the screen'];
     if (s.trouble) return ['Not hearing', 'Not hearing', 'not hearing right now'];  // (why: on its screen, a tap away)
     return s.source === 'mic' ? ['Listening', 'Listening', 'listening']
       : ['Listening to PC sound', 'PC sound', 'listening to PC sound'];
@@ -1215,7 +1215,7 @@ V.notetaker = (() => {
     V.clear(body, V.h('div.nt-ready', {},
       V.h('div.nt-hero', {}, icon('listen', 'nt-hero-icon')),
       V.h('h3', { text: note ? `Listen into "${V.noteTitle(note)}"` : 'Notes, written for you' }),
-      V.h('p.nt-lead', { text: `Vault writes down what's said in a class or meeting as it happens. When you stop, ${writer()} turns it into tidy notes: a summary, key points, terms, homework and questions.` }),
+      V.h('p.nt-lead', { text: `Wefty writes down what's said in a class or meeting as it happens. When you stop, ${writer()} turns it into tidy notes: a summary, key points, terms, homework and questions.` }),
       name ? V.h('label.label', {}, 'What is it? (optional)', name) : null,
       folder ? V.h('label.label', {}, 'Folder', folder) : null,
       choice,
@@ -1231,12 +1231,12 @@ V.notetaker = (() => {
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
         how.kind === 'web' ? V.h('li', { text: navigator.wakeLock
-          ? 'You can use the rest of Vault while it listens. Keep Vault on the screen (it stays on by itself).'
-          : 'You can use the rest of Vault while it listens. Keep Vault on the screen, with the screen on.' })
-          : how.kind ? V.h('li', { text: 'You can use the rest of Vault while it listens.' }) : null,
+          ? 'You can use the rest of Wefty while it listens. Keep Wefty on the screen (it stays on by itself).'
+          : 'You can use the rest of Wefty while it listens. Keep Wefty on the screen, with the screen on.' })
+          : how.kind ? V.h('li', { text: 'You can use the rest of Wefty while it listens.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
-        how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Vault on your PC.' }) : null,
+        how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Wefty on your PC.' }) : null,
         V.h('li.nt-consent', { text: pcSound ? CONSENT_WORDS : 'Ask people before you record them.' }))));
     V.clear(foot,
       hasTranscript ? V.button('Make notes now', { icon: 'check', onClick: () => makeNotes(note.id) }) : null,
@@ -1262,14 +1262,14 @@ V.notetaker = (() => {
     if (!ui || !ui.statusEl || !session) return;
     const s = session;
     const words = s.state === 'starting' ? 'Starting...' : s.state === 'paused' ? 'Paused' : s.state === 'stopping' ? 'Saving...'
-      : s.waiting ? 'Waiting for Vault to be on the screen' : 'Listening';
+      : s.waiting ? 'Waiting for Wefty to be on the screen' : 'Listening';
     ui.statusEl.dataset.state = s.state === 'listening' && !s.waiting && !s.trouble ? 'on' : s.state === 'paused' ? 'paused' : 'wait';
     ui.statusEl.querySelector('.nt-state-word').textContent = words;
     ui.statusEl.querySelector('.nt-count').textContent = s.words ? `${s.words} word${s.words === 1 ? '' : 's'}` : '';
     ui.troubleEl.hidden = !(s.trouble || s.waiting || s.wasAway);
     ui.troubleEl.querySelector('span').textContent = s.trouble
-      || (s.waiting ? 'Vault stopped listening in the background. It carries on when Vault is back on the screen.'
-        : 'Vault was in the background for a moment and missed what was said then. Keep Vault on the screen while it listens.');
+      || (s.waiting ? 'Wefty stopped listening in the background. It carries on when Wefty is back on the screen.'
+        : 'Wefty was in the background for a moment and missed what was said then. Keep Wefty on the screen while it listens.');
   }
 
   function drawWords() {
@@ -1318,8 +1318,8 @@ V.notetaker = (() => {
       V.button('Stop', { disabled: s.state === 'stopping',
         onClick: () => stopListening({ make: false }).catch(V.problem) })) : null;
     V.clear(body, V.h('div.nt-live', {}, onAir, ui.statusEl, ui.troubleEl, ui.wordsEl,
-      V.h('p.nt-small', { text: `${hearsWith(s.engine)} Tap Hide to use the rest of Vault while it listens.${s.engine === 'web'
-        ? ' It pauses if Vault leaves the screen (another app, or the phone locked) and carries on when Vault is back.' : ''}` })));
+      V.h('p.nt-small', { text: `${hearsWith(s.engine)} Tap Hide to use the rest of Wefty while it listens.${s.engine === 'web'
+        ? ' It pauses if Wefty leaves the screen (another app, or the phone locked) and carries on when Wefty is back.' : ''}` })));
     const paused = s.state === 'paused';
     V.clear(foot,
       V.button(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : null, disabled: s.state === 'starting' || s.state === 'stopping',

@@ -1,4 +1,4 @@
-/* Vault's look ("Seam"): cool greys, one iris accent, 1 px lines instead of glows, flat surfaces with crisp edges.
+/* Wefty's look ("Seam"): cool greys, one iris accent, 1 px lines instead of glows, flat surfaces with crisp edges.
    Light and dark come from the same tokens (light-dark() picks by the page's colour scheme, which util.js sets from
    Settings > Appearance or the system). The same sheet lays out a phone (tabs along the bottom, a note over
    everything), a Chromebook-size window (a rail, the list and the note side by side) and the PC app (a rail, folders,
@@ -139,12 +139,14 @@ button { cursor: pointer; }
 
 /* ------------------------------------------------------------ the mark and the wordmark */
 
+/* The mark (util.js V.mark): in colour where it's the brand (the rail, the wordmark); one colour (currentColor) for
+   the faint ones in empty lists. The wordmark's box reaches down to the y's tail, so its height is the mark's size
+   (34 px; 38 px at the start) times 96.37 / 78.57. */
 .mark { display: block; flex: none; color: var(--brand); }
-.wordmark { display: block; height: 34px; width: auto; }
-.wordmark .wm-mark { fill: var(--brand); }
+.wordmark { display: block; height: 41.7px; width: auto; }
 .wordmark .wm-text { fill: var(--text); }
 #boot { display: grid; place-items: center; height: 100vh; height: 100dvh; }
-#boot .wordmark { height: 38px; animation: arrive var(--d-3) var(--ease-out) both; }
+#boot .wordmark { height: 46.6px; animation: arrive var(--d-3) var(--ease-out) both; }
 @keyframes arrive { from { opacity: 0; transform: translateY(4px); } }
 /* Out of sight (the PC app keeps its page running in the tray): nothing moves, so nothing needs drawing. */
 html.away *, html.away *::before, html.away *::after { animation-play-state: paused !important; }
@@ -468,6 +470,15 @@ textarea.field { resize: vertical; min-height: 48px; }
 .gate-box > .label { margin-top: 10px; }
 .gate-box .btn.wide-btn { margin-top: 14px; }
 .gate-box > .steps { margin: 8px 0; }
+/* The old installed app's "Vault is now Wefty" (js/start.js movedScreen): the new home screen icon, as it looks. */
+.gate-box > .moved-icon { justify-self: center; width: 72px; height: 72px; border-radius: 18px; margin-bottom: 6px; }
+.gate-box > .moved-open { justify-content: center; text-decoration: none; }
+/* An iPhone's old icon with changes the cloud hasn't got yet: wait for Synced before removing it. */
+.gate-box > .moved-waiting { margin: 6px 0 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--text); }
+/* An iPhone's old icon that handed its sign-in to the new one (js/start.js's move pass): copied, signed out here. */
+.gate-box > .moved-done { margin: 6px 0 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--ok-soft); color: var(--text); }
+.gate-box > .moved-done.trouble { background: var(--warn-soft); }
+.gate-box > .moved-hint { text-align: center; margin: 4px 0 0; }
 .setup-step {
   display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; background: var(--card); border: 1px solid var(--line);
   border-radius: var(--r-lg); padding: 16px; margin-top: 10px;

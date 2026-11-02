@@ -161,7 +161,7 @@ V.ai = (() => {
   // A friend's private storage is in the cloud of the person who invited them, who holds that cloud's secret key and so
   // could read a key kept there: said so wherever a key is saved (js/welcome.js too), never "your own cloud".
   const invited = () => !!(V.data.user && V.data.user.invited);
-  const KEPT_THEIRS = 'kept in your private storage in the Vault cloud of the person who invited you (they could read it), '
+  const KEPT_THEIRS = 'kept in your private storage in the Wefty cloud of the person who invited you (they could read it), '
     + 'and never shown here';
   const kept = () => (invited() ? KEPT_THEIRS : 'kept in your own cloud, never shown');
   const month = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -552,7 +552,7 @@ V.ai = (() => {
     cloudOut: 'Your cloud can\'t be reached right now. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     offline: 'Claude can\'t be reached from this network. Your words are saved, and the notes will be made by themselves once it can be (or tap Make notes).',
     away: 'You\'re offline. Your words are saved, and the notes will be made by themselves when you\'re back online.',
-    old: 'This PC\'s Vault needs an update to make notes (open Jarvis and click Update). Or make them on your phone.',
+    old: 'This PC\'s Wefty needs an update to make notes (open Jarvis and click Update). Or make them on your phone.',
   };
 
   const STOPPED = () => new AiError('stopped', 'Stopped.');
@@ -1654,7 +1654,7 @@ V.ai = (() => {
     await readOwed();
     const now = tally();
     if (now.limit > 0 && now.spent >= now.limit) {
-      return new AiError('limit', `Vault's AI has used this month's ${money(now.limit)} (${monthName()}). Raise the limit in Settings > AI, or wait for next month.`);
+      return new AiError('limit', `Wefty's AI has used this month's ${money(now.limit)} (${monthName()}). Raise the limit in Settings > AI, or wait for next month.`);
     }
     return null;
   }
@@ -1895,7 +1895,7 @@ V.ai = (() => {
     } });
     if (known.cloud) {
       return ui.line('Claude key', !ownKeys() ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
-        : invited() ? 'In your private storage in the Vault cloud of the person who invited you (they could read it), never '
+        : invited() ? 'In your private storage in the Wefty cloud of the person who invited you (they could read it), never '
           + 'shown here. Claude can be used here. Remove it any time.'
           : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
     }
@@ -1928,7 +1928,7 @@ V.ai = (() => {
     return V.h('div.ai-key.ai-key-claude', {},
       ui.line('Claude key', invited() ? `Paste a key from console.anthropic.com here: it's ${kept()}.`
         : V.desktop ? 'Paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown, and your phone and Chromebook can use it too.'
-          : 'On your PC: Vault > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
+          : 'On your PC: Wefty > Settings > AI does it in one tap. Or paste a key from console.anthropic.com here: it\'s kept in your own cloud and never shown.', null),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
@@ -1956,7 +1956,7 @@ V.ai = (() => {
         try { await removeGeminiKey(); V.toast('Gemini key removed.'); } catch (error) { V.problem(error); }
         ui.draw();
       } });
-      return row(ui.line('Gemini key (free)', (invited() ? 'In your private storage in the Vault cloud of the person who '
+      return row(ui.line('Gemini key (free)', (invited() ? 'In your private storage in the Wefty cloud of the person who '
           + 'invited you, so they could read it: remove it here any time, or delete the key in Google AI Studio. '
         : 'Kept in your own cloud, never shown. ') + (claudeOn()
         ? (notesClaude()
@@ -1976,7 +1976,7 @@ V.ai = (() => {
           : saved.why === 'bad' ? `Gemini key saved, but Google's check said: ${saved.said}`
           : `Gemini key saved. ${saved.why === 'busy' ? 'Google was too busy to check it just now'
             : saved.why === 'slow' ? 'Google didn\'t answer in time to check it'
-            : 'Google couldn\'t be reached from this network to check it'}, so it's checked the first time Vault uses it.`,
+            : 'Google couldn\'t be reached from this network to check it'}, so it's checked the first time Wefty uses it.`,
         { ms: saved.why === 'bad' ? 9000 : 6000 });
         ui.draw();
       } catch (error) {
@@ -1990,15 +1990,17 @@ V.ai = (() => {
     const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
     return row(V.h('div.ai-key.ai-key-gemini', {},
       ui.line('Gemini key (free)', 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google '
-        + `(new ones start with AQ.): Vault checks it with Google, then it's ${kept()}.`, null),
+        + `(new ones start with AQ.): Wefty checks it with Google, then it's ${kept()}.`, null),
       V.h('ol.steps.ai-steps', {},
-        V.h('li', { text: 'Tap "Get a free key" and sign in with your Google account.' }),
+        V.h('li', { text: 'Tap "Get a free key" and sign in with your own Google account (school accounts usually can\'t make keys).' }),
         V.h('li', { text: 'Tap "Create API key", then copy the key.' }),
         V.h('li', { text: 'Paste it here and tap Save.' })),
       V.h('div.ai-key-row', {}, box, save),
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a free key at aistudio.google.com', onclick: open }),
-      V.h('p.hint.ai-school', { text: 'If a wifi blocks it, use mobile data, or let your messages wait and go when '
-        + 'you\'re home.' })));
+      V.h('p.hint.ai-school', { text: 'A school Google account usually can\'t make a key (schools switch it off), so use your '
+        + 'own personal one: on a school Chromebook, make the key on your phone, and Wefty uses it on all your devices. If a '
+        + 'wifi blocks Gemini, use mobile data, or let your messages wait and go when you\'re home. Google says you must be '
+        + '18 or older to use the Gemini API.' })));
   }
 
   /* One of the AI card's switches for every device (`name` its label, `cls` its row's class): `set(want)` writes it
@@ -2070,7 +2072,7 @@ V.ai = (() => {
     const now = tally();
     const limit = V.button('Change limit', { onClick: async () => {
       const answer = await V.ask('Monthly limit', { value: now.limit.toFixed(2), type: 'number', ok: 'Save',
-        label: 'Dollars a month', hint: 'Vault\'s AI stops for the month once it has spent this. 0 means no limit.' });
+        label: 'Dollars a month', hint: 'Wefty\'s AI stops for the month once it has spent this. 0 means no limit.' });
       if (answer === null) return;
       const dollars = Math.round(Number(answer) * 100) / 100;
       if (!Number.isFinite(dollars) || dollars < 0) return V.toast('Type an amount, like 1.00.', { kind: 'err' });

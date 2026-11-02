@@ -29,7 +29,7 @@ V.db = (() => {
         resolve(db);
       };
       request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error('Vault is open in another tab that needs closing first.'));
+      request.onblocked = () => reject(new Error('Wefty is open in another tab that needs closing first.'));
     });
   }
 

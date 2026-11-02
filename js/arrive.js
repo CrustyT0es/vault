@@ -441,7 +441,7 @@ V.arrive = (() => {
     } catch (error) {
       if (error && error.name === 'AbortError') return false;  // closed without picking
       mark('blocked', true);
-      V.toast(`${yours()} didn't let Vault use a folder. Files still wait in Send: save them from there.`, { ms: 7000 });
+      V.toast(`${yours()} didn't let Wefty use a folder. Files still wait in Send: save them from there.`, { ms: 7000 });
       redrawSettings();
       return false;
     }
@@ -478,7 +478,7 @@ V.arrive = (() => {
     if (allowed === 'granted') {
       outcome.clear();
       saveCheck();
-    } else V.toast(`Vault wasn't allowed to save to ${folder.name}.`, { kind: 'err' });
+    } else V.toast(`Wefty wasn't allowed to save to ${folder.name}.`, { kind: 'err' });
     draw();
     redrawSettings();
     return true;
@@ -565,10 +565,10 @@ V.arrive = (() => {
     if (target.state === 'copied') return { text: 'Copied — press Ctrl+V to paste', ok: true };
     if (target.state === 'copying') return copying;
     // (Chrome said no once, in front: the next click or key in Vault tries again.)
-    if (target.state === 'waiting') return inFront() && !target.refused ? copying : { text: 'Click in Vault to copy it' };
+    if (target.state === 'waiting') return inFront() && !target.refused ? copying : { text: 'Click in Wefty to copy it' };
     // ('older': something newer is on the clipboard, or about to be, or what's there was copied in another app meanwhile.)
     if (target.state === 'tap' || target.state === 'older') {
-      return { text: target.state === 'tap' && target.refused ? 'Vault couldn\'t copy it by itself'
+      return { text: target.state === 'tap' && target.refused ? 'Wefty couldn\'t copy it by itself'
         : 'Not copied: you may have copied something since' };
     }
     if (target.state === 'refused') return { text: 'Couldn\'t copy it here' };
@@ -589,9 +589,9 @@ V.arrive = (() => {
     const left = files.length - saved.length - programs.length - failed.length;
     let said = null;
     if (files.some((t) => saving.has(t.id))) said = { text: `Saving to ${place()}…` };
-    else if (left > 0 && allowed === 'prompt') said = { text: `Vault needs your OK to keep saving to ${folder.name}` };
-    else if (left > 0 && allowed === 'denied') said = { text: `Vault isn't allowed to save to ${folder.name}` };
-    else if (failed.length) said = { text: trouble === 'gone' ? `Vault can't find ${folder.name} any more` : `Couldn't save to ${folder.name}` };
+    else if (left > 0 && allowed === 'prompt') said = { text: `Wefty needs your OK to keep saving to ${folder.name}` };
+    else if (left > 0 && allowed === 'denied') said = { text: `Wefty isn't allowed to save to ${folder.name}` };
+    else if (failed.length) said = { text: trouble === 'gone' ? `Wefty can't find ${folder.name} any more` : `Couldn't save to ${folder.name}` };
     else if (saved.length) said = { text: saved.length === 1 ? `Saved to ${place()}` : `${saved.length} saved to ${place()}`, ok: true };
     return [said, programs.length ? { text: 'Programs aren\'t saved by themselves: save it in Send if you trust it' } : null];
   }
@@ -705,9 +705,9 @@ V.arrive = (() => {
         + (state.blocked ? ` ${yours()} didn't allow it last time.` : ''),
       V.button('Choose a folder', { icon: 'folder', onClick: () => choose() }));
     }
-    const hint = trouble === 'gone' ? `Vault can't find ${folder.name} any more. Choose a folder again.`
-      : allowed === 'prompt' ? `Saving to ${folder.name}. Vault needs your OK again.`
-        : allowed === 'denied' ? `Vault isn't allowed to save to ${folder.name}. Choose it again.`
+    const hint = trouble === 'gone' ? `Wefty can't find ${folder.name} any more. Choose a folder again.`
+      : allowed === 'prompt' ? `Saving to ${folder.name}. Wefty needs your OK again.`
+        : allowed === 'denied' ? `Wefty isn't allowed to save to ${folder.name}. Choose it again.`
           : `Saving to ${folder.name} · since ${V.ago(folder.since)}`;
     return line(label, hint, V.h('div.setting-buttons', {},
       allowed === 'prompt' ? V.button('Allow', { kind: 'primary', onClick: allow }) : null,

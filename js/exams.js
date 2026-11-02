@@ -37,7 +37,7 @@ V.exams = (() => {
     V.sheet({
       title: 'What\'s on the test?',
       content: [
-        V.h('p.hint.covers-about', { text: 'Pick the folders and tags its flash cards are in. Vault counts down to the test day and spreads the cards you haven\'t gone over across the days left, in Review.' }),
+        V.h('p.hint.covers-about', { text: 'Pick the folders and tags its flash cards are in. Wefty counts down to the test day and spreads the cards you haven\'t gone over across the days left, in Review.' }),
         V.h('label.label', { text: 'Test day' }, day),
         V.h('div.label', { text: 'Folders' }), V.h('div.covers-list', {}, folders),
         tags.length ? [V.h('div.label', { text: 'Tags' }), V.h('div.covers-list', {}, tags)] : null,

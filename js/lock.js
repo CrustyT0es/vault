@@ -116,7 +116,7 @@ V.lock = (() => {
         let answer = null;
         const dots = V.h('div.pin-dots');
         const note = V.h('p.hint', {
-          text: make ? 'At least 4 digits. Vault can\'t get locked notes back if you forget it, so pick one you\'ll remember.' : '',
+          text: make ? 'At least 4 digits. Wefty can\'t get locked notes back if you forget it, so pick one you\'ll remember.' : '',
         });
         const heading = V.h('p.pin-title', { text: make ? 'Pick a PIN for locked notes' : '' });
         let typed = '';

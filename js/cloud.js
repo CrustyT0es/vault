@@ -68,8 +68,8 @@ V.pc = V.desktop ? (() => {
     },
     standalone: () => standalone,
     howToUpdate: () => (standalone
-      ? 'Get the newest Vault from the person who invited you, unzip it and double-click its setup-vault.bat.'
-      : 'Open Jarvis and click Update: Vault comes with it.'),
+      ? 'Get the newest Wefty from the person who invited you, unzip it and double-click its setup-wefty.bat.'
+      : 'Open Jarvis and click Update: Wefty comes with it.'),
     token: () => call('token').then((answer) => answer.token),
     setClipboard: (text) => call('setClipboard', { text }),
     notify: (title, text) => call('notify', { title, text }).catch(() => {}),

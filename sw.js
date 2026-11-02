@@ -11,10 +11,15 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.14.1-a8429a688461';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
-const CACHE = 'vault-' + BUILD;
+const BUILD = '1.15.0-d6196c0dc803';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+/* Since Wefty moved (1.15: crustyt0es.github.io/vault/ -> /wefty/, one origin, so one set of caches), the new
+   address's caches are called "wefty-...": a worker from before 1.15 at the old address deletes every "vault-..." cache
+   but its own when it switches over, and would take the new address's offline copy with it. Anywhere else (the old
+   address, the tests' own) they stay "vault-...". Each worker only ever counts and clears its own name's caches. */
+const PREFIX = /\/wefty\/$/.test(new URL(self.registration.scope).pathname) ? 'wefty-' : 'vault-';
+const CACHE = PREFIX + BUILD;
 const LEGACY = /^vault-1\.0\.\d+$/;  // Vault 1.0.x's caches: its pages can't say "update-now", so it switches itself
-const KEPT = /^vault-(\d+(?:\.\d+)+)-[0-9a-f]{12}$/;  // a version kept here since (vault-<version>-<hash>)
+const KEPT = /^(?:vault|wefty)-(\d+(?:\.\d+)+)-[0-9a-f]{12}$/;  // a version kept here since (<prefix><version>-<hash>)
 const STORES = ['notes', 'folders', 'transfers', 'clips', 'meta', 'outgoing', 'files', 'shared'];
 
 async function sha256(buffer) {
@@ -40,8 +45,8 @@ async function install() {
   if (listing.build !== BUILD) throw new Error('version.json is from another publish: trying again later');
   // Never back to an older version than one this phone already has (publish.py refuses that too; a rollback is a
   // newer version with the old code).
-  const have = (await caches.keys()).map((name) => KEPT.exec(name)).filter(Boolean).map((found) => found[1]);
-  if (have.some((version) => older(listing.version, version))) throw new Error('Vault ' + listing.version + ' is older');
+  const have = (await ownCaches()).map((name) => KEPT.exec(name)).filter(Boolean).map((found) => found[1]);
+  if (have.some((version) => older(listing.version, version))) throw new Error('Wefty ' + listing.version + ' is older');
   // All at once (one at a time took 9 s at a phone's 150 ms a request: long enough for the app to be closed first).
   const fetched = await Promise.all(Object.entries(listing.files || {}).filter(([path]) => path !== 'sw.js')
     .map(async ([path, want]) => {
@@ -58,8 +63,9 @@ async function install() {
     if (path === 'index.html') await cache.put('./', kept());
   }
   await cache.put('version.json', new Response(JSON.stringify(listing), { headers: { 'Content-Type': 'application/json' } }));
-  // Only once, from Vault 1.0.x: its page can't pick the moment, so this version takes over by itself.
-  if ((await caches.keys()).some((name) => LEGACY.test(name))) await self.skipWaiting();
+  // Only once, from Vault 1.0.x: its page can't pick the moment, so this version takes over by itself. (Only ever at
+  // the old address: the new one never had a 1.0.x, and its own pages can pick the moment.)
+  if ((await ownCaches()).some((name) => LEGACY.test(name))) await self.skipWaiting();
 }
 
 self.addEventListener('install', (event) => {
@@ -75,9 +81,14 @@ self.addEventListener('message', (event) => {
   if (said.vault === 'build' && event.ports && event.ports[0]) event.ports[0].postMessage({ build: BUILD });
 });
 
+/* This address's own caches (PREFIX): the other address's are never counted or cleared from here. */
+async function ownCaches() {
+  return (await caches.keys()).filter((name) => name.startsWith(PREFIX));
+}
+
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys()
-    .then((names) => Promise.all(names.filter((n) => n.startsWith('vault-') && n !== CACHE).map((n) => caches.delete(n))))
+  event.waitUntil(ownCaches()
+    .then((names) => Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name))))
     .then(() => self.clients.claim()));
 });
 

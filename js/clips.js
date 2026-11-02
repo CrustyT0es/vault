@@ -132,8 +132,8 @@ V.clips = (() => {
   function blocked({ again = false } = {}) {
     if ((toldBlocked && !again) || !inFront()) return;
     toldBlocked = true;
-    V.toast('Chrome is blocking Vault from your clipboard: allow it in Chrome\'s site settings for Vault (tap the icon '
-      + 'left of the address, or Settings > Apps > Vault > Permissions).', { ms: 12000 });
+    V.toast('Chrome is blocking Wefty from your clipboard: allow it in Chrome\'s site settings for Wefty (tap the icon '
+      + 'left of the address, or Settings > Apps > Wefty > Permissions).', { ms: 12000 });
   }
 
   /* While a locked note's words show (js/editor.js, as the PC's own clipboard sharing pauses then), nothing copied
@@ -253,7 +253,7 @@ V.clips = (() => {
     const clip = entry.clip;
     entry.notice = V.notice({
       title: `From ${named(clip.from_device)}`, text: clip.text.trim().slice(0, 200), icon: 'copy', ms: 15000,
-      lines: [{ text: 'Vault couldn\'t copy it by itself' }],
+      lines: [{ text: 'Wefty couldn\'t copy it by itself' }],
       actions: [{ label: 'Copy', kind: 'primary', icon: 'copy', onClick: async () => {
         if (unwritten === entry) unwritten = null;
         await V.copy(clip.text, { cloud: true });
@@ -515,7 +515,7 @@ V.clips = (() => {
     store(AUTO, 'on');
     redraw();
     if (here && !held && mayShare(here)) {
-      V.toast('Your clipboard now goes to your other devices when you open Vault. Send what\'s on it now?',
+      V.toast('Your clipboard now goes to your other devices when you open Wefty. Send what\'s on it now?',
         { action: 'Send', onAction: () => share(here) });
     }
   }
@@ -674,11 +674,11 @@ V.clips = (() => {
       store(SEEN, here ? print(here) : '');
       lookedNow();
     } catch (error) {
-      return V.toast('Vault wasn\'t allowed to use the clipboard. Allow it in Chrome\'s site settings for Vault, then try again.');
+      return V.toast('Wefty wasn\'t allowed to use the clipboard. Allow it in Chrome\'s site settings for Wefty, then try again.');
     }
     store(AUTO, 'on');
     redraw();
-    if (!(await take(V.data.clips[0]))) V.toast('On. Copy something on another device, then open Vault here.');
+    if (!(await take(V.data.clips[0]))) V.toast('On. Copy something on another device, then open Wefty here.');
   }
 
   // Drawn again only while the Clipboard tab is showing (the tabs share one page).
@@ -692,8 +692,8 @@ V.clips = (() => {
     return V.h('div.card.switches.clip-step', {},
       V.h('label.switch-row', {},
         V.h('span.switch-text', {}, V.h('strong', { text: `Keep this ${here}'s clipboard in step` }),
-          V.h('span', { text: on ? `Copy on any device, then open Vault here: it's ready to paste. What you copy here goes to your other devices when you open Vault (never passwords or codes).`
-            : `Off: after copying, open Vault and tap Share my clipboard. Switched on, opening Vault for a second is enough (a ${here} only lets Vault use the clipboard while Vault is open).` })),
+          V.h('span', { text: on ? `Copy on any device, then open Wefty here: it's ready to paste. What you copy here goes to your other devices when you open Wefty (never passwords or codes).`
+            : `Off: after copying, open Wefty and tap Share my clipboard. Switched on, opening Wefty for a second is enough (a ${here} only lets Wefty use the clipboard while Wefty is open).` })),
         V.h('input.switch', { type: 'checkbox', checked: on, 'aria-label': `Keep this ${here}'s clipboard in step`, onchange: (event) => {
           if (event.target.checked) { event.target.checked = false; turnOn(); } else { store(AUTO, 'off'); redraw(); }
         } })));
@@ -720,7 +720,7 @@ V.clips = (() => {
       lookedNow();
       await share(text);
     } catch (error) {
-      V.toast('Vault wasn\'t allowed to read the clipboard. Paste into the box below instead.');
+      V.toast('Wefty wasn\'t allowed to read the clipboard. Paste into the box below instead.');
       if (parts) parts.paste.focus();
     }
   }
@@ -761,14 +761,14 @@ V.clips = (() => {
     V.clear(parts.latest, latest ? V.h('div.card.latest', {},
       V.h('h2.section', { text: `Latest from ${V.DEVICES.includes(latest.from_device) ? V.deviceName(latest.from_device) : 'another device'}` }),
       item(latest)) : V.h('div.card.latest.empty-latest', {},
-      V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Vault > Clipboard > Share my clipboard.'
+      V.h('p', { text: V.desktop ? 'Nothing from your phone yet. On the phone, open Wefty > Clipboard > Share my clipboard.'
         : 'Nothing from your PC yet. Copy something there and it shows up here.' })));
     V.clear(parts.history, V.data.clips.length ? V.data.clips.map(item) : null);
   }
 
   function render(container) {
     root = container;
-    const paste = V.h('textarea.field', { rows: 2, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Vault' : 'Or paste here', 'aria-label': 'Text to share' });
+    const paste = V.h('textarea.field', { rows: 2, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Wefty' : 'Or paste here', 'aria-label': 'Text to share' });
     parts = { latest: V.h('div'), history: V.h('div.clips'), paste };
     V.clear(container, V.h('div.page', {},
       V.h('div.page-head', {}, V.h('h1', { text: 'Shared clipboard' }), V.statusPill()),

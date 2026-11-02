@@ -217,7 +217,7 @@ V.update = (() => {
 
   async function checkNow() {
     if (V.desktop) {
-      if (!V.pc.can('checkUpdates')) return { state: 'error', message: 'This Vault app checks with Jarvis updates.' };
+      if (!V.pc.can('checkUpdates')) return { state: 'error', message: 'This Wefty app checks with Jarvis updates.' };
       let answer;
       try { answer = await V.pc.call('checkUpdates'); } catch (error) { return { state: 'error', message: error.message }; }
       noteChecked(answer.checked);
@@ -226,13 +226,13 @@ V.update = (() => {
       return answer;
     }
     if (!registration) registration = await (registering || (registering = register()));
-    if (!registration) return { state: 'error', message: 'Updates come when Vault is opened from its web address.' };
+    if (!registration) return { state: 'error', message: 'Updates come when Wefty is opened from its web address.' };
     noteChecked();
     let coming;
     try {
       coming = await installingAfter(registration.update());
     } catch (error) {
-      return { state: 'error', message: navigator.onLine ? 'Vault\'s home page couldn\'t be reached just now.' : 'No internet just now.' };
+      return { state: 'error', message: navigator.onLine ? 'Wefty\'s home page couldn\'t be reached just now.' : 'No internet just now.' };
     }
     if (coming) {
       await new Promise((resolve) => {
@@ -262,7 +262,7 @@ V.update = (() => {
   async function whatsNew() {
     const lines = await notes();
     V.sheet({
-      title: `What's new in Vault ${V.VERSION}`,
+      title: `What's new in Wefty ${V.VERSION}`,
       content: lines.length ? V.h('ul.news', {}, lines.map((line) => V.h('li', { text: line })))
         : V.h('p.muted', { text: 'Nothing to tell about this version.' }),
       actions: [{ label: 'OK', kind: 'primary' }],
@@ -270,7 +270,7 @@ V.update = (() => {
   }
 
   function tell() {
-    V.toast(`Updated to Vault ${V.VERSION}`, { action: 'What\'s new', onAction: whatsNew, ms: 9000 });
+    V.toast(`Updated to Wefty ${V.VERSION}`, { action: 'What\'s new', onAction: whatsNew, ms: 9000 });
   }
 
   /* -- starting up (start.js) */
@@ -336,7 +336,7 @@ V.update = (() => {
     async now() {
       if (listening()) return false;
       if (!(await V.editor.settled()) || V.send.busy() || V.files.busy()) {
-        V.toast('Vault updates as soon as what\'s being saved or sent is done.');
+        V.toast('Wefty updates as soon as what\'s being saved or sent is done.');
         return false;
       }
       return apply(true);

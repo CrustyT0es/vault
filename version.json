@@ -1,12 +1,12 @@
 {
  "format": 1,
- "version": "1.14.1",
+ "version": "1.15.0",
  "min_shell": 1,
  "notes": [
-  "Notes in the list show their words cleanly: no more # or - [ ] marks, and checklists show little tick boxes.",
-  "The note-taker keeps listening while you use the rest of Vault: tap Hide, and a bar at the top shows it's still listening. Tap the bar to go back."
+  "Vault is now Wefty: same notes, same sign-in, a new name and icon. The web address is now crustyt0es.github.io/wefty/, and the old one sends you there.",
+  "Notes in the list show their words cleanly: no more # or - [ ] marks, and checklists show little tick boxes."
  ],
- "build": "1.14.1-a8429a688461",
+ "build": "1.15.0-d6196c0dc803",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -65,12 +65,12 @@
    "size": 103336
   },
   "icons/favicon-32.png": {
-   "sha256": "2666c4e97047d7f2e4d76ec04729a01f180acdf4367c8c9d02827382a18f2a4a",
-   "size": 893
+   "sha256": "bbfe72c9ff74dd623a7341c8d8384f89779090d991c17bc0e9240d05fb40d3e4",
+   "size": 1303
   },
   "icons/favicon.svg": {
-   "sha256": "ec8a5acffff8357d40a509d72b1ad669392f0c0186e3c42557591f85eeca2bdc",
-   "size": 628
+   "sha256": "4b8b39b98bd4121fabb713040d19f761ae0401086bf6a5f8c0a75235e16916ff",
+   "size": 1190
   },
   "icons/seam-192.png": {
    "sha256": "eae0d802b6ba9ced374e430b7c574d7ce58be5e6750cc3a8f535fc10d3f521fe",
@@ -96,24 +96,48 @@
    "sha256": "ead61221933f98adb1cfda44baaa472c3feab364a70103b09d5f867deedfa0e1",
    "size": 5653
   },
+  "icons/wefty-192.png": {
+   "sha256": "ae14ae06eda6c1a3136ae82be31dc2120d30eb3cd031ed48c066fc968f167814",
+   "size": 8622
+  },
+  "icons/wefty-512.png": {
+   "sha256": "ae8c78ae7beca4ae4e8d6ceac0670e9f386b7f05e6e9309110038b31dcc6ed9f",
+   "size": 26223
+  },
+  "icons/wefty-apple-180.png": {
+   "sha256": "1accac58f78d4bfb7f1eab0b20c2acfbcd5b84581b33e7b9dbc9e59b7a4e0664",
+   "size": 5955
+  },
+  "icons/wefty-maskable-192.png": {
+   "sha256": "760f84c983747f28d2972c8245e56e6a43319196903480e120f3c3819945f65a",
+   "size": 4575
+  },
+  "icons/wefty-maskable-512.png": {
+   "sha256": "69c33742eeea3dd8408ad6f5f64f75cbbc43fb56fbfe067e1d81b2fda28a8d0b",
+   "size": 13763
+  },
+  "icons/wefty-mono-512.png": {
+   "sha256": "2dfba201c3d6ff5565f7a58275574a16efae83ec729d46ad1e18def18a9a6af2",
+   "size": 7943
+  },
   "index.html": {
-   "sha256": "14fe96fb19ac3400240826b43e7d41fea4d1b55ef89605699e8dec1829500e89",
-   "size": 5193
+   "sha256": "1026e9154a34a0a511cf831ef741d6b643a80b8430eb3e427c2a9dca51cfb70f",
+   "size": 5580
   },
   "js/access.js": {
-   "sha256": "545406553477dacd7a75e7b1124a4655064e660d21e01cc3ca890d5645986e07",
-   "size": 47336
+   "sha256": "8b38865a1337a01495e42d9e6c7a55eaf3eee6f44e0fbcfea8b2e837f09c9e2d",
+   "size": 47369
   },
   "js/ai.js": {
-   "sha256": "047b8c87fa4a33bfc1bef970d17f25de10f2823ac07a1aded7b64001289f7cb7",
-   "size": 134318
+   "sha256": "a19b33fb7d60df8a62a7dcbaaf4e8309f0af5b2946d263f979ee7dfa1f0d5a80",
+   "size": 134650
   },
   "js/arrivals.js": {
    "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
    "size": 3838
   },
   "js/arrive.js": {
-   "sha256": "576708388523084607fe23b687a2084a552e9535db4b3c951cf543fc5d5ec6cc",
+   "sha256": "5347f39d17b58e14f58030f0abfefd15063878ec11ef17436c75b25675766b6d",
    "size": 35401
   },
   "js/attachsearch.js": {
@@ -121,35 +145,35 @@
    "size": 5778
   },
   "js/chat.js": {
-   "sha256": "4628b2709536474f95a7c5eecb5354b9ffb29c211ed8ceda24d777709ce2c1aa",
+   "sha256": "c82f1aafc3a4a5af00faf36306db0531efdb8d2c1bc25fe27866b25941923a7a",
    "size": 98842
   },
   "js/clips.js": {
-   "sha256": "c36acc1a7abf53295396d5b3ce99e41ee74f6ebefcaba65c0f936dfbc19ad31d",
+   "sha256": "095636a8d0fd6ff7c7817112db21d7285140a51fb156ee83f519773f71d83fd9",
    "size": 45420
   },
   "js/cloud.js": {
-   "sha256": "ed2eb39f9924f7b9ae9fe13f0896f0703201ebb882903b9f80b2127f0c339467",
+   "sha256": "d85fe906d5476289b9a283e21a67c9a4cef3fdc7b41cd149c0230aa5b315b517",
    "size": 48965
   },
   "js/db.js": {
-   "sha256": "f26d4cc9063c6a93f7bc6ed8217a77ba8f67be4cf7a450a2b675a64289376182",
+   "sha256": "e48e7ef3b1d78e2872acd7c7484b3b3a53f7b2d4738336fd78e921b02366dce1",
    "size": 3536
   },
   "js/dictation.js": {
-   "sha256": "3ef7aa4b60027d1170cc3e01d0809c9cd6b47e00dfe786dc39a10fe6c6cfd6fc",
+   "sha256": "d7aa4fa8c5c6ca436dffe08e93093d698074cfe5e6f3182b91443a248ede873a",
    "size": 19526
   },
   "js/editor.js": {
-   "sha256": "a75b1783baa836a413b83b22f74a8e62ea2f411dfafaea894f7e6fa2c9a1fbe0",
+   "sha256": "aa3c8ab8abedb9f428716d5a40aa6271972d0561b65f51eee9bae20cb175d8a8",
    "size": 169582
   },
   "js/exams.js": {
-   "sha256": "527df9fc801c3219c8d2b747798469ca8ba3f8fb490d8b050e6a5a4e8616e036",
+   "sha256": "ef5ab68960e616067290201e4b5bc23f1345dfad955a3bc4507aaaa02e265c9a",
    "size": 6490
   },
   "js/files.js": {
-   "sha256": "5c0c06b6ca0d236bbe70fce91d896661279b154db61a35d8dc287fa8349f1b9b",
+   "sha256": "5ee1238707e0af7eefd77df6d586e43d30a0f80a7d99b10ccc36e7f643d26903",
    "size": 65468
   },
   "js/format.js": {
@@ -157,7 +181,7 @@
    "size": 46142
   },
   "js/history.js": {
-   "sha256": "b73742397b9eeb30fe8f88a0e82aeb1b1e055d49f57d3b37b6558dae9bdaa861",
+   "sha256": "f3ab39f0cf66e21fa30f3b05737e70c024abaffead51edf2fb28cbd1beb3ae37",
    "size": 26896
   },
   "js/ink.js": {
@@ -169,19 +193,23 @@
    "size": 15514
   },
   "js/lock.js": {
-   "sha256": "d6c0775b5d1df3f6cada6e64dc7a4aae92f3f6710ea0c715feaaa61107eded40",
+   "sha256": "2dc5a12191a30bc6643574ec994394b892fb7e72a518a6c79e9f196cc40395a9",
    "size": 7054
   },
+  "js/moved.js": {
+   "sha256": "0e828f64d0c64ac71b733e8fb9fed3f7d96cd8bb24420da368ff16baf98198bc",
+   "size": 4894
+  },
   "js/news.js": {
-   "sha256": "22ac7db29e40d489e4f39305c23a6018d2c1f222e803641892ac4d7db9021b12",
-   "size": 33976
+   "sha256": "f5f996073a110f9f4c21f7289c9294a5daf7b617fe5c82e42b042a7532869108",
+   "size": 33990
   },
   "js/notes.js": {
-   "sha256": "6eda87be082b89484c06090c515d3dfdb4f672c2f8f5ee152179b1ade9bdde20",
+   "sha256": "a97ee8395ae21759405adb9c727b81e13f8f0a5f85186244a9877e604c427799",
    "size": 58315
   },
   "js/notetaker.js": {
-   "sha256": "4e36853b9aae2b714b330a78ade4f2f67bb757b5f84833cd1b1b5bb80739f561",
+   "sha256": "de5631b38e9630f4e4efcbd1d0b8a914171a80dbaf4713d3f4f73b75daa72185",
    "size": 80098
   },
   "js/organise.js": {
@@ -189,56 +217,56 @@
    "size": 40345
   },
   "js/reading.js": {
-   "sha256": "69c2802805b2c46782c29728c2859fef8a1ff511ecf5aa2cb667aba1422ab28f",
+   "sha256": "561e6365ef2376c6f63a4961d2ef7f791a4a3cfe7259121805adffe425b5c901",
    "size": 14354
   },
   "js/reminders.js": {
-   "sha256": "d3b622eabbd3023431392c8085a6bf76a77c80bfa54c0caa0641071a6570ea79",
-   "size": 38059
+   "sha256": "d9e68507015102b84785dc9d573cb1f37d0abd2fb33314025b19bb94145ac8e6",
+   "size": 38120
   },
   "js/review.js": {
    "sha256": "ff96a5447c1e34b82ad57eecf83463eb01bd4a07d1cf7e0019dc3fe637d48496",
    "size": 32045
   },
   "js/send.js": {
-   "sha256": "e82962851c575a138dc7979358944077c8b2de73cb26ceeb1abe7ee7405550ad",
+   "sha256": "21e8aca321b7e825eccb53bdb7dc8b8fdef2819937795119455a4db492a928c0",
    "size": 58786
   },
   "js/settings.js": {
-   "sha256": "8d2489a62d1d5d3b67305442a04b4d5ca8e334c5d226f5e1e2ee0860e309d0b8",
-   "size": 21977
+   "sha256": "7a3e04ce8e62f961cebea9a5afc393d6009f8ad4ea5e2c346add509de161508a",
+   "size": 21979
   },
   "js/start.js": {
-   "sha256": "43730fba920d07ca145e8c8a6e5404162a48c293abb6d734f22e5f3cbf172051",
-   "size": 47339
+   "sha256": "29aafd6c23b350ca06cf3d709422755c0f3e4e15769362e7ef3ab0edeb3ec6a8",
+   "size": 77588
   },
   "js/study.js": {
    "sha256": "28c29e9a44704eba9f40e523797f03bfece91857f154fd438659714666fc5aea",
    "size": 23926
   },
   "js/update.js": {
-   "sha256": "924796955e89f6dc24e7c234216e011f3ce12b44a5b7bde3ce83638e4d9b2f15",
+   "sha256": "79e5906f754fd8445861452bb0582b2fe8f7370b17367e1801f727dad0a93c3e",
    "size": 15633
   },
   "js/util.js": {
-   "sha256": "79638f543a5bcf7af7819f1dc6d1eead311691aa1387b9ae65895c8420395882",
-   "size": 44271
+   "sha256": "d023a8e5976a41322bc3ddbde98a1e85d1c19a9fec972fae29bbf2a597c6f4c9",
+   "size": 47538
   },
   "js/welcome.js": {
-   "sha256": "ba8fc8628c36a3dbe33268e47ee3906a1d4138385f3542d18bd7bc292ed72e23",
-   "size": 17951
+   "sha256": "b828941a972c46c46015bbe508346444c56a41023578f6087ceb70249b96b5fd",
+   "size": 18605
   },
   "manifest.webmanifest": {
-   "sha256": "2ae901fea4b29bcbb13537bc2e390cedba196d4af203293fc2a0aeb0d6cb43dc",
-   "size": 1452
+   "sha256": "bdb192e238ac583d869d4b4b489530220bacf41d51e6839dc0bf1b0040b4bcb8",
+   "size": 1858
   },
   "styles.css": {
-   "sha256": "588f707f3ceecac5b241c1d33fab8716cb632c04e29fa029af29f81630e77c6b",
-   "size": 181456
+   "sha256": "897436f107a27ba49c504cf755f9e109792379e07bfe48c253c5028c5a32b86f",
+   "size": 182654
   },
   "sw.js": {
-   "sha256": "da51f556812c192f950b839cf970ca7b75f7e4e194387d530da3f8534620dfe9",
-   "size": 8260
+   "sha256": "e89fea441f4df1916a42cfacce200649ffd5cee65ffe5bd39ee1420ae14c99fb",
+   "size": 9129
   },
   "vendor/LICENSE-supabase-js.txt": {
    "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",

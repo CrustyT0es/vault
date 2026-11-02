@@ -2140,8 +2140,8 @@ V.editor = (() => {
   function micProblem(error) {
     const name = error && error.name;
     if (name === 'NotAllowedError' || name === 'SecurityError') {
-      return V.desktop ? 'Vault couldn\'t use the microphone. Check that Windows lets apps use it (Settings, Privacy, Microphone).'
-        : 'Vault isn\'t allowed to use the microphone. Allow it in this site\'s settings (the icon by the address), then try again.';
+      return V.desktop ? 'Wefty couldn\'t use the microphone. Check that Windows lets apps use it (Settings, Privacy, Microphone).'
+        : 'Wefty isn\'t allowed to use the microphone. Allow it in this site\'s settings (the icon by the address), then try again.';
     }
     if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No microphone was found.';
     if (name === 'NotReadableError') return 'The microphone is busy in another app.';

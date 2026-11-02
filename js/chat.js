@@ -76,7 +76,7 @@ V.chat = (() => {
   const unsure = (turn) => !isGemini(turn.model) && !V.ai.claudeOn() && !V.ai.modeKnown();
   const SETTLE_MS = 5000;  // a send (or Retry) waits this long at most for a new device to read "Use Claude too"
   const SYSTEM = [
-    'You are a helpful AI assistant built into Vault, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
+    'You are a helpful AI assistant built into Wefty, the owner\'s own notes app, which they use for school and for everything else. They are a student.',
     'Keep answers clear, friendly and no longer than they need to be. Use Markdown: short paragraphs, lists, **bold** for the key words, headings for long answers, and code blocks for code.',
     'They can save any answer as a note, so make answers worth keeping.',
     'When they share a note it comes inside <note> tags, and a text file inside <file> tags: help with what is in it.',
@@ -1394,7 +1394,7 @@ V.chat = (() => {
     const clip = V.iconButton('paperclip', 'Attach', (event) => V.menu(event.currentTarget, [
       { label: 'A picture or file', icon: 'file', onClick: () => pick.click() },
       V.device === 'phone' ? { label: 'Take a photo', icon: 'camera', onClick: () => photo.click() } : null,
-      { label: 'From Vault', icon: 'stack', onClick: fromVault },
+      { label: 'From Wefty', icon: 'stack', onClick: fromVault },
       { label: 'A note', icon: 'notes', onClick: pickNotes },
     ]), 'chat-clip');
     const model = V.h('button.chat-pill.chat-model', { type: 'button', title: 'Choose the model', onclick: chooseModel },
@@ -1592,11 +1592,11 @@ V.chat = (() => {
     for (const t of V.data.transfers.values()) {
       if (t.deleted || t._purge || !t.path || t.kind !== 'file') continue;
       items.push({ path: t.path, name: t.name || 'file', mime: t.mime || '', size: t.size || 0, at: t.created_at || '',
-        where: t.to_device === 'drive' ? 'Vault Drive' : t.from_device === V.device ? 'Sent' : 'Received' });
+        where: t.to_device === 'drive' ? 'Wefty Drive' : t.from_device === V.device ? 'Sent' : 'Received' });
     }
     items.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     const sheet = V.sheet({
-      title: 'From Vault',
+      title: 'From Wefty',
       content: items.length ? V.h('div.chat-note-list', {}, items.slice(0, 80).map((item) => V.h('button.chat-note-row', {
         type: 'button', onclick: async () => {
           sheet.close();
@@ -1608,7 +1608,7 @@ V.chat = (() => {
             V.toast(`${item.name} couldn't be fetched (are you online?).`, { kind: 'err' });
           }
         } }, V.icon(/^image\//.test(item.mime) ? 'image' : 'file'), V.h('span.chat-note-name', { text: item.name }),
-      V.h('span.chat-note-when', { text: item.where })))) : V.h('p.hint', { text: 'No pictures or files in Vault yet.' }),
+      V.h('span.chat-note-when', { text: item.where })))) : V.h('p.hint', { text: 'No pictures or files in Wefty yet.' }),
     });
   }
 

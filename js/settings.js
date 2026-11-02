@@ -8,7 +8,7 @@ V.settings = (() => {
   let root = null;
 
   // Chrome's install offer is kept by util.js (V.install), so the welcome steps can use it too.
-  V.on('install', (what) => { if (what === 'done') V.toast('Vault is on your home screen.'); draw(); });
+  V.on('install', (what) => { if (what === 'done') V.toast('Wefty is on your home screen.'); draw(); });
 
   // On an iPhone or iPad not yet on the home screen, the address carries #connect= while Settings shows (as in the
   // welcome's home screen step), so an icon added from here opens connected; taken out again on leaving Settings.
@@ -90,8 +90,8 @@ V.settings = (() => {
       return;
     }
     const ok = asked || await V.confirm('Sign out?', V.desktop
-      ? `Vault on this PC${V.pc.standalone() ? '' : ' (and Jarvis\'s notes)'} stops until you sign in again. Your notes stay safe in the cloud.`
-      : 'Vault on this phone stops until you sign in again. Your notes stay safe in the cloud.', { ok: 'Sign out', danger: true });
+      ? `Wefty on this PC${V.pc.standalone() ? '' : ' (and Jarvis\'s notes)'} stops until you sign in again. Your notes stay safe in the cloud.`
+      : 'Wefty on this phone stops until you sign in again. Your notes stay safe in the cloud.', { ok: 'Sign out', danger: true });
     if (!ok) return;
     await V.cloud.signOut();
     location.reload();
@@ -132,9 +132,9 @@ V.settings = (() => {
       const how = V.welcome.howToInstall();
       let install;
       if (V.install.installed()) {
-        install = line(phone ? 'On your home screen' : 'Installed as an app', 'Vault is installed.', null);
+        install = line(phone ? 'On your home screen' : 'Installed as an app', 'Wefty is installed.', null);
       } else if (V.install.ready()) {
-        install = line('Install Vault', V.deviceKind.android ? 'Puts it on your home screen like any app, and lets you share to it.'
+        install = line('Install Wefty', V.deviceKind.android ? 'Puts it on your home screen like any app, and lets you share to it.'
           : 'Puts it with your other apps, so it opens in its own window.',
         V.button('Install', { kind: 'primary', icon: 'download', onClick: async () => { await V.install.ask(); draw(); } }));
       } else {
@@ -158,8 +158,8 @@ V.settings = (() => {
         V.qr(link),
         V.h('ol.steps', {},
           V.h('li', { text: 'Point your phone\'s camera at the code and tap the link it shows (on Android, Google Lens reads it too).' }),
-          V.h('li', { text: 'Vault opens (in Chrome on Android, Safari on an iPhone). Sign in with your e-mail and your Vault password.' }),
-          V.h('li', { text: 'Put it on the home screen: on Android, Install (or Chrome\'s ⋮ menu > Add to Home screen), and then photos can be shared straight to your PC; on an iPhone, in Safari\'s Vault, Settings > This iPhone > Copy the sign-in link, add Vault to the Home Screen, then open the icon, tap Paste the link and sign in once.' }))),
+          V.h('li', { text: 'Wefty opens (in Chrome on Android, Safari on an iPhone). Sign in with your e-mail and your Wefty password.' }),
+          V.h('li', { text: 'Put it on the home screen: on Android, Install (or Chrome\'s ⋮ menu > Add to Home screen), and then photos can be shared straight to your PC; on an iPhone, in Safari\'s Wefty, Settings > This iPhone > Copy the sign-in link, add Wefty to the Home Screen, then open the icon, tap Paste my sign-in and sign in once.' }))),
       V.h('div.setting-buttons', {},
         V.button('Copy the link', { icon: 'copy', onClick: async () => { await V.copy(link); V.toast('Copied. E-mail it to yourself and open it on the phone.'); } })));
   }
@@ -231,7 +231,7 @@ V.settings = (() => {
   function pcCard() {
     if (!V.desktop || !V.prefs) return null;
     return card('This PC',
-      line('Start Vault with Windows', 'Quietly, in the tray, so files and the clipboard always come through.', toggle('autostart')),
+      line('Start Wefty with Windows', 'Quietly, in the tray, so files and the clipboard always come through.', toggle('autostart')),
       line('Quick note', `Press ${V.prefs.hotkey} anywhere for a little note box.`, V.button('Change', { onClick: hotkey })),
       line('Share what I copy', 'Text only; never passwords, keys or what password managers hide.', toggle('clipboardShare')),
       line('Copy what my phone shares', 'Onto this PC\'s clipboard as it arrives.', toggle('clipboardReceive')),
@@ -268,20 +268,20 @@ V.settings = (() => {
     const answer = lastAnswer || {};
     const said = checking ? 'Checking...'
       : answer.state === 'error' ? `Couldn't check: ${answer.message || 'try again later'}`
-        : answer.state === 'current' && !now.ready ? 'Vault is up to date.'
+        : answer.state === 'current' && !now.ready ? 'Wefty is up to date.'
           : now.checked ? `Last checked ${V.ago(now.checked)}` : 'Not checked yet';
-    return card('About Vault',
-      line(`Vault ${now.version}`, said, now.canCheck ? V.button('Check for updates', {
+    return card('About Wefty',
+      line(`Wefty ${now.version}`, said, now.canCheck ? V.button('Check for updates', {
         icon: 'restore', disabled: checking, onClick: checkNow }) : null),
-      now.ready ? line(/^\d/.test(now.ready) ? `Vault ${now.ready} is ready` : 'An update is ready',
-        'It switches over by itself next time Vault is in the background, or now.',
+      now.ready ? line(/^\d/.test(now.ready) ? `Wefty ${now.ready} is ready` : 'An update is ready',
+        'It switches over by itself next time Wefty is in the background, or now.',
         V.button('Update now', { kind: 'primary', icon: 'download', onClick: () => V.update.now() })) : null,
-      now.needsShell ? line(`Vault ${now.needsShell} needs the PC part updated`,
+      now.needsShell ? line(`Wefty ${now.needsShell} needs the PC part updated`,
         V.pc.howToUpdate(), null) : null,
       V.h('div.setting-buttons', {},
         V.button('What\'s new', { onClick: () => V.update.whatsNew() }),
         now.downloaded ? V.button('Use the built-in copy', { kind: 'danger-quiet', onClick: async () => {
-          const sure = await V.confirm('Use the built-in copy?', 'Vault goes back to the version installed on this PC '
+          const sure = await V.confirm('Use the built-in copy?', 'Wefty goes back to the version installed on this PC '
             + 'and skips this update. A newer update still comes when there is one.', { ok: 'Go back' });
           if (sure) V.update.useBuiltIn().catch(V.problem);
         } }) : null));
@@ -299,10 +299,10 @@ V.settings = (() => {
     V.clear(root, V.h('div.page.settings', {},
       V.h('div.page-head', {}, V.h('h1', { text: 'Settings' }), V.statusPill()),
       card('Your account',
-        line(user.email || 'Signed in', user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Vault can see them.'
+        line(user.email || 'Signed in', user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Wefty can see them.'
           : 'Your notes, files and clipboard are only in your own cloud.', null),
         // (Always here for a friend, so those who joined before the owner's Stats existed are told too.)
-        user.invited ? V.h('p.hint.account-stats', { text: `Whoever runs this Vault's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
+        user.invited ? V.h('p.hint.account-stats', { text: `Whoever runs this Wefty's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
         V.h('div.setting-buttons', {},
           V.button('Change password', { onClick: changePassword }),
           V.button('Sign out', { kind: 'danger-quiet', onClick: signOut }))),

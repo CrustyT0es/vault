@@ -14,7 +14,7 @@
    iPad has no such offer (Safari's Share > Add to Home Screen), and its new icon starts with nothing of Safari's
    (iOS keeps each one's storage apart), so: while this step shows, the address carries #connect= (the cloud and the
    e-mail, never a password), which an icon added from here opens with; and "Copy the sign-in link" puts the same on
-   the clipboard for the icon's "Paste the link". Either way the friend signs in there once with their new password.
+   the clipboard for the icon's "Paste my sign-in". Either way the friend signs in there once with their new password.
    Never on the PC app; Vault on its own on a PC (V.pc.standalone) gets the Gemini step only. Settings > This iPhone
    offers the same link (`markConnect`, `iosIcon`), for an icon added later.
 
@@ -35,7 +35,7 @@ V.welcome = (() => {
   // What the owner's Stats show about each friend (js/access.js, vault/stats.py): said on the choose-password screen
   // and, for good, under "Your account" in a friend's Settings (friends who joined before the Stats were made too).
   const STATS_WORDS = 'Their Stats show a few numbers about you: how many notes and files you have, how much space they '
-    + 'take, which devices and Vault versions you use, and when you last used it. Never what\'s in them.';
+    + 'take, which devices and Wefty versions you use, and when you last used it. Never what\'s in them.';
 
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (error) { return null; } };
   const write = (value) => {
@@ -69,7 +69,7 @@ V.welcome = (() => {
     const kind = V.deviceKind;
     if (kind.inApp) {
       const browser = kind.ios ? 'Safari' : 'Chrome';
-      return { kind: 'in-app', browser, steps: [`Vault can't go on your home screen from inside this app. Open Vault in ${browser} to add it.`],
+      return { kind: 'in-app', browser, steps: [`Wefty can't go on your home screen from inside this app. Open Wefty in ${browser} to add it.`],
         note: '' };
     }
     if (kind.ios) {
@@ -83,7 +83,7 @@ V.welcome = (() => {
     }
     if (kind.chromebook) {  // (before Android's: a Chromebook set to "It's my phone" has no Add to Home screen)
       return { kind: 'chromebook', steps: ['Click ⋮ at the top right of Chrome.', 'Choose Cast, save and share > Install page as app.'],
-        note: 'If your school doesn\'t allow it, keep Vault as a bookmark instead.' };
+        note: 'If your school doesn\'t allow it, keep Wefty as a bookmark instead.' };
     }
     if (kind.android || (V.device === 'phone' && !/Windows|Macintosh/.test(navigator.userAgent))) {
       return { kind: 'android', steps: ['Tap ⋮ at the top right of Chrome.', 'Tap Add to Home screen, then Install.'], note: '' };
@@ -109,10 +109,10 @@ V.welcome = (() => {
         for (const button of buttons) button.disabled = true;
         try {
           const saved = await V.ai.saveGeminiKey(text);
-          V.toast(saved.checked ? (invited() ? 'Your free AI key works. It\'s kept in your private storage in the Vault cloud '
+          V.toast(saved.checked ? (invited() ? 'Your free AI key works. It\'s kept in your private storage in the Wefty cloud '
             + 'of the person who invited you (they could read it), and it\'s never shown here.'
             : 'Your free AI key works. It\'s kept in your own cloud, never shown.')
-            : 'Key saved. Google couldn\'t check it just now, so Vault checks it the first time it\'s used.', { ms: 8000 });
+            : 'Key saved. Google couldn\'t check it just now, so Wefty checks it the first time it\'s used.', { ms: 8000 });
           resolve('saved');
         } catch (error) {
           status.textContent = '';
@@ -134,7 +134,7 @@ V.welcome = (() => {
           problem.textContent = 'Nothing is copied yet. In AI Studio, tap Copy next to your key, then come back and tap Paste my key.';
         }, () => {
           manual.hidden = false;
-          problem.textContent = 'Vault couldn\'t read what you copied. Paste the key in the box instead (press and hold, then Paste).';
+          problem.textContent = 'Wefty couldn\'t read what you copied. Paste the key in the box instead (press and hold, then Paste).';
           box.focus();
         });
       } });
@@ -143,22 +143,27 @@ V.welcome = (() => {
       const buttons = [paste, saveTyped];
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save(box.value); });
       screen(dots('ai'), V.h('h1', { text: 'Free AI for your notes' }),
-        V.h('p.muted', { text: 'Vault can turn what you hear in class into notes, and chat with you, using Google\'s Gemini. '
+        V.h('p.muted', { text: 'Wefty can turn what you hear in class into notes, and chat with you, using Google\'s Gemini. '
           + 'It\'s free with your own key, and getting one takes about a minute.' }),
         V.h('ol.steps', {},
-          V.h('li', { text: 'Tap Open Google AI Studio and sign in with your Google account.' }),
+          V.h('li', { text: 'Tap Open Google AI Studio and sign in with your own Google account (not your school one).' }),
           V.h('li', { text: 'Tap Create API key (any name is fine), then Copy.' }),
           V.h('li', { text: 'Come back here and tap Paste my key.' })),
         V.button('Open Google AI Studio', { kind: 'wide-btn', icon: 'open', onClick: () => window.open(GEMINI_PAGE, '_blank', 'noopener') }),
         paste, manual, status, problem,
         V.h('p.welcome-age', {}, V.icon('alert'), V.h('span', { text: 'Google says you must be 18 or older to use the Gemini API.' })),
+        // (School Google accounts: their school usually switches Google AI Studio off for them, so the key is made with the
+        // person's own account, on their own phone or computer: never a way round the school's settings for its accounts.)
+        V.h('p.welcome-age.welcome-school', {}, V.icon('alert'), V.h('span', { text: 'School Google accounts usually can\'t '
+          + 'make keys: schools switch this off for them. Use your own personal Google account instead. On a school Chromebook, '
+          + 'it\'s easiest to make the key on your phone: once it\'s saved, Wefty uses it on all your devices.' })),
         V.deviceKind.inApp ? V.h('p.welcome-age.welcome-in-app', {}, V.icon('alert'), V.h('span', { text: 'Google won\'t let you '
-          + `sign in inside Instagram, Snapchat and other apps' own browsers. Open Vault in ${V.deviceKind.ios ? 'Safari' : 'Chrome'} `
+          + `sign in inside Instagram, Snapchat and other apps' own browsers. Open Wefty in ${V.deviceKind.ios ? 'Safari' : 'Chrome'} `
           + 'for this step, or skip it for now.' })) : null,
         invited() ? V.h('p.welcome-kept', {}, V.icon('lock'), V.h('span', { text: 'Your key is stored in the cloud of '
           + 'the person who invited you. They could read it. You can delete it any time in Settings > AI, or remove the key in '
           + 'Google AI Studio.' })) : null,
-        V.h('p.hint', { text: 'Vault works fully without it: notes, files, sending and everything else. You can add a key any time in Settings > AI.' }),
+        V.h('p.hint', { text: 'Wefty works fully without it: notes, files, sending and everything else. You can add a key any time in Settings > AI.' }),
         V.h('button.link-btn.welcome-skip', { type: 'button', text: 'Skip for now', onclick: () => { if (!busy) resolve('skipped'); } }));
     });
   }
@@ -175,11 +180,11 @@ V.welcome = (() => {
       const computer = how.kind === 'chromebook' || how.kind === 'browser';
       const inApp = how.kind === 'in-app';
       function draw() {
-        const offer = !inApp && V.install.ready() ? V.button(computer ? 'Install Vault' : 'Add to home screen', {
+        const offer = !inApp && V.install.ready() ? V.button(computer ? 'Install Wefty' : 'Add to home screen', {
           kind: 'primary wide-btn', icon: 'download',
           onClick: async () => { if ((await V.install.ask()) === 'accepted') finish('installed'); else draw(); } }) : null;
         const email = user.email || (V.config && V.config.email) || 'your e-mail';
-        screen(dots('install'), V.h('h1', { text: computer ? 'Install Vault as an app' : 'Add Vault to your home screen' }),
+        screen(dots('install'), V.h('h1', { text: computer ? 'Install Wefty as an app' : 'Add Wefty to your home screen' }),
           V.h('p.muted', { text: computer ? 'Then it opens like an app, in its own window, even with no internet.'
             : 'Then it opens like an app, full screen, even with no internet.' }),
           offer,
@@ -188,7 +193,7 @@ V.welcome = (() => {
           how.kind === 'ios' ? iosIcon(email, 'the password you just picked') : null,
           inApp ? V.h('div.welcome-ios', {},
             V.h('p', { text: `Tap Copy the sign-in link, open ${how.browser}, paste it into the address bar and go. Then sign in `
-              + `once with ${email} and the password you just picked, and add Vault to the home screen from there.` }),
+              + `once with ${email} and the password you just picked, and add Wefty to the home screen from there.` }),
             V.button('Copy the sign-in link', { icon: 'copy', onClick: async () => {
               await V.copy(V.connectLink());
               V.toast(`Copied. Now open ${how.browser} and paste it into the address bar.`, { ms: 6000 });
@@ -214,16 +219,16 @@ V.welcome = (() => {
             : 'Free AI: add a key any time in Settings > AI') : null,
           has.includes('install') ? installLine(line, results.install) : null),
         V.deviceKind.ios && ['installed', 'added'].includes(results.install)
-          ? V.h('p.muted', { text: 'From now on, open Vault from its icon (sign in there once).' }) : null,
-        V.button('Open Vault', { kind: 'primary wide-btn', onClick: () => resolve() }));
+          ? V.h('p.muted', { text: 'From now on, open Wefty from its icon (sign in there once).' }) : null,
+        V.button('Open Wefty', { kind: 'primary wide-btn', onClick: () => resolve() }));
     });
   }
 
   /* The home screen's line in "You're all set": "on your home screen" only when that's known (Chrome's own Install
      said so, or this is the icon); a tapped "I've added it" can't be checked from here. */
   function installLine(line, result) {
-    if (result === 'installed' || V.install.installed()) return line(true, 'Vault is on your home screen');
-    if (result === 'added') return line(true, 'Home screen: added? Open Vault from its icon');
+    if (result === 'installed' || V.install.installed()) return line(true, 'Wefty is on your home screen');
+    if (result === 'added') return line(true, 'Home screen: added? Open Wefty from its icon');
     return line(false, 'Home screen: Settings shows how, any time');
   }
 
@@ -244,13 +249,13 @@ V.welcome = (() => {
   }
 
   /* The icon starts with nothing of Safari's: what to do there, and the link to paste into it. */
-  function iosIcon(email, password = 'your Vault password') {
+  function iosIcon(email, password = 'your Wefty password') {
     return V.h('div.welcome-ios', {},
-      V.h('p', { text: `The new icon is Vault on its own: open it and sign in there once, with ${email} and ${password}. If it asks `
-        + 'to connect, copy the link here, then tap Paste the link there.' }),
+      V.h('p', { text: `The new icon is Wefty on its own: open it and sign in there once, with ${email} and ${password}. If it asks `
+        + 'to connect, copy the link here, then tap Paste my sign-in there.' }),
       V.button('Copy the sign-in link', { icon: 'copy', onClick: async () => {
         await V.copy(V.connectLink());
-        V.toast('Copied. If the icon asks to connect, tap Paste the link.', { ms: 6000 });
+        V.toast('Copied. If the icon asks to connect, tap Paste my sign-in.', { ms: 6000 });
       } }));
   }
 

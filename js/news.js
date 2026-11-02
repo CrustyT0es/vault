@@ -75,14 +75,14 @@ V.news = (() => {
         body: JSON.stringify({ ...args, action }) });
     } catch (error) {
       if (error && error.kind === 'signed-out') throw error;
-      throw Object.assign(new Error(navigator.onLine ? 'Vault couldn\'t reach your cloud just now. Try again in a minute.'
+      throw Object.assign(new Error(navigator.onLine ? 'Wefty couldn\'t reach your cloud just now. Try again in a minute.'
         : OFFLINE), { offline: !navigator.onLine });
     } finally {
       clearTimeout(stop);
     }
     const said = await response.json().catch(() => ({}));
     if (response.ok) return said && typeof said === 'object' ? said : {};
-    const message = said && typeof said.message === 'string' && said.message ? said.message
+    const message = said && typeof said.message === 'string' && said.message ? V.weftyWords(said.message)
       : `Your cloud's helper said ${response.status}.`;
     throw Object.assign(new Error(message), { status: response.status, code: (said && said.error) || '' });
   }
@@ -409,7 +409,7 @@ V.news = (() => {
   function redraw() { if (settings && settings.draw) settings.draw(); }
 
   async function remove(item) {
-    const sure = await V.confirm('Delete this update?', 'It goes from everyone\'s Vault, with its poll\'s answers. This '
+    const sure = await V.confirm('Delete this update?', 'It goes from everyone\'s Wefty, with its poll\'s answers. This '
       + 'can\'t be undone.', { ok: 'Delete', danger: true });
     if (!sure) return;
     try {
@@ -559,7 +559,7 @@ V.news = (() => {
     const sheet = V.sheet({
       title: 'New announcement',
       content: [
-        V.h('p', { text: 'It pops up once for everyone else in your Vault cloud the next time they open Vault. You can '
+        V.h('p', { text: 'It pops up once for everyone else in your Wefty cloud the next time they open Wefty. You can '
           + 'open it again from Settings > Announcements.' }),
         V.h('label.label', {}, 'Title', title), V.h('label.label', {}, 'Message', text),
         V.h('div.setting-buttons.news-compose-add', {}, pollButton, noteButton), pollBox, noteBox, problem],
@@ -589,7 +589,7 @@ V.news = (() => {
             answer.unavailable = '';
           }
           if (item) keepSeen(item.id);
-          V.toast('Posted. Everyone sees it next time they open Vault.');
+          V.toast('Posted. Everyone sees it next time they open Wefty.');
           redraw();
           return false;
         } catch (error) {
@@ -643,7 +643,7 @@ V.news = (() => {
     const rows = items.slice(0, SHOWN).map(row);
     if (!rows.length) {
       rows.push(ui.line('Nothing posted yet', answer.unavailable
-        ? 'Announcements need Vault\'s helper in your cloud, at its newest version: see Invite people, above.'
+        ? 'Announcements need Wefty\'s helper in your cloud, at its newest version: see Invite people, above.'
         : 'Post an update, a poll or a note for everyone from Invite people, above.', null));
     }
     if (items.length > SHOWN) rows.push(V.h('p.hint', { text: `The newest ${SHOWN} of ${items.length}.` }));
