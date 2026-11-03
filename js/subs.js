@@ -4,9 +4,11 @@
    What you pay for (a name, a price in CAD or USD, how often, when it next renews, whether it's a free trial), kept
    for every device in the settings row's extra.subscriptions (changed through V.cloud.changeExtra, the
    compare-and-swap, so two devices changing different ones at once both keep theirs). Shown:
-   - on Today ("Coming up", through V.today.addSection: js/today.js loads just before this file): a renewal within its
-     reminder days ("Higgsfield renews Fri"), a trial ending (amber: cancel if you don't want it); nothing when nothing
-     is soon;
+   - on Today's days (1.17, through V.today.addDayItems: js/today.js loads just before this file): each renewal on its
+     own day ("Higgsfield renews", its price under it), a trial ending (amber, with Cancel here), as far as the days go;
+     a tap opens it;
+   - on Today's first-run screen, which has no days ("Coming up", through V.today.addSection): a renewal within its
+     reminder days ("Higgsfield renews Fri"), a trial ending; nothing when nothing is soon;
    - in its own list (Today's ⋯ > Subscriptions, or "See all"): sorted by the next renewal, the monthly total per
      currency, add / edit / delete in a sheet, and "Cancel here" opening the page where it's cancelled.
    A renewal day that has passed rolls forward by whole periods when shown (`rolled`, keeping the day of the month it
@@ -267,6 +269,8 @@ V.subs = (() => {
   }
 
   function todayCard() {
+    // (Today's days have every renewal on its day: this card is for the first-run screen, which has none)
+    if (V.today.showsDays && V.today.showsDays()) return null;
     const today = V.today();
     rollLater();
     const coming = soon(null, today);
@@ -276,6 +280,30 @@ V.subs = (() => {
         V.h('button.sub-all', { type: 'button', text: 'See all', onclick: () => open() })),
       V.h('div.sub-soon-list', {}, coming.slice(0, 4).map((x) => todayRow(x, today)),
         coming.length > 4 ? V.h('button.sub-more', { type: 'button', text: `${coming.length - 4} more`, onclick: () => open() }) : null));
+  }
+
+  /* -- Today's days (1.17): each renewal from `from` to `to` on its own day (a weekly one on each), and a trial's end
+     (amber, with Cancel here when there's a link). Paused ones never. A tap opens it as it is now. */
+  function dayItems(from, to) {
+    rollLater();
+    const out = [];
+    for (const sub of list(from)) {
+      if (sub.paused) continue;
+      let one = sub;
+      for (let guard = 0; one && one.next <= to && guard < 60; guard++) {
+        const now = one;
+        out.push({
+          day: now.next, key: `${now.id}:${now.next}`, warn: now.trial, data: { sub: now.id },
+          text: now.trial ? `${now.name} trial ends` : `${now.name} renews`,
+          line: now.trial ? 'Cancel if you don\'t want it' : `${money(now.price, now.currency)}${perWords(now)}`,
+          lead: () => initial(now),
+          action: now.trial && now.link ? () => cancelButton(now, '.small') : null,
+          open: () => edit(list().find((s) => s.id === now.id) || sub), openTitle: 'Change it',
+        });
+        one = rolled({ ...now, trial: false }, V.addDays(now.next, 1));  // (the one after: paid, once a trial has ended)
+      }
+    }
+    return out;
   }
 
   /* -- the list */
@@ -448,10 +476,11 @@ V.subs = (() => {
   V.on('signing-out', () => { if (shown) shown.close(); });
   if (V.today && V.today.addSection) {  // (ORDER.subs: Today's own slot for it, after the flash cards)
     V.today.addSection({ id: 'subs', order: (V.today.ORDER && V.today.ORDER.subs) || 45, column: 'right', build: todayCard });
+    if (V.today.addDayItems) V.today.addDayItems({ id: 'subs', items: dayItems });
     V.today.addMenuItem({ id: 'subs', label: 'Subscriptions', icon: 'restore', onClick: () => open() });
   }
 
   // (save/remove/stored/validDate/MOST: the Chat tab's tools, js/chattools.js, go through the same path and checks)
-  return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, money, line, monthly, save, remove, stored,
-    validDate, safeLink, when, perWords, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
+  return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, dayItems, money, line, monthly, save, remove,
+    stored, validDate, safeLink, when, perWords, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
 })();

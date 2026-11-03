@@ -1,7 +1,8 @@
 /* Vault: keeping notes in order. Folders (made with a name and an emoji, renamed, put in order, put inside each other
-   up to DEPTH levels, deleted), moving notes (one at a time, or several picked at once), the Archive, your own
-   templates, #tags read from the words, and what the search box understands (in:School, #tag, has:checklist, due:week,
-   is:pinned...). notes.js draws the Notes tab with these, and the editor's folder picker and More menu use them too.
+   up to DEPTH levels, by their menus or by dragging (js/drag.js; placeFolder), deleted), moving notes (one at a time,
+   or several picked at once), the Archive, your own templates, #tags read from the words, and what the search box
+   understands (in:School, #tag, has:checklist, due:week, is:pinned...). notes.js draws the Notes tab with these, and
+   the editor's folder picker and More menu use them too.
 
    Nothing new is stored but in a note's `extra`: archived, is_template and template_name, with organised_at saying
    when one of those was last changed (see keepOrganised); and in a folder's, its parent (extra.parent). Tags aren't
@@ -24,6 +25,11 @@ V.organise = (() => {
     up: '<path d="m6.5 14.5 5.5-5.5 5.5 5.5"/>',
     edit: '<path d="M4.5 19.5h4l10.2-10.2a2.83 2.83 0 0 0-4-4L4.5 15.5z"/><path d="m13.5 6.5 4 4"/>',
     smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2a4 4 0 0 0 6.8 0"/><circle cx="9.3" cy="10" r=".7" fill="currentColor" stroke="none"/><circle cx="14.7" cy="10" r=".7" fill="currentColor" stroke="none"/>',
+    grip: ['9 6', '15 6', '9 12', '15 12', '9 18', '15 18'].map((at) => {
+      const [x, y] = at.split(' ');
+      return `<circle cx="${x}" cy="${y}" r="1.4" fill="currentColor" stroke="none"/>`;
+    }).join(''),
+    arrange: '<path d="M4 6.5h9M4 12h6M4 17.5h9"/><path d="M17.5 4.5v15M15 7l2.5-2.5L20 7M15 17l2.5 2.5L20 17"/>',
     blank: '',
   };
   const plainIcon = V.icon;
@@ -505,12 +511,200 @@ V.organise = (() => {
     return true;
   }
 
-  /* The ⋯ menu of a folder. Inbox keeps its name and its place (quick notes and Jarvis's notes go there) and can't be
-     deleted. */
+  /* -- putting folders in order, and in each other, by dragging (js/notes.js; the Arrange folders sheet below)
+
+     A folder's place is its parent (extra.parent) and its sort number among the folders beside it, as before: a drop
+     numbers the folders of the one it lands in 0, 1, 2... (only the ones whose number changes are saved), so other
+     devices, and Vaults from before, show the same order. Inbox stays first at the top. */
+
+  const rawParentId = (f) => (f && f.extra && typeof f.extra.parent === 'string' ? f.extra.parent : null);
+
+  /* Where `moving` would go dropped in `zone` ('before', 'into' or 'after') of the folder `onto`: {parent, at}, `at`
+     counted among the folders of `parent` without `moving` (null when `onto` is `moving` itself). `kidsShown`: the
+     folders inside `onto` are drawn right under it (an open tree), so just under it is their start. */
+  function spotBy(moving, onto, zone, kidsShown = false) {
+    if (!onto || !moving || onto.id === moving.id) return null;
+    const without = (id) => children(id).filter((f) => f.id !== moving.id);
+    if (zone === 'into') return { parent: onto.id, at: without(onto.id).length };
+    if (zone === 'after' && kidsShown) return { parent: onto.id, at: 0 };
+    const parent = parentId(onto);
+    const at = without(parent).findIndex((f) => f.id === onto.id);
+    return at < 0 ? null : { parent, at: zone === 'before' ? at : at + 1 };
+  }
+
+  /* What putting `moving` at place `at` among the folders in `parent` (null = the top level) would do: {why} when it
+     can't (a loop, too deep, a name taken there, before Inbox), {same} when that's where it is, else {list} (that
+     level's folders in their new order) and {into} (the parent). */
+  function planPlace(moving, parent, at) {
+    const now = V.data.folders.get(moving.id) || moving;
+    const into = parent ? liveFolder(parent) : null;
+    if (parent && !into) return { why: '' };
+    const home = into ? into.id : null;
+    const why = cantMove(now, into) || (parentId(now) !== home ? nameTaken(now.name, into, now.id) : '');
+    if (why) return { why };
+    const list = children(home).filter((f) => f.id !== now.id);
+    const place = Math.max(0, Math.min(list.length, Number.isFinite(at) ? at : list.length));
+    if (!into && place === 0 && list.length && isInbox(list[0])) return { why: 'Inbox always stays first.' };
+    list.splice(place, 0, now);
+    const box = into ? -1 : list.findIndex(isInbox);
+    if (box > 0) list.unshift(...list.splice(box, 1));  // (a Vault from before may have put one above it)
+    const was = children(home);
+    if (parentId(now) === home && was.length === list.length && was.every((f, i) => f.id === list[i].id)) return { same: true };
+    return { list, into };
+  }
+
+  /* `moving` put at place `at` among the folders in `parent` (null = the top level; at Infinity = the end), saying
+     where with an Undo, or why not. Resolves true when it moved. */
+  async function placeFolder(moving, parent, at = Infinity) {
+    const plan = planPlace(moving, parent, at);
+    if (plan.why) { V.toast(plan.why, { kind: 'err', ms: 5000 }); return false; }
+    if (plan.same || !plan.list) return false;
+    const now = V.data.folders.get(moving.id) || moving;
+    const { list, into } = plan;
+    const moved = parentId(now) !== (into ? into.id : null);
+    const changes = list.map((f, i) => ({ f, i })).filter(({ f, i }) => f.id === now.id || Number(f.sort) !== i);
+    const before = changes.map(({ f }) => ({ id: f.id, sort: f.sort, parent: rawParentId(f) }));
+    for (const { f, i } of changes) {
+      if (f.id === now.id) await saveFolder(f, { sort: i }, { parent: into ? into.id : null });
+      else await saveFolder(f, { sort: i });
+    }
+    const place = list.indexOf(now);
+    const after = list[place - 1];
+    const said = moved ? (into ? `Moved ${now.name} into ${into.name}` : `Moved ${now.name} to the top`)
+      : after ? `Moved ${now.name} after ${after.name}` : `Moved ${now.name} to the start${into ? ' of ' + into.name : ''}`;
+    V.toast(said, { action: 'Undo', onAction: () => putFoldersBack(before).catch(V.problem) });
+    return true;
+  }
+
+  /* Folders back where they were before a drop: their sort numbers and parents as they were. */
+  async function putFoldersBack(before) {
+    for (const { id, sort, parent } of before) {
+      const row = V.data.folders.get(id);
+      if (row && !row.deleted) await saveFolder(row, { sort }, { parent });
+    }
+  }
+
+  /* For js/drag.js: what dropping folder `moving` in `zone` of the folder `onto` would do. `el` is lit to drop into it,
+     `line(zone, kidsShown)` gives the line for a place between two. */
+  function folderTarget(moving, onto, zone, { kidsShown = false, el = null, line = null } = {}) {
+    const spot = spotBy(moving, onto, zone, kidsShown);
+    if (!spot) return null;
+    const plan = planPlace(moving, spot.parent, spot.at);
+    if (plan.same) return null;
+    const into = zone === 'into';
+    return { ok: !plan.why, why: plan.why || '', el: into ? el : null, into, line: !into && line ? line(zone, kidsShown) : null,
+      run: () => placeFolder(moving, spot.parent, spot.at) };
+  }
+
+  /* ...on a row of a list of folders drawn top to bottom (data-id; `tree`: data-depth, each folder's own right under
+     it). `lit` is the part lit to drop into it (with the folder's data-id when the row has none), `from` where a line
+     starts (its left, px), `step` how far in a level is. */
+  function folderRowTarget(moving, row, x, y, { lit = row, from = 0, step = 14, tree = false } = {}) {
+    const onto = liveFolder(row.dataset.id || lit.dataset.id);
+    if (!onto) return null;
+    const next = tree ? row.nextElementSibling : null;
+    const kidsShown = !!next && !!next.dataset && next.dataset.depth !== undefined
+      && Number(next.dataset.depth) > Number(row.dataset.depth || 0) && children(onto.id).length > 0;
+    return folderTarget(moving, onto, V.drag.zone(row, x, y), { kidsShown, el: lit,
+      line: (zone, shown) => V.drag.lineBy(row, zone, 'y', from + (zone === 'after' && shown ? step : 0)) });
+  }
+
+  /* ...on something meaning "the top level" (the side list's Folders, the All chip): at the end of it. */
+  function topTarget(moving, el) {
+    const plan = planPlace(moving, null, Infinity);
+    if (plan.same) return null;
+    return { ok: !plan.why, why: plan.why || '', el, into: true, run: () => placeFolder(moving, null, Infinity) };
+  }
+
+  /* What a folder being dragged looks like under the pointer. */
+  const dragLabel = (folder) => ({ kind: 'folder', id: folder.id, label: folder.name,
+    icon: folder.icon || (V.notes && V.notes.folderBadge(folder)) || V.icon('folder') });
+
+  /* Every folder in one list, to drag by its handle into order or into another (or to the end, for the top level):
+     the way to arrange them on a phone, where the chips show only the top ones. A handle on the keyboard moves its
+     folder too: Up and Down among the ones beside it, Right into the one above it, Left out of the one it's in. */
+  function arrangeFolders() {
+    const list = V.h('div.arrange-list', { role: 'list', 'aria-label': 'Folders' });
+    const end = V.h('div.arrange-end', { text: 'Drop here to put it last' });
+    let refocus = null;
+    const scroll = () => [{ el: list.closest('.sheet-body'), axis: 'y' }];
+    const resolve = (under, x, y, data) => {
+      const moving = liveFolder(data.id);
+      if (!moving) return null;
+      if (under === end || end.contains(under)) return topTarget(moving, end);
+      const row = under.closest('.arrange-row');
+      if (!row || !list.contains(row)) return null;
+      const badge = row.querySelector('.fc-badge');
+      return folderRowTarget(moving, row, x, y, { tree: true, from: badge ? badge.getBoundingClientRect().left : 0, step: 22 });
+    };
+    function keyMove(event, folder) {
+      const now = liveFolder(folder.id);
+      if (!now || isInbox(now)) return;
+      const up = parentId(now);
+      const beside = children(up);
+      const i = beside.findIndex((f) => f.id === now.id);
+      let go = null;
+      if (event.key === 'ArrowUp' && i > 0) go = [up, i - 1];
+      else if (event.key === 'ArrowDown' && i < beside.length - 1) go = [up, i + 1];
+      else if (event.key === 'ArrowRight' && i > 0) go = [beside[i - 1].id, Infinity];
+      else if (event.key === 'ArrowLeft' && up) {
+        const above = liveFolder(up);
+        const outer = parentId(above);
+        go = [outer, children(outer).findIndex((f) => f.id === above.id) + 1];
+      }
+      if (!event.key.startsWith('Arrow')) return;
+      event.preventDefault();
+      if (!go) return;
+      refocus = now.id;
+      placeFolder(now, go[0], go[1]).then((moved) => { if (!moved) refocus = null; }, V.problem);
+    }
+    function draw() {
+      // (the keyboard stays on the handle it was on, as the list is drawn again after each move and each sync)
+      const had = list.contains(document.activeElement) && document.activeElement.closest('.arrange-row');
+      const keep = refocus || (had && had.dataset.id);
+      refocus = null;
+      V.clear(list, tree().map(({ folder, depth }) => {
+        const home = isInbox(folder);
+        const handle = V.h('button.arr-handle', {
+          type: 'button', disabled: home,
+          'aria-label': home ? `${folder.name} always stays first` : `Move ${folder.name}`,
+          title: home ? 'Inbox always stays first' : 'Drag to move it, or use the arrow keys',
+          onkeydown: (event) => keyMove(event, folder),
+        }, V.icon(home ? 'pin' : 'grip'));
+        const row = V.h('div.arrange-row' + (home ? '.fixed' : ''), {
+          role: 'listitem', dataset: { id: folder.id, depth: String(Math.min(depth, 4)) },
+        }, handle, V.h('span.fc-badge', {}, V.notes.folderBadge(folder) || V.icon('folder')),
+        V.h('span.fc-name', { text: folder.name }));
+        if (!home) V.drag.source(row, { handle: '.arr-handle', data: () => liveFolder(folder.id) && dragLabel(liveFolder(folder.id)), resolve, scroll });
+        return row;
+      }));
+      const handle = keep && list.querySelector(`.arrange-row[data-id="${keep}"] .arr-handle`);
+      if (handle) handle.focus();
+    }
+    draw();
+    const redraw = V.debounce(() => {
+      if (!list.isConnected) return;
+      if (V.drag.busy()) { redraw(); return; }
+      draw();
+    }, 60);
+    const heard = (event) => { if (event.detail === 'folders') redraw(); };
+    V.bus.addEventListener('data', heard);
+    V.sheet({
+      title: 'Arrange folders',
+      content: [V.h('p.hint.arrange-hint', { text: 'Drag a folder by its dots: onto another folder to put it inside, or between two to put it there.' }),
+        list, end],
+      actions: [{ label: 'Done', kind: 'primary' }],
+      onClose: () => V.bus.removeEventListener('data', heard),
+    });
+  }
+
+  /* The ⋯ menu of a folder. Inbox keeps its name and its place (quick notes and Jarvis's notes go there, and it stays
+     first) and can't be deleted. */
   function folderMenu(folder, anchor, { onGone, onMade } = {}) {
     const list = children(parentId(folder));  // up and down go among the folders beside it
     const at = list.findIndex((f) => f.id === folder.id);
     const home = isInbox(folder);
+    const below = at > 0 && !isInbox(list[at - 1]);  // (nothing goes above Inbox)
     V.menu(anchor, [
       home ? null : { label: 'Rename', icon: 'edit', onClick: async () => {
         const changed = await folderSheet({ title: 'Rename folder', ok: 'Rename', folder, askIcon: false });
@@ -524,21 +718,27 @@ V.organise = (() => {
         const made = await newFolder({ parent: V.data.folders.get(folder.id) || folder });
         if (made && onMade) onMade(made);
       } } : null,
+      // (js/aicards.js: cards made with AI from everything in it, into a "Study cards" note there)
+      V.aiCards ? { label: 'Make flash cards', icon: 'cards', onClick: () => V.aiCards.forFolder(folder.id) } : null,
       home ? null : { label: 'Move folder to...', icon: 'folder-move', onClick: async () => {
         const to = await chooseFolder({ title: `Move ${folder.name} to`, moving: folder });
         if (to) await moveFolder(folder, to.id);
       } },
-      at > 0 ? { label: 'Move up', icon: 'up', onClick: () => reorder(folder, -1) } : null,
-      at >= 0 && at < list.length - 1 ? { label: 'Move down', icon: 'down', onClick: () => reorder(folder, 1) } : null,
+      // (js/export.js: its notes, and the folders inside it, as one ZIP)
+      V.exporter ? { label: 'Export folder', icon: 'download', onClick: () => V.exporter.folder(folder.id).catch(V.problem) } : null,
+      below ? { label: 'Move up', icon: 'up', onClick: () => reorder(folder, -1) } : null,
+      !home && at >= 0 && at < list.length - 1 ? { label: 'Move down', icon: 'down', onClick: () => reorder(folder, 1) } : null,
+      V.notes.folders().length > 2 ? { label: 'Arrange folders...', icon: 'arrange', onClick: arrangeFolders } : null,
       home ? null : { label: 'Delete folder', icon: 'trash', danger: true, onClick: () => deleteFolder(folder, onGone) },
     ]);
   }
 
+  /* The menu's Move up and Move down: a step among the folders beside it (never past Inbox, which stays first). */
   async function reorder(folder, step) {
     const list = children(parentId(folder));
     const at = list.findIndex((f) => f.id === folder.id);
     const to = at + step;
-    if (at < 0 || to < 0 || to >= list.length) return;
+    if (at < 0 || to < 0 || to >= list.length || isInbox(list[at]) || isInbox(list[to])) return;
     [list[at], list[to]] = [list[to], list[at]];
     for (let i = 0; i < list.length; i++) {
       if (Number(list[i].sort) !== i) await saveFolder(list[i], { sort: i });
@@ -751,6 +951,7 @@ V.organise = (() => {
     SORTS, sort, view, setSort: (value) => setPref('vault-sort', value), setView: (value) => setPref('vault-view', value),
     comparator, newFolder, folderSheet, folderMenu, chooseFolder, isInbox, move, pin, archive, trash, restore, change,
     DEPTH, TOP, parentId, children, ancestors, pathOf, depthOf, inside, tree, saveFolder, moveFolder, cantMove,
+    placeFolder, planPlace, folderTarget, folderRowTarget, topTarget, dragLabel, arrangeFolders,
     saveTemplate, ownTemplates, templateName, templateSection,
   };
 })();

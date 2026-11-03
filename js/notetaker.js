@@ -95,8 +95,17 @@ V.notetaker = (() => {
   const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
   // Chrome on Android, kept listening, hands each finished phrase over again with every phrase before it glued on (a
   // known Chrome bug), so there it hears one phrase at a time and starts again after each. Safari on an iPhone or iPad
-  // is no better kept listening (it hangs, or repeats words), so it hears a phrase at a time too.
-  const ANDROID = /Android/i.test(navigator.userAgent) || !!(V.deviceKind && V.deviceKind.ios);
+  // is no better kept listening (it hangs, or repeats words), so it hears a phrase at a time too. Chrome on an Android
+  // tablet (by default) or a phone set to Desktop site leaves "Android" out ("X11; Linux x86_64") but is still
+  // Android's Chrome, so what V.deviceKind knows counts too (Settings' "It's my phone" makes such a device 'android'),
+  // and so does a touch screen on Linux that isn't a Chromebook (a Linux computer with one just hears a phrase at a
+  // time and waits while Wefty is out of sight: the safe side).
+  const ANDROID = (() => {
+    const kind = V.deviceKind || {};
+    const agent = navigator.userAgent || '';
+    const linuxTouch = !kind.chromebook && /\bLinux\b/.test(agent) && !/\bCrOS\b/.test(agent) && navigator.maxTouchPoints > 0;
+    return !V.desktop && (/Android/i.test(agent) || !!kind.android || !!kind.ios || kind.kind === 'android' || linuxTouch);
+  })();
   // Everywhere else (a Chromebook, Chrome on a computer) it's kept listening, but one long session hears worse and
   // worse (the owner: "after about 50 words it picks up terribly"), so a session is swapped for a fresh one in a real
   // pause, once it's `age` ms old or has heard `words` words: `quiet` ms after a finished phrase with nothing more
@@ -105,6 +114,15 @@ V.notetaker = (() => {
   // never had such a pause is ended at its next finished phrase once it's `most` ms old (a stop, which still hands
   // over what it heard; words said while the next one starts can be missed there). (Tests shorten them.)
   const rotate = { age: 20000, words: 35, quiet: 1000, most: 60000 };
+  // Out of sight (1.17; the owner: "even to switch tabs it still listens until stopped"). Chrome on a Chromebook or a
+  // computer keeps a page's speech recognition going while its tab is hidden (another tab, another app, the window
+  // minimised: only Chrome on Android ends it when hidden, and newer versions there won't start one hidden either:
+  // Chromium's SpeechRecognition::PageVisibilityChanged, issue 517429672), so there the note-taker keeps listening,
+  // starting fresh sessions in the background too; should a start be refused out of sight, it waits for Wefty to be
+  // back, as a phone does. A phone's browser stops hearing when Wefty isn't on the screen (one asking for desktop
+  // sites too: ANDROID): it waits, and its screen says so up front. (Other computer browsers, Safari on a Mac, wait
+  // as before.)
+  const HEARS_HIDDEN = !ANDROID && !V.desktop && /\bChrome\/\d/.test(navigator.userAgent);
   const plainWords = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
   /* What `text` adds after the words already kept, when it starts with them all again (else all of it). Android's
@@ -149,8 +167,18 @@ V.notetaker = (() => {
   }
 
   /* The browser's speech recognition, started again whenever it stops by itself (after a silence, now and then
-     anyway, or when Vault was in the background) until Stop or Pause. */
-  function webHearing(on) {
+     anyway, or when Vault was in the background) until Stop or Pause. `background`: it goes on while the page is hidden
+     (HEARS_HIDDEN, the note-taker's; dictation stops when Wefty goes out of sight anyway). */
+  function webHearing(on, { background = false } = {}) {
+    let refusedHidden = false;  // a start out of sight was refused here: from then on it waits for the screen
+    const mayHear = () => !document.hidden || (background && !refusedHidden);
+    /* A start (or its answer) refused while hidden, in the background: it waits for Wefty to be back on the screen. */
+    const refused = () => {
+      if (!background || !document.hidden) return false;
+      refusedHidden = true;
+      on.waiting(true);
+      return true;
+    };
     let rec = null;
     let wanted = false;
     let pending = '';      // words heard but not final yet
@@ -173,7 +201,7 @@ V.notetaker = (() => {
       restart = null;
       unquiet();
       if (!wanted || rec) return;
-      if (document.hidden) { on.waiting(true); return; }
+      if (!mayHear()) { on.waiting(true); return; }
       const R = Recognition();
       rec = new R();
       rec.continuous = !ANDROID;
@@ -190,7 +218,7 @@ V.notetaker = (() => {
       /* The pause has lasted: everything said is in, so this session goes at once for a fresh one. */
       const swap = () => {
         quiet = null;
-        if (rec !== mine || !wanted || rotating || pending.trim() || document.hidden) return;
+        if (rec !== mine || !wanted || rotating || pending.trim() || !mayHear()) return;
         rotating = true;
         try { mine.abort(); } catch (error) { /* it ended already: onend starts the next */ }
       };
@@ -236,7 +264,9 @@ V.notetaker = (() => {
       rec.onaudiostart = () => on.trouble(null);
       rec.onerror = (event) => {
         const what = event.error || '';
-        if (what === 'not-allowed' || what === 'service-not-allowed') {
+        if ((what === 'not-allowed' || what === 'service-not-allowed') && refused()) {
+          // (refused because Wefty was out of sight, not the microphone: onend then waits for the screen)
+        } else if (what === 'not-allowed' || what === 'service-not-allowed') {
           wanted = false;
           on.fail(V.deviceKind && V.deviceKind.ios
             ? `Wefty can't use speech here. On your ${V.deviceKind.model}: Settings > Apps > Safari > Microphone (Allow), and turn on Siri or Dictation (Settings > General > Keyboard > Enable Dictation). Then try again in Safari.`
@@ -266,7 +296,7 @@ V.notetaker = (() => {
         pending = '';
         on.interim('');
         if (!wanted) { if (finished) finished(); finished = null; return; }
-        if (document.hidden) { on.waiting(true); return; }
+        if (!mayHear()) { on.waiting(true); return; }
         if (rotating) { rotating = false; begin(); return; }  // ended for a fresh session: straight on
         const now = Date.now();
         ends = ends.filter((t) => now - t < 10000).concat(heard ? [] : [now]);
@@ -277,6 +307,7 @@ V.notetaker = (() => {
         on.waiting(false);
       } catch (error) {
         rec = null;
+        if (refused()) return;  // (out of sight: it starts again once Wefty is back)
         restart = setTimeout(begin, 1000);
       }
     }
@@ -520,11 +551,11 @@ V.notetaker = (() => {
       aboveLength: parts.above.length, part: (note.extra.notetaker && note.extra.notetaker.part) || 1,
       counted: ((note.extra.notetaker && note.extra.notetaker.seconds) || 0) * 1000, runningSince: 0, dirty: false,
       trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '' };
-    session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers());
+    session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers(), { background: HEARS_HIDDEN });
     draw();
     told();
     session.saver = setInterval(() => { if (session && session.dirty) save().catch(V.problem); }, SAVE_EVERY);
-    session.clock = setInterval(drawClock, 1000);
+    session.clock = setInterval(() => { drawClock(); keepPlaced(); }, 1000);
     keepAwake(true);
     await session.hearing.start();
     if (session && session.state === 'starting') setState('listening');
@@ -1024,7 +1055,7 @@ V.notetaker = (() => {
     const layer = V.h('div.nt-layer', {}, panel);
     document.getElementById('layers').append(layer);
     requestAnimationFrame(() => layer.classList.add('shown'));
-    ui = { layer, parts, ready: null, making: null, problem: null, wordsEl: null, interimEl: null, shown: 0 };
+    ui = { layer, panel, parts, ready: null, making: null, problem: null, wordsEl: null, interimEl: null, shown: 0 };
     document.addEventListener('keydown', escape, true);
     drawStrip();  // (the bar at the top goes while the screen shows)
   }
@@ -1040,6 +1071,7 @@ V.notetaker = (() => {
     if (!ui) return;
     const { layer } = ui;
     ui = null;
+    cover(false);
     document.removeEventListener('keydown', escape, true);
     layer.classList.remove('shown');
     setTimeout(() => layer.remove(), 200);
@@ -1050,8 +1082,8 @@ V.notetaker = (() => {
   const live = () => !!(session && ui && !ui.making && !ui.problem);
 
   /* Hide: the screen goes, the listening doesn't (the bar at the top says so, and brings it back). Not while it's
-     stopping: the notes' screen comes next. */
-  function hide() {
+     stopping: the notes' screen comes next. `focus` false: a tab was tapped, and the keyboard goes where it leads. */
+  function hide({ focus = true } = {}) {
     if (!live()) { closePressed(); return; }
     if (session.state === 'stopping') return;
     const was = session;
@@ -1060,8 +1092,75 @@ V.notetaker = (() => {
       was.toldHidden = true;
       V.toast('Still listening. Tap the bar at the top to come back.', { ms: 6000 });
     }
-    if (strip && strip.el.isConnected) strip.open.focus({ preventScroll: true });  // (the keyboard comes back there)
+    if (focus && strip && strip.el.isConnected) strip.open.focus({ preventScroll: true });  // (the keyboard comes back there)
   }
+
+  /* -- Wefty's own tabs while it listens (1.17; the owner: "During auto notes allow to browse the app freely as it
+     keeps listening, even to switch tabs"). On a phone its screen covered the tab bar, so Hide was the only way out:
+     now the live screen leaves the tabs in reach (the bar along the bottom under 900 px, the rail on the left from 900
+     px) and a tab tapped there hides the screen (it keeps listening: the bar at the top says so) on the way to that
+     tab. Not a modal dialog then (the tabs are part of what can be used). The start, writing and problem screens still
+     cover everything. */
+  function placeLayer() {
+    if (!ui) return;
+    const tabs = live() ? document.querySelector('#app.ready:not(.gate) > nav.tabs') : null;
+    let box = tabs && tabs.getClientRects().length ? tabs.getBoundingClientRect() : null;
+    // (only where the tabs themselves are what's there under the screen: a phone's full-screen note covers them)
+    if (box) {
+      const under = document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+        .find((el) => !ui.layer.contains(el));
+      if (!under || !tabs.contains(under)) box = null;
+    }
+    const below = box && box.width > box.height ? Math.max(0, Math.round(innerHeight - box.top)) : 0;  // along the bottom
+    const beside = box && box.height > box.width ? Math.max(0, Math.round(box.right)) : 0;            // the rail
+    ui.layer.style.bottom = below ? `${below}px` : '';
+    ui.layer.style.left = beside ? `${beside}px` : '';
+    if (below) ui.layer.dataset.tabs = 'below';
+    else if (beside) ui.layer.dataset.tabs = 'beside';
+    else delete ui.layer.dataset.tabs;
+    ui.panel.setAttribute('aria-modal', below || beside ? 'false' : 'true');
+    cover(!!(below || beside));
+  }
+
+  /* Not a modal dialog with the tabs in reach, so what the screen covers is made inert (a screen reader's swipe and
+     the Tab key go from the screen to the tabs only, never to the hidden page under it): everything of #app but its
+     tabs. Given back when the screen closes or covers the tabs again. Only what this made inert is given back. */
+  let covered = [];
+  function cover(on) {
+    const now = on ? [...document.querySelectorAll('#app > *')].filter((el) => !el.matches('nav.tabs')) : [];
+    for (const el of covered) if (!now.includes(el)) el.inert = false;
+    covered = covered.filter((el) => now.includes(el));
+    for (const el of now) if (!el.inert) { el.inert = true; covered.push(el); }
+  }
+  /* Placed again when the window changes, and each second while it listens (a note closing under it as it opened
+     uncovers the tabs a moment later); drawn again when that moves them (its small print says where they are). */
+  function keepPlaced() {
+    if (!ui) return;
+    const was = ui.layer.dataset.tabs || '';
+    placeLayer();
+    if ((ui.layer.dataset.tabs || '') !== was && live()) draw();
+  }
+  window.addEventListener('resize', keepPlaced);
+  // A tab (or the rail's picture) tapped while the live screen shows: the screen goes first, still listening, then
+  // the tab does what it always does.
+  document.addEventListener('click', (event) => {
+    if (!live() || !ui.layer.dataset.tabs || !event.target || !event.target.closest) return;
+    if (event.target.closest('#app > nav.tabs button')) hide({ focus: false });
+  }, true);
+
+  /* What the live screen says about using the rest of Wefty meanwhile, as its tabs are placed (and, in Chrome on a
+     Chromebook or a computer, other tabs and apps too). */
+  function browseWords(engine) {
+    const where = ui && ui.layer.dataset.tabs;
+    const how = where === 'below' ? 'Tap Hide, or a tab below, to use the rest of Wefty'
+      : where === 'beside' ? 'Tap Hide, or a tab on the left, to use the rest of Wefty' : 'Tap Hide to use the rest of Wefty';
+    if (engine !== 'web' || ANDROID) return `${how}: it keeps listening.`;
+    return HEARS_HIDDEN ? `${how}: it keeps listening, in other tabs and apps too (keep this tab open).`
+      : `${how}: it keeps listening. It pauses if Wefty leaves the screen and carries on when Wefty is back.`;
+  }
+
+  /* A phone's (or an iPhone's) name, for the line saying it can't hear while Wefty is in the background. */
+  const phoneName = () => (V.deviceKind && V.deviceKind.ios ? `your ${V.deviceKind.model}` : 'your phone');
 
   /* Stop without making notes (the bar's Stop, and the one on the bar at the top): asked first, as it ends the
      listening. What was heard stays in the note, with "Make notes" for later. */
@@ -1232,9 +1331,12 @@ V.notetaker = (() => {
           V.h('span', { text: 'To make notes, set up Claude in Settings > AI. Listening works without it.' })),
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
-        how.kind === 'web' ? V.h('li', { text: navigator.wakeLock
-          ? 'You can use the rest of Wefty while it listens. Keep Wefty on the screen (it stays on by itself).'
-          : 'You can use the rest of Wefty while it listens. Keep Wefty on the screen, with the screen on.' })
+        how.kind === 'web' ? V.h('li', { text: ANDROID
+          ? `You can use the rest of Wefty while it listens, but keep Wefty open${navigator.wakeLock ? ' (the screen stays on by itself)'
+            : ', with the screen on'}: ${phoneName()} can't hear while Wefty is in the background.`
+          : HEARS_HIDDEN ? 'You can use the rest of Wefty, other tabs and other apps while it listens. Keep this tab open.'
+            : navigator.wakeLock ? 'You can use the rest of Wefty while it listens. Keep Wefty on the screen (it stays on by itself).'
+              : 'You can use the rest of Wefty while it listens. Keep Wefty on the screen, with the screen on.' })
           : how.kind ? V.h('li', { text: 'You can use the rest of Wefty while it listens.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
@@ -1319,9 +1421,13 @@ V.notetaker = (() => {
       V.icon('pc'), V.h('span.nt-pcsound-words', { text: barWords(s) }),
       V.button('Stop', { disabled: s.state === 'stopping',
         onClick: () => stopListening({ make: false }).catch(V.problem) })) : null;
+    // Out of sight: a phone can't hear (said where it's seen, not in the small print); Chrome on a Chromebook or a
+    // computer carries on (HEARS_HIDDEN); other browsers pause (browseWords).
     V.clear(body, V.h('div.nt-live', {}, onAir, ui.statusEl, ui.troubleEl, ui.wordsEl,
-      V.h('p.nt-small', { text: `${hearsWith(s.engine)} Tap Hide to use the rest of Wefty while it listens.${s.engine === 'web'
-        ? ' It pauses if Wefty leaves the screen (another app, or the phone locked) and carries on when Wefty is back.' : ''}` })));
+      s.engine === 'web' && ANDROID ? V.h('p.nt-bg', {}, V.icon('phone'), V.h('span', {
+        text: `Keep Wefty open: ${phoneName()} can't hear while Wefty is in the background (another app, or the screen `
+          + 'locked). It carries on when Wefty is back.' })) : null,
+      V.h('p.nt-small', { text: `${hearsWith(s.engine)} ${browseWords(s.engine)}` })));
     const paused = s.state === 'paused';
     V.clear(foot,
       V.button(paused ? 'Resume' : 'Pause', { icon: paused ? 'play' : null, disabled: s.state === 'starting' || s.state === 'stopping',
@@ -1398,6 +1504,7 @@ V.notetaker = (() => {
     // listens with its screen put away, is that note's: the X, and nothing of the listening.)
     const on = live();
     ui.layer.classList.toggle('listening', on);
+    placeLayer();  // (the tabs in reach while it listens)
     drawClock();
     ui.parts.title.textContent = on ? titleShown(session.title) : 'Note-taker';
     const { close, hide: hideButton, stop } = ui.parts;

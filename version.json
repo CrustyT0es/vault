@@ -1,18 +1,18 @@
 {
  "format": 1,
- "version": "1.16.1",
+ "version": "1.17.0",
  "min_shell": 1,
  "notes": [
+  "Today shows your days in a row you can swipe through, this week and the next two, and under the quick actions each day's to-dos, reminders, tests and renewals. Tap the Wefty logo to get back to Today.",
+  "Quick actions sit at the top of Today now: New note and Note-taker big, Dictate and Flash cards under them.",
+  "Drag to organise: drag folders up, down and into each other, and drag notes onto a folder, Pinned, Archive or the Trash. On a phone, hold first and then drag, or use \u22ef > Arrange folders.",
+  "Flash cards made with AI: from a note's \u22ef menu, a folder's options, or a test that has no cards yet. You see the cards first and pick which to add. It's free with Gemini.",
+  "Export notes as a text or Markdown file from a note's \u22ef menu, from Select notes (several go in one ZIP with their pictures) or from a folder's options. Copy as text copies the words without the marks.",
+  "The note-taker keeps listening while you switch tabs in Wefty, and on a Chromebook even in another browser tab. On a phone, keep Wefty open while it listens.",
   "Chat can now do things in Wefty for you: send a picture of a subscription and say \"add this to subscriptions\", or ask it to make a note, add flash cards or set a due date. Each change shows under the answer with Open and Undo.",
-  "Repeating reminders: \"Badminton every Tuesday 6pm\", every day, every weekday, every other Friday, every month. Ticking it done (or the time passing) sets the next one, and Chat can set them too.",
-  "Flash cards are on Today now, with how many are due, and in Notes' \u22ef menu on a phone.",
-  "Today holds still on phones: no more jumping sideways or a white square in the corner.",
-  "No more ** or == marks in note titles and previews, and bold words look bold while you type on a phone.",
-  "Chat calls itself Wefty now, even in chats you started before the new name.",
-  "Wefty now opens on Today: what's due and late, tests coming up, flash cards to review, subscriptions renewing soon, and the notes you were just in. Tick things off right there.",
-  "Four tabs: Today, Notes, Share and Chat. Share holds Send, Files and Clipboard together."
+  "Repeating reminders: \"Badminton every Tuesday 6pm\", every day, every weekday, every other Friday, every month. Ticking it done (or the time passing) sets the next one, and Chat can set them too."
  ],
- "build": "1.16.1-755877fa649b",
+ "build": "1.17.0-8b663f835324",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -127,16 +127,20 @@
    "size": 7943
   },
   "index.html": {
-   "sha256": "d451b7e2a66217b26b69f80f52d616c6a87bb51c265341ef2b4610bfb1f3b9fe",
-   "size": 5894
+   "sha256": "da8f622d5017761f321af19247d49608fa938ea49b64f7099348162f5a918ccb",
+   "size": 6010
   },
   "js/access.js": {
    "sha256": "001652204ad102ff76d0c7ac1afd94bc8c790fba217de3ddef022bea81c4814a",
    "size": 58495
   },
   "js/ai.js": {
-   "sha256": "c246b2d96154b56ae95dd1d9b7e7c1c7ba5fa43954360a8500d2b5d742aacb50",
-   "size": 141407
+   "sha256": "9198146fdbc360c8451ca3e4023ba408391adc26ceace70fe238181a8c23ea26",
+   "size": 141650
+  },
+  "js/aicards.js": {
+   "sha256": "a242c070249c4777afd013a0e730b0e2aa748e4cc87a62648059f03890f599e8",
+   "size": 43436
   },
   "js/arrivals.js": {
    "sha256": "a49f2693dd330406f2221d5dece5c33516226118892f82f7e7ade82ed388716b",
@@ -151,12 +155,12 @@
    "size": 7173
   },
   "js/chat.js": {
-   "sha256": "5f8a99768a109a98d060864c02f8c6f2c510ca4b09738196e537025fd344161c",
-   "size": 119701
+   "sha256": "4ba7141d5da3ba0a38f52061c171a1cf5baaa8bc00f4053b8e110e8a950f5bd7",
+   "size": 119833
   },
   "js/chattools.js": {
-   "sha256": "299a09f7485cc0e4da6e82ab2f0855183e237be973bbae37613a7ee549b4bf6d",
-   "size": 39049
+   "sha256": "a05251585c89beea932890ec7f97218640e5ff19ffc3351b28dc41d2d1140699",
+   "size": 43629
   },
   "js/clips.js": {
    "sha256": "55fc0a99aa651c7afddd412f538535d9a9db834ce58f1914ec276fee3633c675",
@@ -178,13 +182,21 @@
    "sha256": "d7aa4fa8c5c6ca436dffe08e93093d698074cfe5e6f3182b91443a248ede873a",
    "size": 19526
   },
+  "js/drag.js": {
+   "sha256": "5594c5d84048e713ddb74acb2ca9e6f5fecbfb81f9011d0c62ba57f52d69222e",
+   "size": 16042
+  },
   "js/editor.js": {
-   "sha256": "ac0c7704a90e51caa64a9b1a883e622351416a49fee39819b10430902e0e2291",
-   "size": 169896
+   "sha256": "4816c0e4c7445db7d8609398a448df94dba950af7ff9296589162830ddc62fe1",
+   "size": 170659
   },
   "js/exams.js": {
    "sha256": "ef5ab68960e616067290201e4b5bc23f1345dfad955a3bc4507aaaa02e265c9a",
    "size": 6490
+  },
+  "js/export.js": {
+   "sha256": "cd7ec272211c2c8aed04f7043a83049cf70ac41c890fc2d5acf38a0bd088adfb",
+   "size": 24497
   },
   "js/files.js": {
    "sha256": "9e6f0b7945c597900f91c197e2b0ffbd06d59d689cc38adbbba2d99c7bc3a12d",
@@ -219,16 +231,16 @@
    "size": 36803
   },
   "js/notes.js": {
-   "sha256": "b7b20e3cd187d304b0a05c408f3fda038d4de0b4da1f88152b2c4a1b8e5f4474",
-   "size": 71327
+   "sha256": "846b673db35a966776be267f715875cae0f9586dcecac4593bdd0db2796e4478",
+   "size": 73258
   },
   "js/notetaker.js": {
-   "sha256": "6269a43e85d373f5969d33f1f12a91742781bfe95061fbbf8de91fb6c6ce578b",
-   "size": 80352
+   "sha256": "633758a3e1cee6ab983e0752db5b90be04fb5936abba9334ab18e6c12814a176",
+   "size": 88152
   },
   "js/organise.js": {
-   "sha256": "5a1c5819893487f65c7b78acb0405c314c4e8c5b6aa46f54d6c32f27cdc9c61c",
-   "size": 40345
+   "sha256": "c5b13dca1b5619272c7ab69b5c18c43340980edce49cde7aeccb1c98b7720ef7",
+   "size": 52439
   },
   "js/profile.js": {
    "sha256": "39df092399b399b270333b682b7d92d2ff1ca305658d1b5bd490328235b785d9",
@@ -243,8 +255,8 @@
    "size": 70984
   },
   "js/review.js": {
-   "sha256": "e2087b2de74b652d66593b71520533351dddd03ad112fa6146626892560f0749",
-   "size": 33269
+   "sha256": "169ace1ca7f8b7e7ee83e8244d11f65c03b92c4e1a55bcb87550be0274909827",
+   "size": 34016
   },
   "js/send.js": {
    "sha256": "598b50622a74d802435b4572d320d959ef15533bf80d3294ce699e94b53740a2",
@@ -263,32 +275,32 @@
    "size": 4886
   },
   "js/start.js": {
-   "sha256": "158b0eee5f265aecde41abbb5bc69ef35a6b54fb4473e813bfea5f28611f269d",
-   "size": 82945
+   "sha256": "6dcd1f7fd9590e3730b28277943460ae144a3f61f597e18d162ab7418c300699",
+   "size": 83579
   },
   "js/study.js": {
    "sha256": "28c29e9a44704eba9f40e523797f03bfece91857f154fd438659714666fc5aea",
    "size": 23926
   },
   "js/subs.js": {
-   "sha256": "fd86aa1eed0301bd4e49f53a19557960aca79d494923f5289d0d79a02480e3d3",
-   "size": 24444
+   "sha256": "810ac69e7c76b987d9070c8f0bec972252a420436b8e51253fe52a18ba39428d",
+   "size": 26092
   },
   "js/theme.js": {
    "sha256": "2f2efdacab9e0982aef08241c39f639fa550f1615cc8306e1d7d3b28c147313c",
    "size": 3935
   },
   "js/today.js": {
-   "sha256": "51bfa7d187f130111730744014f7488761eaf69b45240222b8cac103d55201b5",
-   "size": 43136
+   "sha256": "11e99cd10edd9246e16276cf306eae30f172716a40f6ad972e28feea8785bdea",
+   "size": 74221
   },
   "js/update.js": {
    "sha256": "158adfcd16731bb83097fe6f2c6d03cda20e1fc290698b52c33a8ae1269e07b3",
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "e1bab1932042b28395e475af63fbb56e3acd411d76660f7937558c8035ca2cd3",
-   "size": 53618
+   "sha256": "609ca58046cad4dbcc4ac72a66b4230881e39d35294e75a2fbb338b0af1d9ad2",
+   "size": 54255
   },
   "js/welcome.js": {
    "sha256": "44dc9b2e2b17d66bf0ba9cba3879f1d18f7cb7605733d8de7933b0450fc9cee1",
@@ -299,11 +311,11 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "938aa2ba6f0ed8cb0b1fba401a620ae64b841ce585baea209590fe7626114c16",
-   "size": 248568
+   "sha256": "484845a61194e59eb59de59b3ae61d04e53a2e739b6aa0b8ecaea870a560c802",
+   "size": 266526
   },
   "sw.js": {
-   "sha256": "2f76a64f18ae414b60690771771668ca535561ddb42c104f8c340b49b1f1dc5f",
+   "sha256": "8234eb3e5f01939d76ad59091090fb4809234b86581c69cfbf65d879e6000ce4",
    "size": 9129
   },
   "vendor/LICENSE-supabase-js.txt": {

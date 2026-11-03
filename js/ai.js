@@ -1889,8 +1889,9 @@ V.ai = (() => {
      cloud is slow: the notes are made by themselves later), never a guess at the brain or a "no key". While Claude is
      off it's always Gemini, whatever `use` says; whether it is waits (up to waits.look) for the settings row to be read
      from the cloud on a device that hasn't yet (modeReady). With Claude on, Gemini still writes them when its key is
-     set up, unless "Write notes with Claude" is on (brain, pick). */
-  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null }) {
+     set up, unless "Write notes with Claude" is on (brain, pick). `tallyFree` false (the flash cards made with AI,
+     js/aicards.js): a free Gemini answer isn't counted as a request in this month's tally at all; Claude's always is. */
+  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null, tallyFree = true }) {
     await modeReady(waits.look);  // ("Use Claude too" as the cloud has it: a new device reads it with its first sync)
     if (!known || known.failed) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
     const off = !claudeOn();
@@ -1917,7 +1918,7 @@ V.ai = (() => {
     }
     const cost = price(answer.usage);
     // Added up for every device; the notes never wait on it for long (it keeps the cost owed here if it can't write it).
-    await within(count(cost), waits.look, null).catch(() => {});
+    if (tallyFree || !(answer.usage && answer.usage.gemini)) await within(count(cost), waits.look, null).catch(() => {});
     return { ...answer, cost };
   }
 

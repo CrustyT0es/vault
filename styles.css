@@ -205,7 +205,7 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
   padding: 0 calc(6px + env(safe-area-inset-right, 0px)) var(--safe-bottom) calc(6px + env(safe-area-inset-left, 0px));
   min-height: 64px; background: var(--surface); border-top: 1px solid var(--line);
 }
-.rail-mark, .rail-spacer, .tabs .rail-me { display: none; }
+.rail-home, .rail-spacer, .tabs .rail-me { display: none; }
 .tab {
   flex: 1; max-width: 120px; min-width: 0; display: grid; grid-template-rows: 24px 6px 15px; row-gap: 3px; justify-items: center;
   align-content: center; min-height: 64px; background: none; border: none; padding: 6px 2px; color: var(--muted);
@@ -238,7 +238,11 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
     flex-direction: column; justify-content: flex-start; align-items: center; gap: 4px; padding: 16px 0 14px;
     border-top: none; border-right: 1px solid var(--line); background: var(--bg); min-height: 0; overflow: auto;
   }
-  .rail-mark { display: block; margin: 0 0 16px; }
+  /* (the logo is a button to Today, 1.17: 52 px to point at, the mark where it always was) */
+  .rail-home {
+    display: grid; place-items: center; flex: none; width: 52px; height: 52px; margin: -11px 0 5px; padding: 0;
+    border: none; border-radius: 14px; background: none;
+  }
   .rail-spacer { display: block; flex: 1; min-height: 12px; }
   .tab {
     flex: none; width: 64px; min-height: 0; grid-template-rows: 22px 6px 14px; padding: 8px 0 6px; border-radius: 12px;
@@ -251,7 +255,7 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
   .rail-me .av { width: 36px; height: 36px; }
   .rail-me[data-mark=ring]::after { width: 44px; height: 44px; }
 }
-@media (min-width: 900px) and (hover: hover) { .tab:hover { background: var(--surface-2); } }
+@media (min-width: 900px) and (hover: hover) { .tab:hover, .rail-home:hover { background: var(--surface-2); } }
 
 /* Your picture: your first letter on the lavender, and a mark for how syncing goes (js/profile.js): nothing when all
    is well, a thin turning ring while a sync takes a while, an amber dot while changes wait here, a red one when the
@@ -292,6 +296,13 @@ header.app-head {
 .app-head .head-grow { flex: 1; }
 .app-head .head-sub { margin: 0; color: var(--muted); font: 500 13px/18px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-head .head-mark { flex: none; margin-right: 8px; }
+/* (on Today the logo is a button back to its top, 1.17: 44 px to tap, the mark where it was) */
+.app-head .head-home {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin: 0 1px 0 -7px; padding: 0;
+  border: none; border-radius: 12px; background: none;
+}
+.app-head .head-home .head-mark { margin: 0; }
+@media (hover: hover) { .app-head .head-home:hover { background: var(--surface-2); } }
 .app-head .head-back { margin-left: -10px; margin-right: 2px; }
 .app-head > .icon-btn { width: 44px; height: 44px; border-radius: 12px; }
 .app-head > .btn { flex: none; margin: 0 4px; }
@@ -1680,6 +1691,29 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
 .pick-action.danger:hover { background: var(--danger-soft); }
 .pick-action:disabled, .pick-action:disabled:hover { opacity: .4; background: transparent; cursor: default; }  /* nothing picked yet */
 .notes-layout.selecting .list-column { padding-bottom: calc(150px + var(--safe-bottom)); }
+/* picked notes' Export (js/export.js): in the bar's top row, beside Pick all (the row of actions below is full on a
+   320 px phone) */
+.pick-export {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 44px; padding: 0 10px; justify-self: auto;
+  border-radius: var(--r-md); text-decoration: none; white-space: nowrap;
+}
+.pick-export .icon { width: 18px; height: 18px; }
+.pick-export:hover:not(:disabled) { background: var(--surface-2); }
+.pick-export:disabled { opacity: .4; cursor: default; }
+
+/* Export's sheet (js/export.js): Text or Markdown as two big rows, a locked note's warning above them */
+.export-choices { display: grid; gap: 8px; }
+.template.export-choice { width: 100%; grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; align-items: center; }
+.template.export-choice .icon { grid-row: span 2; margin: 0; }
+.template.export-choice .t-hint { color: var(--text-2); }
+.export-warn {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--warn-soft); color: var(--text); font: 500 14px/20px var(--font);
+}
+.export-warn .icon { flex: none; margin-top: 1px; color: var(--warn); }
+.sheet-body > .export-about { margin: 12px 0 0; text-align: left; }
+.export-ready { display: flex; align-items: center; gap: 10px; margin: 0; overflow-wrap: anywhere; }
+.export-ready .icon { flex: none; color: var(--accent-ink); }
 /* how many picked notes are folded away under "Past week" / "Older" (Pick all takes them too) */
 .fold-picked { color: var(--accent-ink); font-weight: 600; margin-left: 8px; }
 .fold-picked[hidden] { display: none; }
@@ -1710,6 +1744,76 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
 
 /* a card dragged over a folder (the PC) */
 .nav-item.drop-on, .chip.drop-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Dragging (js/drag.js, 1.17): the label under the pointer, the line where a folder would go, a folder lit to drop
+   into (or crossed out: the reason is said on the drop), what's being dragged faded where it was, and a thing held by
+   a finger lifted a little. */
+html.dragging, html.dragging * { cursor: grabbing !important; -webkit-user-select: none !important; user-select: none !important; }
+.drag-ghost {
+  position: fixed; left: 0; top: 0; z-index: 95; pointer-events: none; display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(280px, calc(100vw - 16px)); height: 40px; padding: 0 14px 0 10px; border-radius: var(--r-md);
+  background: var(--raised); color: var(--text); border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
+  font: 600 14px/18px var(--font); will-change: transform;
+}
+.drag-ghost > .icon { width: 18px; height: 18px; color: var(--accent-ink); flex: none; }
+.drag-ghost .emoji { font-size: 16px; }
+.drag-ghost .dot-box { display: grid; place-items: center; }
+.drag-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-count {
+  flex: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--accent);
+  color: var(--on-accent); font: 600 12px/22px var(--font); text-align: center;
+}
+.drag-ghost.refused { border-color: var(--danger); }
+.drop-line { position: fixed; z-index: 94; pointer-events: none; border-radius: 2px; background: var(--accent); }
+.drop-line[hidden] { display: none; }
+.drop-line::before {  /* a ring where the line starts, so a short one still reads as "here" */
+  content: ""; position: absolute; left: -5px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; box-sizing: border-box;
+  border-radius: 50%; border: 2px solid var(--accent); background: var(--bg);
+}
+.drop-line.across::before { left: 50%; top: -5px; margin: 0 0 0 -4.5px; }
+.drag-source { opacity: .45; }
+.drag-held { transform: scale(1.02); box-shadow: var(--shadow-2); transition: transform var(--d-1) var(--ease-out), box-shadow var(--d-1); }
+:is(.crumb, .subfolder, .arrange-row, .arrange-end, .nav-heading).drop-on { background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
+:is(.nav-item, .chip, .crumb, .subfolder, .arrange-row, .arrange-end).drop-no {
+  background: var(--danger-soft); border-color: var(--danger); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger);
+}
+/* things a finger holds to drag: never their words selected or the phone's own menu */
+:is(.chips .chip, .folders .nav-item, .subfolder, .arrange-row) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* On a phone (and a narrow window) the chips stay at the top of the list while something's dragged, so a folder is
+   always in reach (the list scrolls by itself under them near their edge). */
+html.dragging .list-column > .chips { position: sticky; top: 0; z-index: 4; background: var(--bg); box-shadow: 0 1px 0 var(--line-soft); }
+@media (min-width: 900px) { html.dragging .list-column > .chips { background: var(--surface); } }
+
+/* Arrange folders (js/organise.js): every folder as a tree, each with its dots to drag it by */
+.arrange-hint { text-align: left !important; margin: 2px 0 10px !important; color: var(--text-2); }
+.arrange-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }  /* (long names end in …) */
+.arrange-row {
+  position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px 0 0; border-radius: var(--r-md);
+  border: 1px solid transparent; background: none; color: var(--text); font: 500 15px/20px var(--font);
+}
+.arrange-row[data-depth="1"] { padding-left: 22px; }
+.arrange-row[data-depth="2"] { padding-left: 44px; }
+.arrange-row[data-depth="3"] { padding-left: 66px; }
+.arrange-row[data-depth="4"] { padding-left: 88px; }
+.arrange-row.drag-held { background: var(--card); }
+.arr-handle {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: none; border-radius: var(--r-md);
+  background: none; color: var(--muted); cursor: grab; touch-action: none;
+}
+.arr-handle:hover { background: var(--surface-2); color: var(--text); }
+.arr-handle:disabled { cursor: default; opacity: .6; }
+.arr-handle:disabled:hover { background: none; color: var(--muted); }
+.arr-handle .icon { width: 20px; height: 20px; }
+.arrange-end {
+  display: grid; place-items: center; min-height: 48px; margin-top: 6px; border: 1px dashed var(--line-strong); border-radius: var(--r-md);
+  color: var(--muted); font: 500 13.5px/18px var(--font);
+}
+html:not(.dragging) .arrange-end { visibility: hidden; }  /* (its room kept, so nothing moves as a drag starts) */
+/* the toasts (the last drop's Undo) step back while dragging: a drop lands on what's under them */
+html.dragging #toasts { opacity: .35; transition: opacity var(--d-1); }
+html.dragging .toast { pointer-events: none; }
+/* with Arrange folders open, the toasts (each move's Undo) show at the top, off the folders being dragged */
+body:has(.arrange-list) #toasts { top: calc(12px + var(--safe-top)); bottom: auto; }
 
 /* grid view: two columns on a phone, as many as fit beside the note on a wide screen */
 .list.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2509,6 +2613,44 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .test-row.soon { border-color: transparent; background: var(--warn-soft); }
 .test-row.soon .test-icon { color: var(--warn); }
 .review-empty .hint { max-width: 320px; }
+/* Review's "Make cards with AI" (js/aicards.js), under its two buttons and in the empty page */
+.review-make { display: flex; justify-content: center; margin-top: -4px; }
+.review-make .btn { min-height: 44px; color: var(--accent-ink); }
+.review-empty .review-make { margin-top: 4px; }
+.deck-make .icon { color: var(--accent-ink); }
+
+/* -- Make flash cards with AI (js/aicards.js): reading, the cards to pick, or what went wrong */
+.aic-state { display: grid; justify-items: center; gap: 10px; max-width: 400px; margin: auto; padding: 20px 0; text-align: center; }
+.aic-state h3 { margin: 6px 0 0; font: 600 19px/26px var(--font); }
+.aic-state p { margin: 0; color: var(--text-2); }
+.aic-state .hint { color: var(--muted); }
+.aic-step { color: var(--muted); font: 500 13px/18px var(--font); font-variant-numeric: tabular-nums; }
+.aic-problem-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--danger-soft); color: var(--danger); }
+.aic-problem-icon .icon { width: 24px; height: 24px; }
+.aic-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 4px; }
+.aic-summary { margin: 0; color: var(--text); font: 600 16px/22px var(--font); min-width: 0; }
+.aic-top .aic-all { flex: none; padding: 8px 0; min-height: 40px; }
+.sheet-body > .aic .aic-note { margin: 2px 0; text-align: left; }
+.aic-group { margin-top: 12px; }
+.aic-into { margin: 0 0 2px; font: 600 14.5px/20px var(--font); color: var(--text); overflow-wrap: anywhere; }
+.aic-where { margin: 0 0 8px; overflow-wrap: anywhere; }
+.aic-list { display: grid; gap: 8px; }
+.aic-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 10px 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface);
+}
+:root[data-theme="dark"] .aic-card { box-shadow: inset 0 1px 0 var(--edge-hi); }
+.aic-card .aic-tick { margin-top: 12px; }
+.aic-fields { display: grid; gap: 6px; min-width: 0; }
+.aic-fields textarea.field {
+  min-height: 44px; padding: 10px 12px; resize: none; field-sizing: content; max-height: 240px; font-size: 16px; line-height: 22px;
+}
+.aic-fields .aic-q { font-weight: 600; }
+.aic-kind { color: var(--muted); font: 500 12.5px/16px var(--font); }
+.aic-card.off { background: transparent; }
+.aic-card.off .aic-fields { opacity: .5; }
+.sheet-body > .aic .aic-foot { margin: 14px 0 0; text-align: left; }
+@media (pointer: coarse) { .aic-card .aic-tick { width: 24px; height: 24px; margin-top: 10px; } }
 
 /* reviewing: the answer buttons say when the card comes back; a blank is a line, its answer marked in its sentence */
 .study-actions .btn.two-line { flex-direction: column; gap: 0; line-height: 18px; min-height: 52px; }
@@ -2676,10 +2818,13 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-trouble { margin: 16px 0 0; }
 .today-welcome { margin: 16px 0 0; max-width: 760px; color: var(--text-2); font: 500 15px/22px var(--font); }
 
-/* Quick actions */
+/* Quick actions (1.17): across the top under the days, as one grid: New note and Note-taker big in its first row,
+   Dictate and Flash cards smaller in its second (each keeps its row when another tile isn't there). */
 .today-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.today-tile { grid-row: 2; }
+.today-tile.big { grid-row: 1; }
 .today-tile {
-  display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 56px; padding: 8px 12px;
+  display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 52px; padding: 6px 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: inset 0 1px 0 var(--edge-hi);
   color: var(--text); text-align: left;
 }
@@ -2703,8 +2848,27 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
 .tile-text small { color: var(--muted); font: 500 12.5px/16px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 419px) { .today-tile { gap: 10px; padding: 8px 10px; } }
-@media (max-width: 359px) { .tile-text small { display: none; } }
+@media (max-width: 419px) { .today-tile { gap: 10px; padding: 6px 10px; } }
+@media (max-width: 359px) { .today-tile:not(.big) .tile-text small { display: none; } }
+/* the big two: a bigger icon and words; on a phone the icon on top, so a name has the tile's whole width */
+.today-tile.big { gap: 14px; min-height: 76px; padding: 12px 16px; }
+.today-tile.big .tile-ic { width: 44px; height: 44px; border-radius: 13px; }
+.today-tile.big .tile-ic .icon { width: 24px; height: 24px; }
+.today-tile.big .tile-label { font: 600 16px/21px var(--font); }
+.today-tile.big .tile-text small { font: 500 13.5px/18px var(--font); }
+@media (max-width: 599px) {
+  .today-tile.big { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 10px; min-height: 0; padding: 14px; }
+  .today-tile.big .tile-ic { width: 40px; height: 40px; border-radius: 12px; }
+  .today-tile.big .tile-ic .icon { width: 22px; height: 22px; }
+  .today-tile.big .tile-text { align-self: stretch; }
+}
+@media (min-width: 900px) {
+  .today-tiles { gap: 12px; }
+  .today-tile.big { min-height: 84px; padding: 14px 20px; gap: 16px; }
+  .today-tile.big .tile-ic { width: 48px; height: 48px; border-radius: 14px; }
+  .today-tile.big .tile-label { font-size: 17px; line-height: 22px; }
+  .today-tile.big .tile-text small { font-size: 14px; line-height: 20px; }
+}
 
 /* Due today and Later this week: a row per to-do, its box on the left */
 .today-todo { padding: 4px 0; }
@@ -2824,14 +2988,38 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .ht-eg code { padding: 2px 6px; border-radius: 6px; background: var(--surface-2); color: var(--text); font: 500 12.5px/18px ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .ht-text .ht-act { display: block; margin-top: 12px; }
 
-/* The week (wide only): Monday to Friday */
+/* The days (1.17, every device): a strip that scrolls sideways from this week's Monday to the Friday two weeks on,
+   stopping on a day; five days in sight when wide, two and a bit on a phone (running to the screen's edges, as Jump
+   back in does). Up and down over it scrolls the page; a sideways swipe at its ends stays in it. No bar under it (the
+   arrows, a swipe or the keys move it). */
 .today-week { margin-top: 12px; }
-.today-week-title { margin: 0 0 6px; color: var(--muted); font: 600 13px/18px var(--font); }
-.today-week-days { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.today-week-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin: 0 0 6px; }
+.today-week-title { margin: 0; min-width: 0; color: var(--muted); font: 600 13px/18px var(--font); }
+.week-steps { display: flex; gap: 6px; flex: none; }
+.week-step {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--text-2); box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.week-step .icon { width: 16px; height: 16px; }
+.week-step[aria-disabled=true] { color: var(--faint); background: none; box-shadow: none; cursor: default; }
+@media (hover: hover) { .week-step:not([aria-disabled=true]):hover { border-color: var(--line-strong); color: var(--text); } }
+/* (a finger swipes: no arrows on a touch screen) */
+@media (hover: none) and (pointer: coarse) { .week-steps { display: none; } .today-week-head { min-height: 22px; } }
+.today-week-days {
+  display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain; scrollbar-width: none;
+}
+.today-week-days::-webkit-scrollbar { display: none; }
 .wday {
+  flex: none; width: calc((100% - 48px) / 5); scroll-snap-align: start;
   display: grid; align-content: start; gap: 4px; min-width: 0; min-height: 60px; padding: 8px 12px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: inset 0 1px 0 var(--edge-hi);
   color: var(--text); text-align: left;
+}
+.wday:focus-visible { outline-offset: -3px; }  /* (inside the day: the strip cuts off what's outside it) */
+@media (max-width: 899px) {
+  .today-week-days { gap: 8px; margin: 0 -16px; padding: 0 16px; scroll-padding: 0 16px; }
+  .wday { width: calc((100% - 16px) / 2.4); min-width: 128px; min-height: 56px; padding: 8px 10px; }
 }
 @media (hover: hover) { .wday:hover { border-color: var(--line-strong); } }
 .wday.today { background: var(--accent-wash); border-color: var(--accent-line); }
@@ -2847,16 +3035,73 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .wd-item.test .icon { width: 16px; height: 16px; }
 .wd-item .wd-more { flex: none; color: var(--muted); font-size: 12.5px; }
 
-@media (max-width: 899px) {
-  /* (on a phone the tiles sit right under the thread, as in the mockup: their own words say what they are) */
-  .today-sec[data-section=quick] > .today-sec-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; }
-  .today-sec[data-section=quick] { padding-top: 16px; }
+/* The days' list (1.17, js/today.js "the days, one by one"): a part per week of the strip ("This week", "Next
+   week"...), each day a heading with its date (and how many to do, or "Nothing due" on the same line), then a card
+   with what's on it. A repeating note's later ones and other parts' things (a renewal) have no box: their mark sits
+   where it would be. A day tapped in the strip is lit for a moment. */
+.today-daylist { display: grid; min-width: 0; }
+.days-week { min-width: 0; }
+.day-group { min-width: 0; margin-top: 16px; border-radius: var(--r-lg); scroll-margin-top: 16px; }
+.days-week > .today-sec-head + .day-group { margin-top: 0; }
+.day-group.empty { margin-top: 10px; }
+.dg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-height: 22px; margin: 0 2px 6px; }
+.day-group.empty .dg-head { margin-bottom: 0; }
+.dg-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--text); font: 600 15px/22px var(--font); }
+.dg-title:focus { outline: none; }
+.dg-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+.dg-name { flex: none; }
+.dg-date { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 500 13.5px/20px var(--font); }
+.day-group.empty .dg-name { color: var(--text-2); font-weight: 500; }
+.dg-meta { flex: none; color: var(--muted); font: 500 13px/18px var(--font); white-space: nowrap; }
+.dg-meta .late-w { color: var(--danger); font-weight: 600; }
+.dg-list { margin: 0; list-style: none; }
+.dg-list > li { min-width: 0; }
+.dg-list > li + li { border-top: 1px solid var(--line-soft); }
+.dg-lead { display: grid; place-items: center; width: 44px; height: 44px; color: var(--muted); }
+.dg-lead > .icon { width: 18px; height: 18px; }
+.dg-lead .sub-tile { width: 30px; height: 30px; border-radius: 9px; font-size: 14px; }
+button.today-row-text {
+  min-height: 44px; align-content: center; padding: 0; border: none; border-radius: var(--r-sm); background: none;
+  color: var(--text); text-align: left; font: inherit;
 }
+@media (hover: hover) { button.today-row-text:hover strong { color: var(--accent-ink); } }
+/* (a repeating note's later ones read a step quieter than what can be ticked) */
+.dg-repeat .today-row-text strong { color: var(--text-2); }
+.today-row .dg-test { display: inline-block; width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px; color: var(--accent-ink); }
+/* a trial ending: amber, inset in the card so its corners stay round */
+.dg-list > li.warn { margin: 2px 4px; padding-right: 8px; border-radius: calc(var(--r-lg) - 4px); background: var(--warn-soft); }
+.dg-list > li.warn, .dg-list > li.warn + li { border-top-color: transparent; }
+.today-row.warn strong, .today-row.warn .today-sub { color: var(--warn); }
+.today-row.warn .sub-tile { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.today-row .btn.sub-cancel { background: var(--card); }
+@media (max-width: 479px) {  /* (a phone: Cancel here goes under the words, which keep the row's width) */
+  .today-row.dg-extra:has(.sub-cancel) { grid-template-columns: 44px minmax(0, 1fr); padding-bottom: 10px; }
+  .today-row.dg-extra .sub-cancel { grid-column: 2; justify-self: start; }
+}
+.days-more {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; margin: 12px 0 0 -8px; padding: 0 8px;
+  border: none; border-radius: var(--r-sm); background: none; color: var(--accent-ink); font: 600 14px/20px var(--font);
+}
+.days-more .icon { width: 16px; height: 16px; }
+@media (hover: hover) { .days-more:hover { background: color-mix(in oklab, var(--text) 6%, transparent); } }
+.day-group.flash { animation: day-lit 1.8s ease-out; }
+@keyframes day-lit {
+  0%, 35% { background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
+  100% { background: transparent; box-shadow: 0 0 0 8px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .day-group.flash { animation: none; background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
+}
+@media (forced-colors: active) { .day-group.flash { outline: 2px solid Highlight; outline-offset: 6px; } }
+
+/* (the tiles sit right under the days, as in the mockup's phone: their own words say what they are) */
+.today-sec[data-section=quick] > .today-sec-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; }
+.today-sec[data-section=quick] { padding-top: 16px; }
 @media (min-width: 900px) {
   /* (the rail has the logo: Today's top row is only its search, beside the greeting) */
   .page.today.wide { position: relative; max-width: 1200px; padding: 0 32px 40px; }
   .page.today.wide > header.app-head { position: absolute; top: 0; right: 22px; min-height: 0; padding-top: calc(16px + var(--safe-top)); }
-  .page.today.wide > header.app-head .head-mark { display: none; }
+  .page.today.wide > header.app-head .head-mark, .page.today.wide > header.app-head .head-home { display: none; }
   /* (room for the top row's buttons on the right: search, and the ⋯ that js/subs.js adds) */
   .page.today.wide .today-greet { padding: calc(24px + var(--safe-top)) 52px 0 0; }
   .page.today.wide:has(.today-more) .today-greet { padding-right: 100px; }
@@ -2872,7 +3117,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   .today-test { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "top go" "bar bar" "nums nums"; }
   .today-test .test-nums { display: flex; gap: 4px; }
   .today-test .test-nums .pace { font-size: 14px; line-height: 20px; }
-  .today-test .test-nums .pace::before { content: "· "; }
+  /* (a dot between "18 of 52 known" and the pace, never before a pace alone: "No flash cards in it yet") */
+  .today-test .test-nums > span + .pace::before { content: "· "; }
   .today-test.ask { grid-template-areas: "top go"; }
 }
 @media (min-width: 1100px) {
@@ -3107,6 +3353,11 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .nt-bar .nt-stop { color: var(--danger); }
 .nt-bar .nt-stop .icon { width: 26px; height: 26px; }  /* (the filled square, as big as the other icons look) */
 .nt-bar .nt-stop:hover { background: var(--danger-soft); color: var(--danger); }
+/* While it listens, Wefty's tabs stay in reach (js/notetaker.js placeLayer sets its bottom, or its left beside the
+   rail): its foot then sits on the tab bar, which keeps the safe area below it. A phone's line about the background. */
+.nt-layer[data-tabs=below] { --safe-bottom: 0px; }
+.nt-bg { display: flex; align-items: flex-start; gap: 8px; flex: none; margin: 0; color: var(--text-2); font: 500 13.5px/19px var(--font); }
+.nt-bg .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--accent-ink); }
 
 /* -- listening with its screen hidden (js/notetaker.js drawStrip): the "call in progress" bar across the top. It sits
    in #layers over the full-screen note (55), under the note-taker (58), sheets and menus (60) and toasts. Under 900 px

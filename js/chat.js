@@ -914,7 +914,8 @@ V.chat = (() => {
      the turn over) never runs one twice: a call that has a result is done, and one that was started without one is
      said to have maybe happened. `refuse`: the round is answered without running anything (too many rounds). */
   async function runRound(chat, turn, step, job, refuse = '') {
-    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length };
+    // (`signal`: Stop ends a tool that waits on the AI itself too: js/aicards.js, make_flash_cards)
+    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length, signal: job.controller.signal };
     job.shown = true;  // (other devices can see this turn from now on: its mark is kept fresh, `answer`'s heartbeat)
     turn.answeringAt = now();
     chat.updated = now();

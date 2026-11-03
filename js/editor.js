@@ -2603,11 +2603,15 @@ V.editor = (() => {
         else await V.organise.move([id], folder.id);
       } },
       !note.locked || revealed ? { label: `Send to ${V.otherName}`, icon: 'send', onClick: sendNote } : null,
-      !note.locked || revealed ? { label: 'Copy the text', icon: 'copy', onClick: async () => {
-        await V.copy([note.title, serialize()].filter(Boolean).join('\n\n'));
-        V.toast('Copied');
-      } } : null,
+      // Export and Copy as text (js/export.js): the words as they are in the editor now (a locked note's only while
+      // they show, with a line saying the file isn't locked).
+      (!note.locked || revealed) && V.exporter ? { label: 'Export', icon: 'download',
+        onClick: () => V.exporter.note(exportable()) } : null,
+      (!note.locked || revealed) && V.exporter ? { label: 'Copy as text', icon: 'copy',
+        onClick: () => V.exporter.copyText(exportable()).catch(V.problem) } : null,
       (!note.locked || revealed) && V.chat ? { label: V.chat.ASK_LABEL, icon: 'spark', onClick: () => V.chat.askAbout() } : null,
+      // (js/aicards.js: never a locked note, even one unlocked now, nor a template)
+      !note.locked && !template && V.aiCards ? { label: 'Make flash cards', icon: 'cards', onClick: () => V.aiCards.forNote(note.id) } : null,
       !note.locked && !template ? { label: 'Save as template', icon: 'notes', onClick: () => V.organise.saveTemplate({
         title: note.title, body: serialize(), folder_id: note.folder_id }).catch(V.problem) } : null,
       template ? { label: 'Make it a normal note', icon: 'notes', onClick: async () => {
@@ -2635,6 +2639,10 @@ V.editor = (() => {
       { label: 'Move to Trash', icon: 'trash', danger: true, onClick: trash },
     ]);
   }
+
+  /* The note as it is in the editor now, for Export and Copy as text: its words as typed (an unlocked locked note's
+     sealed words, showing: `shown`). */
+  const exportable = () => ({ ...note, body: serialize(), shown: !note.locked || revealed });
 
   async function sendNote() {
     const text = [note.title, serialize()].filter((t) => t && t.trim()).join('\n\n');

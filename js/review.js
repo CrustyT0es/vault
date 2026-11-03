@@ -417,15 +417,24 @@ V.review = (() => {
       V.h('button.test-main', { type: 'button', title: 'Open the test note', onclick: () => R.openNote(plan.note.id) },
         V.icon('target', 'test-icon'), V.h('span.test-text', { text: countdown(plan) })),
       plan.count ? V.h('button.deck-learn', { type: 'button', title: `Review what ${plan.name} covers`,
-        onclick: () => start('test:' + plan.note.id) }, V.icon('cards'), V.h('span', { text: 'Review' })) : null);
+        onclick: () => start('test:' + plan.note.id) }, V.icon('cards'), V.h('span', { text: 'Review' }))
+        // (no cards in what it covers yet: js/aicards.js makes some from those notes)
+        : V.aiCards ? V.h('button.deck-learn.deck-make', { type: 'button', title: `Make flash cards for ${plan.name} with AI`,
+          onclick: () => V.aiCards.forTest(plan.note.id) }, V.icon('spark'), V.h('span', { text: 'Make cards' })) : null);
   }
+
+  /* "Make cards with AI" (js/aicards.js): which folder, then the cards. */
+  const makeButton = () => (V.aiCards ? V.button('Make cards with AI', { kind: 'quiet', icon: 'spark',
+    onClick: () => V.aiCards.pickFolder() }) : null);
 
   function page() {
     const at = now();
     if (!at.list.length) {
       return V.h('div.empty.review-empty', {}, V.mark(40),
         V.h('p', { text: 'No flash cards yet.' }),
-        V.h('p.hint', { text: 'Write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to review.' }));
+        V.h('p.hint', { text: 'Write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to review.' }),
+        V.h('p.hint', { text: 'Or let AI make them from a folder of your notes.' }),
+        V.h('div.review-make', {}, makeButton()));
     }
     const line = todayLine(at);
     const tests = at.plans;
@@ -442,7 +451,8 @@ V.review = (() => {
         V.h('div.review-go', {},
           // ('tonal': the screen's main iris button is the new-note one beside it; in light it looks the same)
           V.button(line ? `Review ${line.count}` : 'Practise', { kind: 'tonal', icon: 'cards', onClick: () => start('all') }),
-          V.button('Learn', { icon: 'learn', onClick: () => V.learn.forDeck('all') }))),
+          V.button('Learn', { icon: 'learn', onClick: () => V.learn.forDeck('all') })),
+        V.h('div.review-make', {}, makeButton())),
       tests.length ? [V.h('h2.list-section', {}, V.h('span', { text: 'Tests coming up' }), V.h('span.count', { text: String(tests.length) })),
         tests.map(testRow)] : null,
       folders.length ? [V.h('h2.list-section', {}, V.h('span', { text: 'Folders' })), folders.map(deckRow)] : null,

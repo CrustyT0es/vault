@@ -149,10 +149,21 @@
     else V.notes.search();
   });
 
+  /* The rail's logo (1.17, the owner: "click the logo at the top there and have it go to Today"): Today, or Today's
+     top again when it's showing (js/today.js). Only in the app: the setup and sign-in screens have their own
+     wordmark, which isn't a button. */
+  function goToday() {
+    if (!shell || !app.classList.contains('ready') || app.classList.contains('gate')) return;
+    if (shown && current === 'today' && V.today && V.today.toTop) { V.today.toTop(); return; }
+    V.go('today');
+  }
+
   function buildShell() {
     let me = null;
     try { me = V.profileButton('rail-me'); } catch (error) { console.error(error); }
-    const nav = V.h('nav.tabs', { 'aria-label': 'Wefty' }, V.mark(30, 'rail-mark', { colour: true }),
+    const home = V.h('button.rail-home', { type: 'button', 'aria-label': 'Today', title: 'Today', onclick: goToday },
+      V.mark(30, 'rail-mark', { colour: true }));
+    const nav = V.h('nav.tabs', { 'aria-label': 'Wefty' }, home,
       NAV.map(([id, icon, label]) => V.h('button.tab', {
         type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
       }, V.h('span.tab-icon', {}, V.icon(icon), id === 'share' || id === 'claude' ? V.h('span.badge', { hidden: true }) : null),

@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.16.1';
+V.VERSION = '1.17.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -408,11 +408,14 @@ V.profileButton = (cls = '') => {
 /* Each screen's one row at the top: its title (or the logo, on Today), its own buttons, and your picture. A back
    arrow first where the screen has one (`back`: what it does). It pads for the notch and the note-taker's bar
    (--safe-top), and for a phone's rounded sides in landscape. `.page-head` too, so what looked for a screen's title
-   there still finds it. On a wide screen the picture lives at the foot of the rail instead. */
-V.appHead = ({ title = '', sub = '', back = null, backLabel = 'Back', actions = [], me = true, logo = false, cls = '' } = {}) =>
+   there still finds it. On a wide screen the picture lives at the foot of the rail instead. `onLogo`: the logo is a
+   button to Today (1.17, the owner: "click the logo at the top there and have it go to Today"). */
+V.appHead = ({ title = '', sub = '', back = null, backLabel = 'Back', actions = [], me = true, logo = false, onLogo = null, cls = '' } = {}) =>
   V.h('header.app-head.page-head' + (cls ? '.' + cls : ''), {},
     back ? V.iconButton('back', backLabel, back, 'head-back') : null,
-    logo ? V.mark(30, 'head-mark', { colour: true }) : null,
+    logo && onLogo ? V.h('button.head-home', { type: 'button', 'aria-label': 'Today', title: 'Today', onclick: onLogo },
+      V.mark(30, 'head-mark', { colour: true }))
+      : logo ? V.mark(30, 'head-mark', { colour: true }) : null,
     title || sub ? V.h('div.head-title', {}, title ? V.h('h1', { text: title }) : null, sub ? V.h('p.head-sub', { text: sub }) : null)
       : V.h('span.head-grow'),
     actions,
@@ -449,9 +452,12 @@ V.sheet = function sheet({ title, content, actions = [], wide = false, onClose, 
   const wrap = V.h('div.layer', {
     onmousedown: (event) => { if (dismissable && event.target === wrap) close(); },
   }, panel);
+  // Enter in a box typed into presses the sheet's main button; never on a tick box or a choice (Make flash cards'
+  // ticks: Enter there would add every ticked card before they've all been looked at).
   const keys = (event) => {
     if (event.key === 'Escape' && dismissable) { event.stopPropagation(); close(); }
-    if (event.key === 'Enter' && !event.shiftKey && event.target.tagName === 'INPUT') {
+    if (event.key === 'Enter' && !event.shiftKey && event.target.tagName === 'INPUT'
+      && !['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'range', 'color', 'image'].includes(event.target.type)) {
       const primary = panel.querySelector('.sheet-actions .btn.primary, .sheet-actions .btn.danger');
       if (primary) { event.preventDefault(); primary.click(); }
     }
