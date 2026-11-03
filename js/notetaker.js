@@ -669,7 +669,7 @@ V.notetaker = (() => {
       'Leave out Terms, To do or Questions when there is nothing for them. Write each date in To do as the month\'s '
         + 'short name and the day, like "due Oct 31" or "due Nov 3 9am", never as a weekday alone. Today is ' + today + '.',
       ...(cards ? ['Make 5 to 12 flash cards from the most important ideas: one a line, the question and its short '
-        + 'answer joined by " :: ".'] : []),
+        + 'answer joined by " :: ".', ...((V.aiCards && V.aiCards.RULES) || [])] : []),
     ].join('\n');
   }
 
@@ -718,6 +718,8 @@ V.notetaker = (() => {
     }
     const made = tidy(answer.text);
     if (!made.notes) throw new V.ai.AiError('bad', `${who}'s answer came back empty. Your words are saved: try again.`);
+    // Its flash cards tidied like Make flash cards' (js/aicards.js, 1.19.1): short answers, no labels, none twice.
+    if (cards && V.aiCards && V.aiCards.tidySection) made.notes = V.aiCards.tidySection(made.notes);
     const cut = answer.stopReason === 'max_tokens';
     const notes = made.notes + (cut ? `\n\n(Cut short: ${who} ran out of room. The transcript below has everything.)` : '');
     const now = V.data.notes.get(id) || row;  // (it may have changed while Claude wrote)
@@ -1385,6 +1387,16 @@ V.notetaker = (() => {
         : 'Wefty was in the background for a moment and missed what was said then. Keep Wefty on the screen while it listens.');
   }
 
+  /* A paragraph of the transcript shows `words`: changed only where they changed (1.19.1), so words picked to copy
+     while it listens stay picked (writing the whole paragraph again, many times a second, dropped them). */
+  function wordsInto(para, words) {
+    const node = para.firstChild && para.firstChild.nodeType === Node.TEXT_NODE ? para.firstChild : null;
+    if (!node) { para.prepend(document.createTextNode(words)); return; }
+    if (node.data === words) return;
+    if (words.startsWith(node.data)) node.appendData(words.slice(node.data.length));
+    else node.data = words;
+  }
+
   function drawWords() {
     if (!ui || !ui.wordsEl || !session) return;
     const box = ui.wordsEl;
@@ -1395,8 +1407,8 @@ V.notetaker = (() => {
       ui.shown++;
     }
     const paras = box.querySelectorAll('.nt-para');
-    if (paras.length) paras[paras.length - 1].textContent = list[list.length - 1];
-    if (paras.length > 1) paras[paras.length - 2].textContent = list[list.length - 2];
+    if (paras.length) wordsInto(paras[paras.length - 1], list[list.length - 1]);
+    if (paras.length > 1) wordsInto(paras[paras.length - 2], list[list.length - 2]);
     ui.interimEl.textContent = session.interim ? session.interim : '';
     if (paras.length) paras[paras.length - 1].append(ui.interimEl);
     else if (session.interim) box.append(ui.interimEl);

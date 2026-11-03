@@ -821,7 +821,7 @@ V.send = (() => {
     const link = t.kind === 'link' ? t.text.trim() : '';
     const name = t.kind === 'file' ? t.name : link ? site(link) : t.name || t.text;
     const longer = t.kind === 'text' && !!restOf(t).trim();
-    return V.h('div.transfer' + (out ? '.out' : '.in') + (!out && !t.received_at ? '.fresh' : '') + (thumb ? '.has-thumb' : '')
+    return rowMenu(V.h('div.transfer' + (out ? '.out' : '.in') + (!out && !t.received_at ? '.fresh' : '') + (thumb ? '.has-thumb' : '')
       + (link ? '.is-link' : ''), { dataset: { id: t.id } },
       visual,
       V.h('div.t-main', {},
@@ -832,7 +832,14 @@ V.send = (() => {
           ? V.h('div.t-links', {}, linksIn(t.text).map((url) => linkChip(url, out ? null : t))) : null,
         meta({ out, device: out ? t.to_device : t.from_device, size: t.size, when: t.created_at || t._edited,
           state: statusOf(t, out), done: arrivedHere })),
-      V.h('div.t-actions', {}, actions));
+      V.h('div.t-actions', {}, actions)), name, thumb ? { label: 'Look at it', icon: 'image', onClick: () => viewer([t], 0) } : null);
+  }
+
+  /* "More options" on a row (1.19.1: a right-click, a long press, the keyboard's menu key): its own buttons (Open,
+     Save, Share, Copy, Show in folder, Delete), as a menu; a picture's or a video's Look at it first. */
+  function rowMenu(el, name, first = null) {
+    return V.contextMenu(el, () => [first, ...V.contextMenu.fromButtons(el.querySelector(':scope > .t-actions'))],
+      { label: `${name || 'This'}: options` });
   }
 
   /* Pictures sent together: one card with a mosaic of up to four, the fourth saying how many more. */
@@ -880,13 +887,13 @@ V.send = (() => {
         { ok: 'Delete', danger: true });
       if (sure) for (const t of list) await remove(t);
     }, 'quiet'));
-    return V.h('div.transfer.group' + (out ? '.out' : '.in') + (!out && got < n ? '.fresh' : ''), { dataset: { group: first.extra.group } },
+    return rowMenu(V.h('div.transfer.group' + (out ? '.out' : '.in') + (!out && got < n ? '.fresh' : ''), { dataset: { group: first.extra.group } },
       mosaic,
       V.h('div.t-main', {},
         V.h('div.t-name', { text: `${n} ${what}` }),
         meta({ out, device: out ? first.to_device : first.from_device, size: list.reduce((sum, t) => sum + (t.size || 0), 0),
           when: first.created_at || first._edited, state, done })),
-      V.h('div.t-actions', {}, actions));
+      V.h('div.t-actions', {}, actions)), `${n} ${what}`, { label: n > MOSAIC ? `Look at all ${n}` : 'Look at them', icon: 'image', onClick: () => viewer(list, 0) });
   }
 
   /* Rows in order, with each group's pictures (2 or more with previews) gathered at the place of its newest. */

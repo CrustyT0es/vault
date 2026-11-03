@@ -60,6 +60,12 @@
   --accent-line: light-dark(#b2bcff, #605bc1);
   --accent-2: light-dark(#a099f2, #8382eb);  /* the second and third steps of things drawn in parts from the accent */
   --accent-3: light-dark(#cfcbf8, #6660e9);
+  /* Words picked to copy (1.19.1; the owner: "nor highlighting text at all": the soft purple they had, --accent-soft,
+     was barely there on a white page, about 1.2 to 1). --pick, everywhere words show (the Read view, Chat, Today...),
+     as plain as a browser's own: about 1.6 to 1 on white, 2 on the dark page. --pick-see is the same colour seen
+     through, for the note's boxes, which draw bold, underlines and ==highlights== under their own letters. */
+  --pick: light-dark(#c8c4f7, #4c4992);
+  --pick-see: light-dark(rgb(83 70 231 / .32), rgb(119 113 241 / .5));
   --on-accent: light-dark(#ffffff, #1c125a);
   --on-accent-warn: light-dark(#ffd27a, #773f05);  /* a paused dot on the accent (the note-taker's bar at the top, in light) */
   --focus: light-dark(#6c6dfa, #a1a1fd);
@@ -159,7 +165,9 @@ body {
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 [hidden] { display: none !important; }
-::selection { background: var(--accent-soft); color: var(--text); }
+::selection { background: var(--pick); color: var(--text); }
+/* Windows' high contrast colours: the system's own (the browser forces these too; said, so nothing here fights it) */
+@media (forced-colors: active) { ::selection { background: Highlight; color: HighlightText; } }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ::placeholder { color: var(--placeholder); opacity: 1; }
 /* Thin scrollbars where a mouse or a trackpad uses them (the PC, a Chromebook). A touch screen keeps its own, which
@@ -563,6 +571,18 @@ textarea.field { resize: vertical; min-height: 48px; }
 .menu-item .icon { color: var(--muted); }
 .menu-item:hover, .menu-item:focus { background: light-dark(var(--surface-2), color-mix(in oklab, var(--text) 6%, transparent)); outline: none; }
 .menu-item.danger, .menu-item.danger .icon { color: var(--danger); }
+.menu-item:disabled { opacity: .45; cursor: default; }
+.menu:focus { outline: none; }  /* (a menu opened by a pointer has the keyboard itself, nothing lit: V.menu `pointer`) */
+
+/* "More options" (1.19.1, V.contextMenu): what's acted on shows it while its menu is open; a finger held on it opens
+   the menu, never the phone's word picking or its link preview (until Select text says otherwise); a finger's menu
+   has rows a finger can hit. */
+.ctx-open { outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent); outline-offset: -2px; }
+@media (pointer: coarse) {
+  .ctx:not(.ctx-text) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .ctx :is(input, textarea, [contenteditable]) { -webkit-user-select: text; user-select: text; }
+  .ctx-menu .menu-item { min-height: 44px; }
+}
 
 #toasts {
   position: fixed; left: 50%; bottom: calc(80px + var(--safe-bottom)); transform: translateX(-50%); z-index: 90;
@@ -934,7 +954,8 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 }
 .block-input::placeholder { color: var(--faint); }
 /* see-through, so the bold and the highlight under picked words still show */
-.block-input::selection { background: color-mix(in srgb, light-dark(var(--accent), var(--accent-3)) 24%, transparent); }  /* (dark: the iris step, as the pale lavender made a grey wash) */
+.block-input::selection { background: var(--pick-see); }
+@media (forced-colors: active) { .block-input::selection { background: Highlight; } }  /* (the system's own, as everywhere) */
 .check-row {
   display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0 -8px; padding: 5px 8px;
   border-radius: var(--r-md); transition: background var(--d-1);
@@ -1729,6 +1750,7 @@ button.card { -webkit-user-select: none; user-select: none; -webkit-touch-callou
   border: none; border-radius: var(--r-md); background: transparent; color: var(--text-2); font: 500 12.5px/14px var(--font);
 }
 .pick-action .icon { width: 22px; height: 22px; }
+.pick-action > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* (five in a row: one picked has More) */
 .pick-action:hover { background: var(--surface-2); color: var(--text); }
 .pick-action.danger { color: var(--danger); }
 .pick-action.danger:hover { background: var(--danger-soft); }
@@ -2485,8 +2507,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 }
 @media (min-width: 700px) { .study-head { padding-top: 8px; } }
 .study-title { flex: 1; min-width: 0; margin: 0; font: 600 18px/24px var(--font); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.study-head .study-more[hidden] { display: none; }
-.study.ended .study-head :is(.study-more, .study-done) { display: none; }  /* (the end has its own buttons) */
+.study-head :is(.study-more, .study-edit)[hidden] { display: none; }
+.study.ended .study-head :is(.study-more, .study-done, .study-edit) { display: none; }  /* (the end has its own buttons) */
 .study-done { flex: none; min-height: 44px; padding: 0 14px; color: var(--accent-ink); font-size: 15px; }
 .study-done:hover { color: var(--accent-ink); }
 .study-where { display: grid; gap: 8px; flex: none; padding: 2px 20px 0; }
@@ -2637,6 +2659,16 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   visibility: hidden; white-space: pre-wrap; overflow-wrap: break-word;
 }
 .block-measure > div { min-height: 1lh; }
+/* Words picked across boxes (1.19.1, js/editor.js: span): the parts of the boxes without the caret, drawn as a browser
+   draws picked words, under the letters (the box's own words, or its formatted copy) and never catching a press. */
+.block-field.spanned { isolation: isolate; }
+.block-pick { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }  /* (a line end's sliver never pushes the page sideways) */
+.block-pick > i { position: absolute; background: var(--pick-see); }
+::highlight(wefty-pick) { background-color: var(--pick); color: var(--text); }
+@media (forced-colors: active) {
+  .block-pick > i { forced-color-adjust: none; background: Highlight; }
+  ::highlight(wefty-pick) { background-color: Highlight; color: HighlightText; }
+}
 
 /* The box being written in, when its words have marks (js/editor.js: letters): it draws no letters of its own, and a
    copy over it draws them all, every letter just where the box puts it (only colour and outlines here too, nothing
@@ -2803,6 +2835,7 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .learn-option.faded { opacity: .5; }
 .learn-type { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .learn-type .btn { min-height: 48px; }
+.learn-input { font-size: 16px; }  /* (16 px: an iPhone zooms the page into a smaller box as it's typed in) */
 .learn-input.right { border-color: var(--ok); background: var(--ok-soft); }
 .learn-input.wrong { border-color: var(--danger); background: var(--danger-soft); }
 .learn-input:disabled { color: var(--text); opacity: 1; -webkit-text-fill-color: var(--text); }
@@ -2815,8 +2848,20 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .learn-feedback.err { background: var(--danger-soft); color: var(--text); }
 .learn-feedback.err > .icon { color: var(--danger); }
 .learn-said { flex: 1; min-width: 12em; }
-.learn-feedback-actions { display: flex; gap: 8px; margin-left: auto; }
+.learn-feedback-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; max-width: 100%; }
+/* (on a narrow phone the buttons wrap: Continue takes its own whole row under the others, never a ragged stack) */
+.learn-feedback-actions .btn.primary { flex: 1 0 auto; }
 .learn-feedback .btn { min-height: 40px; }
+.learn-feedback.err .btn.quiet .icon { width: 16px; height: 16px; }
+/* "Do you know it?" (a card with nothing to pick between and too long to type): Show the answer, then how it went */
+.learn-options.one { grid-template-columns: minmax(0, 1fr); }
+.learn-options.one .btn { min-height: 52px; }
+.learn-reveal span:last-child { color: var(--text); font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Edit card (the study screen's pencil, Learn's wrong answer): the card's own words, in its note */
+.card-edit-field { display: grid; gap: 6px; }
+.card-edit-field textarea { resize: none; min-height: 48px; field-sizing: content; max-height: 40vh; overflow-wrap: anywhere; font-size: 16px; }
+.sheet-body > .card-edit-from { margin: 0 0 4px; overflow-wrap: anywhere; text-align: left; }
+.sheet-body > .card-edit-tip { margin: 6px 0 0; text-align: left; }
 
 /* tests: the countdown on the note, on its card, on the folders it covers, and what it covers */
 .note-meta .exam-chip { max-width: 100%; color: var(--accent-ink); background: var(--accent-wash); border-color: var(--accent-line); }

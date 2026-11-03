@@ -1879,12 +1879,12 @@ V.chat = (() => {
     onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${shownTitle(n.title)}`, onclick: onRemove }, V.icon('x')) : null);
 
   function turnEl(chat, turn, last) {
-    const you = V.h('div.chat-you', {},
+    const you = youMenu(chat, turn, V.h('div.chat-you', {},
       (turn.files || []).length || (turn.notes || []).length ? V.h('div.chat-attached', {},
         (turn.files || []).filter((f) => f.kind === 'image').map((f) => V.h('div.chat-sent-pic', {}, pictureEl(f))),
         (turn.files || []).filter((f) => f.kind !== 'image').map((f) => fileChip(f)),
         (turn.notes || []).map((n) => noteChip(n))) : null,
-      turn.text ? V.h('div.chat-you-text', { text: turn.text }) : null);
+      turn.text ? V.h('div.chat-you-text', { text: turn.text }) : null));
     // What an answer cut off at this end had said (1.18): shown while it's finished, until the new words pass it.
     const before = turn.partial && (turn.state === 'waiting' || turn.state === 'answering')
       ? textOf({ ...turn, replies: turn.partial }) : '';
@@ -1939,13 +1939,52 @@ V.chat = (() => {
         title: turn.cutHere ? 'Asks Claude again: that costs about as much as a new answer' : undefined }) : null,
       V.h('span.chat-meta', { text: meta }));
     return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
-      V.h('div.chat-claude', {}, body,
+      answerMenu(chat, turn, last, V.h('div.chat-claude', {}, body,
         notes.length ? V.h('p.chat-note', { text: notes.join(' ') }) : null,
         actionsEl(chat, turn),
         sources.length ? V.h('div.chat-sources', {}, V.h('span.chat-sources-label', { text: 'Sources' }),
           sources.map(([url, title]) => V.h('a.chat-source', { href: url, target: '_blank', rel: 'noopener noreferrer', title: url,
             text: V.format.site(url).name || title }))) : null,
-        actions));
+        actions)));
+  }
+
+  /* -- "more options" on a message (1.19.1: a right-click, a long press, the keyboard's menu key; V.contextMenu). Words
+     picked in it with the mouse keep the browser's own menu (its Copy copies just them). */
+
+  /* Your own message: copy it, or put it back in the box to change and send again. */
+  function youMenu(chat, turn, el) {
+    if (!turn.text) return el;
+    return V.contextMenu(el, (event) => [
+      { label: 'Copy', icon: 'copy', onClick: async () => { await V.copy(turn.text).catch(V.problem); V.toast('Copied'); } },
+      V.contextMenu.byTouch(event) ? V.contextMenu.selectText(el) : null,
+      busy ? null : { label: 'Edit in the box', icon: 'edit', onClick: () => {
+        if (!parts || !parts.input || openId !== chat.id) return;
+        parts.input.value = turn.text;
+        parts.input.dispatchEvent(new Event('input', { bubbles: true }));
+        parts.input.focus();
+      } },
+    ], { label: 'Your message: options' });
+  }
+
+  /* An answer: Copy, Save as note (the Inbox, or a folder), Send to each of your devices, Retry (the last one). */
+  function answerMenu(chat, turn, last, el) {
+    return V.contextMenu(el, (event) => {
+      const text = textOf(turn);
+      if (!text || turn.state === 'refused' || turn.state === 'answering' || turn.state === 'waiting') return [];
+      return [
+        { label: 'Copy', icon: 'copy', onClick: async () => { await V.copy(text).catch(V.problem); V.toast('Copied'); } },
+        V.contextMenu.byTouch(event) ? V.contextMenu.selectText(el) : null,
+        { label: 'Save to Inbox', icon: 'notes', onClick: () => saveNote(chat, turn, V.notes.inbox()) },
+        { label: 'Save to a folder...', icon: 'folder', onClick: async () => {
+          const folder = await V.organise.chooseFolder({ title: 'Save to' });
+          if (folder) saveNote(chat, turn, folder);
+        } },
+        ...(V.send ? V.send.targets() : []).map((to) => ({ label: `Send to ${V.deviceName(to)}`, icon: V.deviceIcon(to),
+          onClick: () => sendTo(chat, turn, to) })),
+        last && !busy ? { sep: true } : null,
+        last && !busy ? { label: turn.state === 'done' || turn.state === 'cut' ? 'Retry' : 'Try again', icon: 'restore', onClick: () => retry(chat, turn) } : null,
+      ];
+    }, { label: 'Answer: options' });
   }
 
   /* The changes Chat made in Wefty for this message: one list, a row each with Open and Undo, Undo all when there are
@@ -2022,7 +2061,7 @@ V.chat = (() => {
     // (1.18: the answer being written here now, or one cut off being finished; one that ended unseen is new)
     const writingNow = (busy && busy.chatId === chat.id) || finishing;
     const fresh = !writingNow && unread.has(chat.id);
-    return V.h('div.chat-row' + (chat.id === openId ? '.on' : '') + (fresh ? '.unread' : ''), { dataset: { id: chat.id } },
+    return V.contextMenu(V.h('div.chat-row' + (chat.id === openId ? '.on' : '') + (fresh ? '.unread' : ''), { dataset: { id: chat.id } },
       V.h('button.chat-row-main', { type: 'button', onclick: () => open(chat.id) },
         V.h('span.chat-row-title', { text: shownTitle(chat.title) || 'New chat' }),
         writingNow ? V.h('span.chat-row-waiting.chat-row-writing', {}, V.h('span.chat-row-dot'),
@@ -2030,7 +2069,9 @@ V.chat = (() => {
           : waiting ? V.h('span.chat-row-waiting', {}, V.icon('clock'), V.h('span', { text: 'Waiting to send' }))
           : fresh ? V.h('span.chat-row-waiting.chat-row-new', {}, V.h('span.chat-row-dot'), V.h('span', { text: 'New answer' }))
           : V.h('span.chat-row-meta', { text: [V.ago(chat.updated), nameOf(last ? last.model : chat.model)].join(' · ') })),
-      V.iconButton('more', 'More', (event) => rowMenu(event.currentTarget, chat), 'tiny'));
+      V.iconButton('more', 'More', (event) => rowMenu(event.currentTarget, chat), 'tiny')),
+    () => [{ label: 'Open', icon: 'open', onClick: () => open(chat.id) }, { sep: true }, ...chatItems(chat)],
+    { label: `${shownTitle(chat.title) || 'New chat'}: options` });
   }
 
   function drawList() {
@@ -2434,16 +2475,14 @@ V.chat = (() => {
     }
   }
 
-  const rowMenu = (anchor, chat) => V.menu(anchor, [
-    { label: 'Rename', icon: 'text', onClick: () => rename(chat) },
-    { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(chat) },
-  ]);
-
-  const chatMenu = (anchor, chat) => V.menu(anchor, [
+  /* A chat's items: its ⋯ in the list and at its top, and its right-click / long-press menu in the list (1.19.1). */
+  const chatItems = (chat) => [
     { label: 'Rename', icon: 'text', onClick: () => rename(chat) },
     chat.turns.length ? { label: 'Save the whole chat as a note', icon: 'notes', onClick: () => saveNote(chat, null, V.notes.inbox(), markdown(chat, false)) } : null,
     { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(chat) },
-  ]);
+  ];
+  const rowMenu = (anchor, chat) => V.menu(anchor, chatItems(chat));
+  const chatMenu = (anchor, chat) => V.menu(anchor, chatItems(chat));
 
   /* ---------------------------------------------------------------- a note asked about from the note itself */
 

@@ -700,12 +700,17 @@ V.organise = (() => {
 
   /* The ⋯ menu of a folder. Inbox keeps its name and its place (quick notes and Jarvis's notes go there, and it stays
      first) and can't be deleted. */
-  function folderMenu(folder, anchor, { onGone, onMade } = {}) {
+  function folderMenu(folder, anchor, opts = {}) {
+    V.menu(anchor, folderItems(folder, opts));
+  }
+
+  /* The folder's menu items (its ⋯, and its right-click / long-press menu everywhere it shows: V.contextMenu). */
+  function folderItems(folder, { onGone, onMade } = {}) {
     const list = children(parentId(folder));  // up and down go among the folders beside it
     const at = list.findIndex((f) => f.id === folder.id);
     const home = isInbox(folder);
     const below = at > 0 && !isInbox(list[at - 1]);  // (nothing goes above Inbox)
-    V.menu(anchor, [
+    return [
       home ? null : { label: 'Rename', icon: 'edit', onClick: async () => {
         const changed = await folderSheet({ title: 'Rename folder', ok: 'Rename', folder, askIcon: false });
         if (changed) await saveFolder(folder, { name: changed.name });
@@ -730,7 +735,7 @@ V.organise = (() => {
       !home && at >= 0 && at < list.length - 1 ? { label: 'Move down', icon: 'down', onClick: () => reorder(folder, 1) } : null,
       V.notes.folders().length > 2 ? { label: 'Arrange folders...', icon: 'arrange', onClick: arrangeFolders } : null,
       home ? null : { label: 'Delete folder', icon: 'trash', danger: true, onClick: () => deleteFolder(folder, onGone) },
-    ]);
+    ];
   }
 
   /* The menu's Move up and Move down: a step among the folders beside it (never past Inbox, which stays first). */
@@ -949,7 +954,7 @@ V.organise = (() => {
   return {
     isArchived, isTemplate, stamped, tagsOf, allTags, parseQuery, foldersFor, matcher, terms, marked, snippet,
     SORTS, sort, view, setSort: (value) => setPref('vault-sort', value), setView: (value) => setPref('vault-view', value),
-    comparator, newFolder, folderSheet, folderMenu, chooseFolder, isInbox, move, pin, archive, trash, restore, change,
+    comparator, newFolder, folderSheet, folderMenu, folderItems, chooseFolder, isInbox, move, pin, archive, trash, restore, change,
     DEPTH, TOP, parentId, children, ancestors, pathOf, depthOf, inside, tree, saveFolder, moveFolder, cantMove,
     placeFolder, planPlace, folderTarget, folderRowTarget, topTarget, dragLabel, arrangeFolders,
     saveTemplate, ownTemplates, templateName, templateSection,

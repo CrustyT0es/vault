@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.19.0';
+V.VERSION = '1.19.1';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -501,11 +501,16 @@ V.confirm = (title, text, { ok = 'OK', danger = false } = {}) => new Promise((re
 /* A menu of `items` ({ label, icon, onClick, danger }) under `anchor`. An item with `checked` (true or false) is a
    switch: it says whether it's on, with a tick when it is. `{ sep: true }` is a line between groups, and `{ node }`
    a piece of its own (an element, or a function given the menu's close that makes one: the picture's status line).
+   `icon` is an icon's name, or an element (copied: js/send.js's rows lend their buttons' own).
    Options: `align: 'up'` opens it above the anchor, from its left edge (the picture at the foot of the rail);
-   `cls` adds a class; `label` names it; `onClose(how)` hears it close ('item', 'outside' (a press beside it) or
-   'escape'); `returnFocus` puts the keyboard back on the anchor.
-   Returns { close, el }. */
-V.menu = function menu(anchor, items, { align = '', cls = '', label = '', onClose = null, returnFocus = false } = {}) {
+   `at: { x, y, touch }` opens it at a point instead (V.contextMenu: where the pointer was; a finger's: above it, so
+   the finger doesn't hide it); `cls` adds a class; `label` names it; `onClose(how)` hears it close ('item', 'outside'
+   (a press beside it), 'escape' or 'scroll'); `returnFocus` puts the keyboard back on the anchor; `scrollCloses`: the
+   wheel or a finger moving beside it closes it (as the system's own menus do); `pointer`: opened by a pointer, so no
+   item is lit until the arrow keys move to one (the keyboard's menus light the first).
+   The arrow keys, Home and End go along its items. Returns { close, el }. */
+V.menu = function menu(anchor, items, { align = '', at = null, cls = '', label = '', onClose = null, returnFocus = false,
+  scrollCloses = false, pointer = false } = {}) {
   const rect = anchor.getBoundingClientRect();
   let closed = false;
   const done = (how = 'item') => {
@@ -520,31 +525,314 @@ V.menu = function menu(anchor, items, { align = '', cls = '', label = '', onClos
     if (item.sep) return V.h('div.menu-sep', { role: 'separator' });
     if (item.node) return typeof item.node === 'function' ? item.node(done) : item.node;
     const switches = typeof item.checked === 'boolean';
+    const icon = !item.icon ? null : typeof item.icon === 'string' ? V.icon(item.icon) : item.icon.cloneNode(true);
     return V.h('button.menu-item' + (item.danger ? '.danger' : '') + (switches ? '.menu-switch' : ''), {
       type: 'button', role: switches ? 'menuitemcheckbox' : 'menuitem', 'aria-checked': switches ? String(item.checked) : null,
+      disabled: item.disabled ? true : null,
       onclick: () => { done(); item.onClick(); },
-    }, item.icon ? V.icon(item.icon) : null, V.h('span', { text: item.label }),
+    }, icon, V.h('span', { text: item.label }),
     switches ? V.h('span.menu-state', { text: item.checked ? 'On' : 'Off' }) : null);
   };
-  const list = V.h('div.menu' + (cls ? '.' + cls : ''), { role: 'menu', 'aria-label': label || null }, items.filter(Boolean).map(row));
-  const wrap = V.h('div.layer.menu-layer', { onmousedown: (event) => { if (event.target === wrap) done('outside'); } }, list);
+  // (a line never first, last or twice in a row: lists made from parts, some of them missing)
+  const shown = [];
+  for (const item of items.filter(Boolean)) if (!item.sep || (shown.length && !shown[shown.length - 1].sep)) shown.push(item);
+  while (shown.length && shown[shown.length - 1].sep) shown.pop();
+  const list = V.h('div.menu' + (cls ? '.' + cls : ''), { role: 'menu', 'aria-label': label || null }, shown.map(row));
+  // Up and Down go along the items (Home, End to the ends), round from the last to the first. A piece of its own that
+  // moves its own way first (the editor's tiles) keeps the keys.
+  list.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const all = [...list.querySelectorAll('[role=menuitem], [role=menuitemcheckbox]')].filter((b) => !b.disabled && b.getClientRects().length);
+    if (!all.length) return;
+    event.preventDefault();
+    const now = all.indexOf(document.activeElement);
+    const to = event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1
+      : now < 0 ? (event.key === 'ArrowDown' ? 0 : all.length - 1)
+        : (now + (event.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length;
+    all[to].focus();
+  });
+  // (the browser's own menu never comes up over this one, or beside it)
+  list.addEventListener('contextmenu', (event) => event.preventDefault());
+  const wrap = V.h('div.layer.menu-layer', {
+    onmousedown: (event) => { if (event.target === wrap) done('outside'); },
+    oncontextmenu: (event) => { if (event.target === wrap) event.preventDefault(); },
+  }, list);
+  if (scrollCloses) {
+    // The wheel or a finger dragged beside the menu: the person wants to scroll, so it goes (the menu's own scrolling,
+    // a long one on a short screen, is left alone).
+    const away = (event) => { if (!list.contains(event.target)) done('scroll'); };
+    wrap.addEventListener('wheel', away, { passive: true });
+    wrap.addEventListener('touchmove', away, { passive: true });
+  }
   const esc = (event) => { if (event.key === 'Escape') { event.stopPropagation(); done('escape'); } };
   document.addEventListener('keydown', esc, true);
   document.getElementById('layers').append(wrap);
+  // Worked out in the page's own px: with the page zoomed (bigger text) the pointer's and the anchor's places are the
+  // screen's, `zoom` times the page's.
+  const zoom = (list.offsetWidth && list.getBoundingClientRect().width / list.offsetWidth) || 1;
+  const screenW = window.innerWidth / zoom, screenH = window.innerHeight / zoom;
+  list.style.maxHeight = (screenH - 16) + 'px';
   const width = list.offsetWidth, height = list.offsetHeight;
-  if (align === 'up') {
-    list.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left)) + 'px';
-    list.style.top = Math.max(8, rect.top - height - 8) + 'px';
+  const box = { left: rect.left / zoom, right: rect.right / zoom, top: rect.top / zoom, bottom: rect.bottom / zoom };
+  if (at) {
+    // At a point: from there down and right, else turned to fit (left of it, above it). A finger's: above the finger.
+    const x = at.x / zoom, y = at.y / zoom;
+    const fitsRight = x + width + 8 <= screenW;
+    list.style.left = (at.touch ? Math.max(8, Math.min(screenW - width - 8, x - width / 2))
+      : Math.max(8, fitsRight ? x : Math.min(screenW - width - 8, x - width))) + 'px';
+    let top = y + height + 8 <= screenH ? y : y - height;
+    if (at.touch) {
+      // Above the finger when it fits, else below it; a menu too long for either side scrolls on the bigger one, so
+      // the finger never covers it.
+      const above = y - 16 - 8;
+      const below = screenH - (y + 28) - 8;
+      if (height > above && height > below && Math.max(above, below) >= 160) {
+        list.style.maxHeight = Math.max(above, below) + 'px';
+        top = above >= below ? y - 16 - Math.min(height, above) : y + 28;
+      } else top = height <= above ? y - height - 16 : y + 28;
+    }
+    list.style.top = Math.max(8, top) + 'px';
+  } else if (align === 'up') {
+    list.style.left = Math.max(8, Math.min(screenW - width - 8, box.left)) + 'px';
+    list.style.top = Math.max(8, box.top - height - 8) + 'px';
   } else {
-    list.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-    list.style.top = (rect.bottom + height + 8 > window.innerHeight ? Math.max(8, rect.top - height - 4) : rect.bottom + 4) + 'px';
+    list.style.left = Math.max(8, Math.min(screenW - width - 8, box.right - width)) + 'px';
+    list.style.top = (box.bottom + height + 8 > screenH ? Math.max(8, box.top - height - 4) : box.bottom + 4) + 'px';
   }
   // (Never past the bottom edge: on a short screen the menu, which scrolls past its max-height, sits higher instead.)
-  list.style.top = Math.max(8, Math.min(parseFloat(list.style.top), window.innerHeight - height - 8)) + 'px';
-  const first = list.querySelector('.menu-item') || list.querySelector('button');
-  if (first) first.focus();
+  list.style.top = Math.max(8, Math.min(parseFloat(list.style.top), screenH - list.offsetHeight - 8)) + 'px';
+  const first = list.querySelector('.menu-item:not([disabled])') || list.querySelector('button');
+  if (pointer) {
+    // (opened by a pointer: the menu itself has the keyboard, nothing lit, so Esc and the arrow keys work at once)
+    list.tabIndex = -1;
+    list.focus({ preventScroll: true });
+  } else if (first) first.focus();
   return { close: done, el: list };
 };
+
+/* "More options" for something that can be acted on (1.19.1; the owner: "Double-clicking on stuff like right click or
+   two finger touchpad doesn't really work for everything like I want it to for more options"). `el` gets a menu of
+   `items` (V.menu's; or a function given the event that makes them as it opens, so they say what's true then; none:
+   the browser's own menu), opened
+   - by a right-click, which a Chromebook's or a Mac's two-finger tap on the touchpad also is, at the pointer;
+   - by a finger or the S Pen held still for a moment (a long press; moving first is a scroll, left to the browser,
+     and Android's own long press is this one), above the finger;
+   - by the keyboard's menu key or Shift+F10, at the thing itself;
+   and closed by Esc, a press beside it or scrolling, the keyboard going back to where it was.
+   In a box typed into (a text box, the editor's words) and over words picked (selected) in `el`, the browser's own
+   menu stays (copy, paste, spelling). Something inside `el` with a menu of its own has it, not `el`'s. Options:
+     touch: false     a long press there is someone else's (js/drag.js: it picks a note, or lifts a folder); a function:
+                      what a long press does instead of the menu
+     open             what a double click with a mouse does (the desktop habit: opening the thing)
+     skip(target)     true where `el`'s menu isn't wanted (the browser's own then): the editor's words
+     label            the menu's name for a screen reader
+   Returns el. */
+V.contextMenu = (() => {
+  const LONG = 500;   // ms a finger stays still for a long press (as Android's own)
+  const SLOP = 10;    // px it may wander meanwhile (more is a scroll)
+  const TEXT = 'textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type=checkbox]):not([type=radio])'
+    + ':not([type=button]):not([type=submit]):not([type=reset]):not([type=range]):not([type=color]):not([type=file]):not([type=image])';
+  const FOCUSABLE = 'button, a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  let held = null;      // a finger down on something with a menu: { el, id, x, y, target, timer }
+  let open = null;      // the menu open now: { el, menu }
+  let rightDown = null; // the last right press: { el, at, picked } (words picked before it: a Mac picks the word pressed)
+
+  const element = (node) => (node && node.nodeType === 1 ? node : node && node.parentElement) || null;
+  const typing = (node) => { const el = element(node); return !!(el && el.closest(TEXT)); };
+  const touchy = (event) => event.pointerType === 'touch' || event.pointerType === 'pen'
+    || !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents);
+  function wordsPicked(el) {
+    const sel = window.getSelection ? window.getSelection() : null;
+    return !!sel && !sel.isCollapsed && sel.rangeCount > 0 && String(sel).trim() !== '' && sel.containsNode(el, true);
+  }
+  const buzz = () => { try { if (navigator.vibrate) navigator.vibrate(12); } catch (error) { /* no buzz, no matter */ } };
+
+  /* No line first, last or twice in a row. */
+  function tidy(items) {
+    const out = [];
+    for (const item of (items || []).filter(Boolean)) {
+      if (item.sep && (!out.length || out[out.length - 1].sep)) continue;
+      out.push(item);
+    }
+    while (out.length && out[out.length - 1].sep) out.pop();
+    return out;
+  }
+
+  /* Where the keyboard goes back to: what had it in `el`, else what was pressed (a card, a row's button), else `el`. */
+  function returnTo(el, target) {
+    const active = document.activeElement;
+    if (active && active !== document.body && el.contains(active)) return active;
+    const hit = element(target) && element(target).closest(FOCUSABLE);
+    if (hit && el.contains(hit)) return hit;
+    if (el.matches(FOCUSABLE)) return el;
+    return active && active !== document.body ? active : null;
+  }
+
+  function show(el, make, opts, how, x, y, target, event) {
+    let items;
+    try { items = tidy(typeof make === 'function' ? make(event) : make); } catch (error) { console.error(error); items = []; }
+    if (!items.some((item) => !item.sep)) return false;
+    if (open) open.menu.close('again');
+    const back = returnTo(el, target);
+    let at = { x, y, touch: how === 'touch' };
+    if (how === 'key') {
+      const box = el.getBoundingClientRect();
+      const top = Math.max(8, Math.min(box.top, window.innerHeight - 8));
+      at = { x: box.left + Math.min(24, box.width / 2), y: Math.min(top + Math.min(box.height, 40), window.innerHeight - 8) };
+    }
+    el.classList.add('ctx-open');
+    const menu = V.menu(el, items, { at, cls: 'ctx-menu', label: opts.label || '', scrollCloses: true, pointer: how !== 'key',
+      onClose: () => {
+        el.classList.remove('ctx-open');
+        if (open && open.menu === menu) open = null;
+        if (back && back.isConnected) back.focus({ preventScroll: true });
+      } });
+    open = { el, menu };
+    return true;
+  }
+
+  function stopHold() {
+    if (!held) return;
+    clearTimeout(held.timer);
+    held = null;
+    window.removeEventListener('pointermove', moved, true);
+    window.removeEventListener('pointerup', stopHold, true);
+    window.removeEventListener('pointercancel', stopHold, true);
+    window.removeEventListener('scroll', stopHold, true);
+  }
+
+  function moved(event) {
+    if (held && event.pointerId === held.id && Math.hypot(event.clientX - held.x, event.clientY - held.y) > SLOP) stopHold();
+  }
+
+  /* The finger lifted after a long press: the tap the browser may make of it (an iPhone's) lands on nothing, never on
+     the menu that came up under it. */
+  function swallowLift(id) {
+    const lifted = (event) => {
+      if (event.pointerId !== id) return;
+      window.removeEventListener('pointerup', lifted, true);
+      window.removeEventListener('pointercancel', lifted, true);
+      const until = Date.now() + 450;
+      const types = ['mousedown', 'mouseup', 'click'];
+      const stop = (e) => {
+        if (Date.now() > until) { off(); return; }
+        if (Math.hypot(e.clientX - event.clientX, e.clientY - event.clientY) > 30) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.type === 'click') off();
+      };
+      const off = () => types.forEach((t) => window.removeEventListener(t, stop, true));
+      types.forEach((t) => window.addEventListener(t, stop, true));
+      setTimeout(off, 500);
+    };
+    window.addEventListener('pointerup', lifted, true);
+    window.addEventListener('pointercancel', lifted, true);
+    setTimeout(() => {  // (lifted already, before the menu came: nothing to wait for)
+      window.removeEventListener('pointerup', lifted, true);
+      window.removeEventListener('pointercancel', lifted, true);
+    }, 4000);
+  }
+
+  function longPress(el, make, opts) {
+    const h = held;
+    stopHold();
+    if (!h || !h.el.isConnected) return;
+    if (typeof opts.touch === 'function') { buzz(); opts.touch(); swallowLift(h.id); return; }
+    if (show(el, make, opts, 'touch', h.x, h.y, h.target, { type: 'longpress', target: h.target, clientX: h.x, clientY: h.y })) {
+      buzz();
+      swallowLift(h.id);
+    }
+  }
+
+  function attach(el, make, opts = {}) {
+    if (!el || el.dataset.ctx === 'on') return el;
+    el.dataset.ctx = 'on';
+    if (opts.touch !== false) el.classList.add('ctx');
+    const mine = (event) => !event.defaultPrevented && !typing(event.target) && !(opts.skip && opts.skip(element(event.target)))
+      && !(touchy(event) && el.classList.contains('ctx-text'));  // (Select text was chosen: a long press picks words again)
+    el.addEventListener('pointerdown', (event) => {
+      if (!touchy(event)) {
+        if (event.button === 2) rightDown = { el, at: Date.now(), picked: wordsPicked(el) };
+        return;
+      }
+      // (a long press that's someone else's, js/drag.js's: theirs alone; `touch` as a function only answers the
+      // browser's own long press, Android's contextmenu, that they didn't see begin)
+      if (!event.isPrimary || opts.touch === false || typeof opts.touch === 'function' || !mine(event) || held) return;
+      if (event.target.closest('[data-ctx="on"]') !== el) return;  // (something inside with a menu of its own)
+      held = { el, id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target,
+        timer: setTimeout(() => longPress(el, make, opts), LONG) };
+      window.addEventListener('pointermove', moved, true);
+      window.addEventListener('pointerup', stopHold, true);
+      window.addEventListener('pointercancel', stopHold, true);
+      window.addEventListener('scroll', stopHold, true);
+    });
+    el.addEventListener('contextmenu', (event) => {
+      if (event.defaultPrevented) return;  // (something inside had its own)
+      if (open && open.el === el) { event.preventDefault(); return; }  // (Android's long press after ours)
+      if (!mine(event)) return;  // the browser's own: copy, paste, spelling
+      if (touchy(event)) {
+        event.preventDefault();
+        if (opts.touch === false) return;
+        if (held && held.el === el) {
+          // Android's own long press came first: it's this one.
+          const h = held;
+          stopHold();
+          if (typeof opts.touch === 'function') { opts.touch(); swallowLift(h.id); return; }
+          if (show(el, make, opts, 'touch', h.x, h.y, h.target, event)) { buzz(); swallowLift(h.id); }
+          return;
+        }
+        if (typeof opts.touch === 'function') { opts.touch(); return; }
+        show(el, make, opts, 'touch', event.clientX, event.clientY, event.target, event);
+        return;
+      }
+      const recent = rightDown && rightDown.el === el && Date.now() - rightDown.at < 1500 ? rightDown : null;
+      if (recent ? recent.picked : wordsPicked(el)) return;  // words picked: the browser's Copy
+      const keyed = !event.clientX && !event.clientY;  // (a menu key the browser turned into a contextmenu)
+      if (show(el, make, opts, keyed ? 'key' : 'mouse', event.clientX, event.clientY, event.target, event)) event.preventDefault();
+    });
+    el.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || !(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return;
+      if (!mine(event)) return;
+      if (show(el, make, opts, 'key', 0, 0, event.target, event)) event.preventDefault();
+    });
+    if (opts.open) {
+      let lastTouch = 0;
+      el.addEventListener('pointerdown', (event) => { if (touchy(event)) lastTouch = Date.now(); });
+      el.addEventListener('dblclick', (event) => {
+        if (event.defaultPrevented || Date.now() - lastTouch < 800 || !mine(event)) return;
+        if (element(event.target).closest('[data-ctx="on"]') !== el) return;
+        // (two clicks on a button inside it, its tick, are that button's, twice)
+        const inner = element(event.target).closest('button, a[href], input, label, select, summary');
+        if (inner && inner !== el && el.contains(inner)) return;
+        event.preventDefault();
+        opts.open(event);
+      });
+    }
+    return el;
+  }
+
+  attach.close = () => { if (open) open.menu.close('escape'); };
+  /* Whether the menu was opened by a finger (or the S Pen): `make`'s event. */
+  attach.byTouch = (event) => !!event && (event.type === 'longpress' || touchy(event));
+  /* An item for a finger's menu on words (a chat message): "Select text", after which a long press on `el` picks
+     words as the phone does (until it's drawn again), with a line saying so. */
+  attach.selectText = (el) => ({ label: 'Select text', icon: 'text', onClick: () => {
+    el.classList.add('ctx-text');
+    V.toast('Now hold the words to pick some.');
+  } });
+  attach.isOpen = () => !!open;
+  /* Menu items made from the buttons in `box` (a row's own Open, Save, Copy...): what they say (or are named), their
+     icon, and what they do (pressing the button itself). */
+  attach.fromButtons = (box) => [...(box ? box.querySelectorAll('button') : [])]
+    .filter((b) => !b.disabled && !b.hidden && b.getClientRects().length)
+    .map((b) => {
+      const label = (b.textContent || '').trim() || b.getAttribute('aria-label') || b.title || '';
+      const icon = b.querySelector('.icon');
+      return label ? { label, icon: icon || null, danger: /danger/.test(b.className) || /^(delete|remove)\b/i.test(label),
+        onClick: () => b.click() } : null;
+    });
+  return attach;
+})();
 
 V.toast = function toast(text, { kind = '', action, onAction, ms = 3200 } = {}) {
   const box = document.getElementById('toasts');

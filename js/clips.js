@@ -868,26 +868,31 @@ V.clips = (() => {
   }
 
   /* One of "Earlier": where it came from and when on one line, the words, then Copy here (and Open for a link). */
+  /* "More options" on a clip (1.19.1: a right-click, a long press, the menu key): its own buttons, and Save as a note. */
+  const clipMenu = (el, clip) => V.contextMenu(el, () => [...V.contextMenu.fromButtons(el.querySelector('.clip-actions')),
+    el.querySelector('.clip-actions') && /Save as a note/.test(el.querySelector('.clip-actions').textContent) ? null
+      : { label: 'Save as a note', icon: 'notes', onClick: () => saveAsNote(clip) }], { label: 'Clip: options' });
+
   function item(clip) {
     const mineHere = clip.from_device === V.device;
-    return V.h('div.clip', {},
+    return clipMenu(V.h('div.clip', {},
       V.h('div.clip-from', { dataset: { from: clip.from_device } }, V.icon(V.deviceIcon(clip.from_device)),
         V.h('span.clip-who', { text: mineHere ? 'From here' : `From ${named(clip.from_device)}` }),
         V.h('span.clip-when', { text: V.ago(clip.created_at) })),
       V.h('div.clip-text', { text: shortText(clip.text) }),
-      V.h('div.clip-actions', {}, openButton(clip), copyButton(clip, mineHere ? 'Copy' : 'Copy here', 'quiet')));
+      V.h('div.clip-actions', {}, openButton(clip), copyButton(clip, mineHere ? 'Copy' : 'Copy here', 'quiet'))), clip);
   }
 
   /* The newest from elsewhere, first and bigger: "Latest, from your Chromebook · 2 min ago", Save as a note, Copy. */
   function latestCard(clip) {
     return V.h('div.card.latest', {},
-      V.h('div.clip', {},
+      clipMenu(V.h('div.clip', {},
         V.h('div.clip-from', { dataset: { from: clip.from_device } }, V.icon(V.deviceIcon(clip.from_device)),
           V.h('span', { text: `Latest, from ${named(clip.from_device)} · ${V.ago(clip.created_at)}` })),
         V.h('div.clip-text', { text: shortText(clip.text) }),
         V.h('div.clip-actions', {}, openButton(clip),
           V.button('Save as a note', { kind: 'quiet', onClick: () => saveAsNote(clip) }),
-          copyButton(clip, 'Copy', ''))));
+          copyButton(clip, 'Copy', ''))), clip));
   }
 
   function draw() {

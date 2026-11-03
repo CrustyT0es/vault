@@ -61,6 +61,7 @@ V.notes = (() => {
   // The notes the lists are made of (templates are kept apart, for the new-note sheet).
   const live = () => [...V.data.notes.values()].filter((n) => !n.deleted && !n._purge && !O.isTemplate(n));
   const listed = () => live().filter((n) => !O.isArchived(n));
+  const trashed = () => [...V.data.notes.values()].filter((n) => n.deleted && !n._purge);
   const edited = (n) => V.editedAt(n);  // (a flash card's progress isn't an edit: js/cloud.js)
   const folderOf = (n) => V.data.folders.get(n.folder_id);
   const inbox = () => folders().find((f) => f.name.toLowerCase() === 'inbox');
@@ -192,8 +193,7 @@ V.notes = (() => {
 
   function shown() {
     if (filter === 'trash') {
-      return [...V.data.notes.values()].filter((n) => n.deleted && !n._purge)
-        .sort((a, b) => (b.deleted_at || '').localeCompare(a.deleted_at || ''));
+      return trashed().sort((a, b) => (b.deleted_at || '').localeCompare(a.deleted_at || ''));
     }
     const q = O.parseQuery(query);
     let list;
@@ -531,6 +531,13 @@ V.notes = (() => {
         }),
       filter === 'archive' ? null : act(allPinned ? 'pin-on' : 'pin', allPinned ? 'Unpin' : 'Pin', done((l) => O.pin(l, !allPinned))),
       act('archive', allArchived ? 'Unarchive' : 'Archive', done((l) => O.archive(l, !allArchived))),
+      // One note picked (a finger's long press picks one): everything else it can do, as a right-click shows (1.19.1).
+      ids.length === 1 ? V.h('button.pick-action.pick-more', { type: 'button', 'aria-haspopup': 'menu',
+        'aria-label': `More for ${V.noteTitle(rows[0] || {})}`, onclick: (event) => {
+          const id = ids[0];
+          const items = noteItems(id).map((item) => (item && item.onClick ? { ...item, onClick: () => { stopPicking(); item.onClick(); } } : item));
+          V.menu(event.currentTarget, items.filter(Boolean), { label: 'More', returnFocus: true });
+        } }, V.icon('more'), V.h('span', { text: 'More' })) : null,
       act('trash', 'Delete', done((l) => O.trash(l)), 'danger'),
     ];
     // Export (js/export.js), in the bar's top row: one note is its own file, several one ZIP. (Not in the Trash.)
@@ -604,30 +611,143 @@ V.notes = (() => {
     open(note.id);
   }
 
-  function cardContext(event, note) {
-    event.preventDefault();
-    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-      // (a long press js/drag.js didn't see begin: it picks, as always)
-      if (!picked.has(note.id)) toggle(note.id);
-      return;
+  /* -- "more options" (1.19.1): a note's menu wherever it shows
+
+     The same items for a note on every screen it shows on (Notes' cards in a list, a grid, the search, Upcoming and
+     the Trash; Today's rows and Jump back in; a test's card), each one of the note's usual actions: a right-click (or
+     a touchpad's two-finger tap), the keyboard's menu key or Shift+F10 (V.contextMenu), the pick bar's ⋯ with one
+     note picked, and a long press where a long press doesn't pick (on Notes' cards it picks, as ever). `lead`: items
+     of the place's own, put right after Open (Today's Tick it off, a test's Study); `opener`: how that place opens it. */
+  function noteItems(id, { lead = [], opener = null, pick = false } = {}) {
+    const note = V.data.notes.get(id);
+    if (!note || note._purge) return [];
+    if (note.deleted) {
+      return [
+        { label: 'Put back', icon: 'restore', onClick: () => O.restore([id]).catch(V.problem) },
+        { label: 'Delete forever', icon: 'trash', danger: true, onClick: () => deleteForever([id]).catch(V.problem) },
+      ];
     }
-    if (filter === 'trash') return;  // (a tap there says what can be done)
-    // A right-click on the PC: what can be done with this note.
-    const at = event.clientX || event.clientY  // (the keyboard's menu key: by the card itself)
-      ? { getBoundingClientRect: () => ({ left: event.clientX, right: event.clientX, top: event.clientY, bottom: event.clientY }) }
-      : event.currentTarget;
+    const R = V.reminders;
     const archived = O.isArchived(note);
-    V.menu(at, [
-      { label: 'Open', icon: 'open', onClick: () => open(note.id) },
-      { label: 'Pick', icon: 'select', onClick: () => { if (!picked.has(note.id)) toggle(note.id); } },
+    const template = O.isTemplate(note);
+    const words = !note.locked && !!String(note.body || '').trim();
+    const at = R ? R.remindAt(note) : null;
+    const repeats = !!(R && R.repeatOf(note));
+    const dated = !!(note.due || at || repeats);
+    const cards = !note.locked && V.review ? V.review.cardsOf(note).length : 0;
+    const later = R && R.snooze && at && !repeats && !note.done;
+    return [
+      { label: 'Open', icon: 'open', onClick: () => (opener ? opener() : open(id)) },
+      ...lead,
+      { sep: true },
+      archived || template ? null : { label: note.pinned ? 'Unpin' : 'Pin to the top', icon: note.pinned ? 'pin-on' : 'pin',
+        onClick: () => O.pin([id], !note.pinned).catch(V.problem) },
       { label: 'Move to...', icon: 'folder-move', onClick: async () => {
         const folder = await O.chooseFolder({ current: note.folder_id });
-        if (folder) await O.move([note.id], folder.id);
+        if (folder) await O.move([id], folder.id);
       } },
-      archived ? null : { label: note.pinned ? 'Unpin' : 'Pin to the top', icon: note.pinned ? 'pin-on' : 'pin', onClick: () => O.pin([note.id], !note.pinned) },
-      { label: archived ? 'Unarchive' : 'Archive', icon: 'archive', onClick: () => O.archive([note.id], !archived) },
-      { label: 'Move to Trash', icon: 'trash', danger: true, onClick: () => O.trash([note.id]) },
-    ]);
+      R && !template ? { label: at || repeats ? 'Change reminder...' : 'Remind me...', icon: 'bell',
+        onClick: () => R.edit(id, at || repeats ? {} : { remind: true }) } : null,
+      later ? { label: 'Remind me in an hour', icon: 'clock', onClick: () => R.snooze(id, 'hour').catch(V.problem) } : null,
+      later ? { label: 'Remind me tomorrow', icon: 'calendar', onClick: () => R.snooze(id, 'tomorrow').catch(V.problem) } : null,
+      R && dated && !template ? { label: note.done ? 'Not done' : 'Mark done', icon: 'check', onClick: () => R.toggleDone(id) } : null,
+      { sep: true },
+      cards ? { label: 'Study its flash cards', icon: 'cards', onClick: () => V.review.study(id) } : null,
+      V.aiCards && words && !template ? { label: cards ? 'Make more flash cards' : 'Make flash cards', icon: 'spark',
+        onClick: () => V.aiCards.forNote(id) } : null,
+      V.exporter && !note.locked ? { label: 'Export...', icon: 'download', onClick: () => V.exporter.picked([id]).catch(V.problem) } : null,
+      V.exporter && words ? { label: 'Copy as text', icon: 'copy', onClick: async () => {
+        await V.editor.settled().catch(() => {});
+        const row = V.data.notes.get(id) || note;
+        await V.exporter.copyText({ ...row, shown: true }).catch(V.problem);
+      } } : null,
+      V.send && words ? { label: `Send to ${V.otherName}`, icon: 'send', onClick: async () => {
+        await V.editor.settled().catch(() => {});
+        const row = V.data.notes.get(id) || note;
+        const text = [row.title, row.body].filter((t) => t && t.trim()).join('\n\n');
+        await V.send.text(text, { name: V.noteTitle(row) }).catch(V.problem);
+      } } : null,
+      { sep: true },
+      pick ? { label: 'Pick', icon: 'select', onClick: () => { if (!picked.has(id)) toggle(id); } } : null,
+      template ? null : { label: archived ? 'Unarchive' : 'Archive', icon: 'archive', onClick: () => O.archive([id], !archived).catch(V.problem) },
+      { label: 'Move to Trash', icon: 'trash', danger: true, onClick: () => O.trash([id]).catch(V.problem) },
+    ];
+  }
+
+  /* Several notes picked, one of them right-clicked: the pick bar's actions for all of them. */
+  function pickedItems() {
+    const ids = [...picked];
+    const rows = ids.map((id) => V.data.notes.get(id)).filter(Boolean);
+    const n = rows.length;
+    const done = (fn) => async () => { stopPicking(); await fn(ids); };
+    if (filter === 'trash') {
+      return [
+        { label: `Put back ${n} notes`, icon: 'restore', onClick: done((l) => O.restore(l)) },
+        { label: `Delete ${n} notes forever`, icon: 'trash', danger: true, onClick: () => deleteForever(ids).catch(V.problem) },
+      ];
+    }
+    const allPinned = rows.every((r) => r.pinned);
+    const allArchived = rows.every(O.isArchived);
+    return [
+      { label: `Move ${n} notes to...`, icon: 'folder-move', onClick: async () => {
+        const folder = await O.chooseFolder({ title: `Move ${n} notes to` });
+        if (folder) await done((l) => O.move(l, folder.id))();
+      } },
+      filter === 'archive' ? null : { label: allPinned ? `Unpin ${n} notes` : `Pin ${n} notes`, icon: allPinned ? 'pin-on' : 'pin',
+        onClick: done((l) => O.pin(l, !allPinned)) },
+      V.exporter ? { label: `Export ${n} notes...`, icon: 'download', onClick: done((l) => V.exporter.picked(l)) } : null,
+      { label: allArchived ? `Unarchive ${n} notes` : `Archive ${n} notes`, icon: 'archive', onClick: done((l) => O.archive(l, !allArchived)) },
+      { sep: true },
+      { label: 'Stop picking', icon: 'x', onClick: () => stopPicking() },
+      { label: `Delete ${n} notes`, icon: 'trash', danger: true, onClick: done((l) => O.trash(l)) },
+    ];
+  }
+
+  /* A card's menu: the picked notes' when it's one of several picked, else its own note's. */
+  function cardMenu(el, note) {
+    return V.contextMenu(el, () => (picking && picked.has(note.id) && picked.size > 1 ? pickedItems() : noteItems(note.id, { pick: true })), {
+      label: `${V.noteTitle(note)}: options`,
+      // (a finger held on a card picks it, js/drag.js: one held there before it saw the press begin picks too)
+      touch: () => { if (!picked.has(note.id)) toggle(note.id); },
+      // A double click opens it while picking, where a click picks (else the click itself opened it).
+      open: () => { if (!picking) return; stopPicking(); open(note.id); },
+    });
+  }
+
+  /* Everything in the Trash deleted for good, after asking (the Trash's own button, and its menu in the side list). */
+  async function emptyTrash() {
+    const list = trashed();
+    if (!list.length) return V.toast('The Trash is empty.');
+    if (!(await V.confirm('Empty the Trash?', `${list.length} note${list.length > 1 ? 's' : ''} will be deleted for good.`, { ok: 'Delete them', danger: true }))) return;
+    await purgeTrashed(list.map((n) => n.id));  // (not one put back while it asked)
+  }
+
+  /* The lists in the side list and the chips that aren't folders: a menu only where there's more to do than open it
+     (All notes: a new note; Flash cards: study, make some; the Trash: empty it). Elsewhere the browser's own. */
+  function listContext(el, id) {
+    return V.contextMenu(el, () => {
+      const openIt = { label: 'Open', icon: 'open', onClick: () => setFilter(id) };
+      if (id === 'all') return [openIt, { label: 'New note', icon: 'plus', onClick: () => chooseTemplate({ fresh: true }) }];
+      if (id === 'trash') return trashed().length ? [openIt, { sep: true }, { label: 'Empty the Trash', icon: 'trash', danger: true, onClick: () => emptyTrash().catch(V.problem) }] : [];
+      if (id === 'review' && V.review) {
+        let due = 0;
+        try { due = V.review.dueCount(); } catch (error) { console.error(error); }
+        return [openIt, due ? { label: `Study ${due} now`, icon: 'cards', onClick: () => V.review.start('all') } : null,
+          V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.pickFolder() } : null];
+      }
+      return [];
+    }, { label: 'Options', touch: false });
+  }
+
+  /* A folder's menu where it shows (the side list, the chips, an open folder's own folders): Open, then its ⋯'s
+     items. (A finger held on one lifts it to drag, and let go opens its options: js/drag.js.) */
+  function folderContext(el, id) {
+    return V.contextMenu(el, () => {
+      const folder = V.data.folders.get(id);
+      if (!folder || folder.deleted) return [];
+      return [{ label: 'Open', icon: 'open', onClick: () => setFilter(id) }, { sep: true },
+        ...O.folderItems(folder, { onGone: () => { if (filter === id) setFilter('all'); }, onMade: (made) => setFilter(made.id) })];
+    }, { label: `${(V.data.folders.get(id) || {}).name || 'Folder'}: options`, touch: false });
   }
 
   /* -- dragging (js/drag.js): notes onto a folder (or Pinned, Archive, Trash), folders into order or into each other
@@ -791,10 +911,9 @@ V.notes = (() => {
     const folder = V.data.folders.get(id);
     const item = V.h('button.nav-item' + (filter === id && !query ? '.on' : ''), {
       type: 'button', onclick: () => setFilter(id), dataset: { id },
-      oncontextmenu: folder ? (event) => { event.preventDefault(); folderMenu(folder, event.currentTarget); } : null,
     }, folder ? folderBadge(folder, true) : V.icon(icon), V.h('span.nav-label', { text: label }),
     count ? V.h('span.count', { text: String(count) }) : null);
-    return folder ? folderSource(item, folder) : item;
+    return folder ? folderContext(folderSource(item, folder), id) : listContext(item, id);
   }
 
   function drawFolders() {
@@ -835,9 +954,8 @@ V.notes = (() => {
       const folder = V.data.folders.get(id);
       const el = V.h('button.chip' + (top === id && !query ? '.on' : ''), {
         type: 'button', onclick: () => setFilter(id), dataset: { id },
-        oncontextmenu: folder ? (event) => { event.preventDefault(); folderMenu(V.data.folders.get(id), event.currentTarget); } : null,
       }, lead, label, count ? V.h('span.count', { text: String(count) }) : null);
-      return folder ? folderSource(el, folder) : el;
+      return folder ? folderContext(folderSource(el, folder), id) : listContext(el, id);
     };
     V.clear(parts.chips,
       chip('all', 'All', null, c.all),
@@ -877,12 +995,11 @@ V.notes = (() => {
     const around = look.terms.length ? O.snippet(words, look.terms, look.size) : words.slice(0, look.size);
     const snippet = titled || around.startsWith('…') ? around : '';
     const tags = O.tagsOf(note);
-    return noteSource(V.h('button.card' + (V.editor.openId() === note.id ? '.open' : '') + (note.done ? '.done' : '')
+    return cardMenu(noteSource(V.h('button.card' + (V.editor.openId() === note.id ? '.open' : '') + (note.done ? '.done' : '')
       + (picked.has(note.id) ? '.selected' : ''), {
       type: 'button', dataset: { id: note.id },
       'aria-pressed': picking ? String(picked.has(note.id)) : null,
       onclick: (event) => cardClick(event, note),
-      oncontextmenu: (event) => cardContext(event, note),
     },
     V.h('div.card-top', {},
       V.h('span.pick', { 'aria-hidden': 'true' }, V.icon('check')),
@@ -905,7 +1022,7 @@ V.notes = (() => {
       look.terms.length && V.attachSearch ? V.attachSearch.chip(note, look.terms) : null,  // "in a photo" / "in a PDF"
       tags.length ? V.h('span.note-tags', {}, tags.slice(0, 3).map((t) => V.h('span.note-tag', {}, O.marked('#' + t.name, look.terms))),
         tags.length > 3 ? V.h('span.note-tag.more', { text: `+${tags.length - 3}` }) : null) : null,
-      V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) }))), note);
+      V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) }))), note), note);
   }
 
   function trashMenu(note) {
@@ -1065,10 +1182,7 @@ V.notes = (() => {
         filter === 'all' || (folder && folder === inbox()) ? loopLine(null) : null);
     };
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
-      kind: 'danger-quiet', icon: 'trash', onClick: async () => {
-        if (!(await V.confirm('Empty the Trash?', `${list.length} note${list.length > 1 ? 's' : ''} will be deleted for good.`, { ok: 'Delete them', danger: true }))) return;
-        await purgeTrashed(list.map((n) => n.id));  // (not one put back while it asked)
-      },
+      kind: 'danger-quiet', icon: 'trash', onClick: emptyTrash,
     })) : null;
     const look = { terms: O.terms(q), size: grid ? 280 : 160 };
     const make = (note) => card(note, look);
@@ -1086,11 +1200,10 @@ V.notes = (() => {
         const kids = O.children(f.id).length;
         const what = [notes ? `${notes} note${notes === 1 ? '' : 's'}` : '', kids ? `${kids} folder${kids === 1 ? '' : 's'}` : '']
           .filter(Boolean).join(' · ') || 'Empty';
-        return folderSource(V.h('button.subfolder', {
+        return folderContext(folderSource(V.h('button.subfolder', {
           type: 'button', dataset: { id: f.id }, onclick: () => setFilter(f.id),
-          oncontextmenu: (event) => { event.preventDefault(); folderMenu(f, event.currentTarget); },
         }, V.h('span.fc-badge', {}, folderBadge(f) || V.icon('folder')), V.h('span.sf-name', { text: f.name }),
-        V.h('span.sf-meta', { text: what }), V.icon('next', 'sf-go')), f);
+        V.h('span.sf-meta', { text: what }), V.icon('next', 'sf-go')), f), f.id);
       })),
       list.length ? V.h('h2.list-section', {}, V.h('span', { text: 'Notes' }), V.h('span.count', { text: String(list.length) })) : null,
     ] : null;
@@ -1415,5 +1528,5 @@ V.notes = (() => {
   });
 
   return { render, again, create, chooseTemplate, ensureStarterFolders, blankNote, open, search, folders, inbox, setFilter, plain,
-    folderBadge, picking: () => picking, showing: () => showing() };
+    folderBadge, noteItems, emptyTrash, picking: () => picking, showing: () => showing() };
 })();

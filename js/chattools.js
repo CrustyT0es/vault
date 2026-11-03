@@ -722,7 +722,9 @@ V.chatTools = (() => {
     async add_flash_cards(args) {
       const cards = (Array.isArray(args.cards) ? args.cards : []).slice(0, CARDS_MOST).map((c) => ({
         q: text(c && c.q, 300).replace(/\s+/g, ' ').replace(/::/g, ':'), a: text(c && c.a, 600).replace(/\s+/g, ' ').replace(/::/g, ':'),
-      })).filter((c) => c.q && c.a);
+      })).filter((c) => c.q && c.a)
+        // (1.19.1: tidied like Make flash cards' own, js/aicards.js: no "Q:", bold, numbering or question said again)
+        .map((c) => (V.aiCards && V.aiCards.tidyCard ? V.aiCards.tidyCard(c.q, c.a) : c)).filter(Boolean);
       if (!cards.length) no('There are no cards to add: each needs a q and an a.');
       const lines = cards.map((c) => `${c.q} :: ${c.a}`).join('\n');
       if (args.note_id) {

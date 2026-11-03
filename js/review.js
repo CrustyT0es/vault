@@ -421,26 +421,47 @@ V.review = (() => {
     return V.h('span.dot-box', {}, V.icon('notes'));
   }
 
+  /* A deck's menu (1.19.1: a right-click, a long press, the menu key): study it, Learn, its notes, more cards. */
+  function deckItems(row) {
+    const cards = now().list.filter(inDeck(row.deck));
+    const live = row.folder && V.data.folders.get(row.folder.id);
+    return [
+      { label: row.due ? `Study ${row.due} now` : `Practise all ${row.count}`, icon: 'cards', onClick: () => start(row.deck) },
+      V.learn && cards.length ? { label: 'Learn: quiz me', icon: 'learn', onClick: () => V.learn.start({ title: row.name, list: cards, deck: row.deck }) } : null,
+      { sep: true },
+      live ? { label: `Open ${live.name}`, icon: 'open', onClick: () => V.notes.setFilter(live.id) }
+        : row.tag ? { label: `Show notes with ${row.name}`, icon: 'open', onClick: () => V.notes.setFilter('tag:' + row.tag.key) } : null,
+      live && V.aiCards ? { label: 'Make more cards with AI', icon: 'spark', onClick: () => V.aiCards.forFolder(live.id) } : null,
+    ];
+  }
+
   /* A deck: one button (its cards due today, else all of them as practice). Learn is in the study screen's ⋯. */
   function deckRow(row) {
     const what = `${row.count} card${row.count === 1 ? '' : 's'}${row.due ? '' : ' · all done today'}`;
-    return V.h('div.deck-row' + (row.due ? '' : '.idle'), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
+    return V.contextMenu(V.h('div.deck-row' + (row.due ? '' : '.idle'), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
       V.h('button.deck-main', { type: 'button', title: row.due ? `Study ${row.name}` : `Practise ${row.name}`,
         'aria-label': row.due ? `Study ${row.name}: ${row.due} today` : `Practise ${row.name}`, onclick: () => start(row.deck) },
       badge(row), V.h('span.deck-text', {}, V.h('span.deck-name', { text: row.name }), V.h('span.deck-meta', { text: what })),
       row.due ? V.h('span.deck-due', { text: String(row.due), 'aria-hidden': 'true' }) : null,
-      V.icon('chevron', 'deck-chev')));
+      V.icon('chevron', 'deck-chev'))), () => deckItems(row), { label: `${row.name}: options` });
   }
 
   function testRow(plan) {
-    return V.h('div.test-row' + (plan.days <= 1 ? '.soon' : ''), { dataset: { id: plan.note.id } },
+    // (its menu: Study or Make cards, what's on it, then the note's own: js/notes.js)
+    const lead = [
+      plan.count ? { label: `Study for ${plan.name}`, icon: 'cards', onClick: () => start('test:' + plan.note.id) }
+        : V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.forTest(plan.note.id) } : null,
+      V.exams ? { label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(plan.note.id) } : null,
+    ];
+    return V.contextMenu(V.h('div.test-row' + (plan.days <= 1 ? '.soon' : ''), { dataset: { id: plan.note.id } },
       V.h('button.test-main', { type: 'button', title: 'Open the test note', onclick: () => R.openNote(plan.note.id) },
         V.icon('target', 'test-icon'), V.h('span.test-text', { text: countdown(plan) })),
       plan.count ? V.h('button.deck-go', { type: 'button', title: `Study what ${plan.name} covers`,
         onclick: () => start('test:' + plan.note.id) }, V.icon('cards'), V.h('span', { text: 'Study' }))
         // (no cards in what it covers yet: js/aicards.js makes some from those notes)
         : V.aiCards ? V.h('button.deck-go.deck-make', { type: 'button', title: `Make flash cards for ${plan.name} with AI`,
-          onclick: () => V.aiCards.forTest(plan.note.id) }, V.icon('spark'), V.h('span', { text: 'Make cards' })) : null);
+          onclick: () => V.aiCards.forTest(plan.note.id) }, V.icon('spark'), V.h('span', { text: 'Make cards' })) : null),
+    () => V.notes.noteItems(plan.note.id, { lead, opener: () => R.openNote(plan.note.id) }), { label: `${plan.name}: options` });
   }
 
   /* "Make cards with AI" (js/aicards.js): which folder, then the cards. */
@@ -534,9 +555,12 @@ V.review = (() => {
     };
     ui.more = V.iconButton('more', 'More', () => openMenu(), 'study-more');
     ui.more.setAttribute('aria-haspopup', 'menu');
+    // (1.19.1: a card that's wrong, often one the AI made, is fixed right where it shows: editCard below)
+    ui.edit = V.iconButton('edit', 'Edit card', () => { if (mode && mode.edit) mode.edit(); }, 'study-edit');
+    ui.edit.hidden = true;
     ui.done = V.h('button.btn.quiet.study-done', { type: 'button', text: 'Done', title: 'Done for now', onclick: () => api.close() });
     ui.panel = V.h('div.study', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-      V.h('header.study-head', {}, ui.title, ui.more, ui.done),
+      V.h('header.study-head', {}, ui.title, ui.edit, ui.more, ui.done),
       V.h('div.study-where', {}, V.h('div.study-line', {}, ui.progress, ui.aside), V.h('span.bar.study-bar', {}, ui.fill)),
       ui.stage, ui.foot, ui.say);
     // (a .layer too, so what waits for sheets to close waits for it: Ctrl+N, an update's reload, picking's keys)
@@ -579,6 +603,8 @@ V.review = (() => {
       say(text) { ui.say.textContent = ''; setTimeout(() => { ui.say.textContent = text; }, 30); },
       /* The end of a go (or Learn's stop between sets): its own buttons only, none at the top. */
       ended(on) { ui.panel.classList.toggle('ended', !!on); },
+      /* Whether the top's Edit card shows (a card showing, in a mode that can edit it). */
+      editable(on) { ui.edit.hidden = !(on && mode && mode.edit); },
       /* A mode takes the screen over; the one before lets go first. */
       use(next) {
         if (mode && mode.leave) mode.leave({ closing: false });
@@ -588,6 +614,7 @@ V.review = (() => {
         V.clear(ui.stage);
         V.clear(ui.foot);
         ui.more.hidden = !items().length;
+        ui.edit.hidden = true;
       },
       /* Done, Esc, Back (`fromHistory`), or another study screen taking its place (`keepStep`: its step in the history
          is the new one's). */
@@ -670,14 +697,16 @@ V.review = (() => {
     return out;
   }
 
+  /* A card's words as shown: no `code` ticks or "Q:"/"A:" label an AI left in (1.19.1, js/learn.js plain). */
+  const plainWords = (text) => (V.learn && V.learn.plain ? V.learn.plain(text) || text : text);
   /* A card's question as page elements: a blank's gap drawn as a line. */
   function question(card) {
-    if (card.kind !== 'blank') return card.term;
+    if (card.kind !== 'blank') return plainWords(card.term);
     return [card.before, V.h('span.blank-gap', { text: V.study.GAP, 'aria-label': 'blank' }), card.after];
   }
   /* ...and its answer: a blank's word in its sentence. */
   function answerOf(card) {
-    if (card.kind !== 'blank') return card.answer;
+    if (card.kind !== 'blank') return plainWords(card.answer);
     return [card.before, V.h('mark.blank-fill', { text: card.answer }), card.after];
   }
 
@@ -700,6 +729,7 @@ V.review = (() => {
           line('I know it:', ' it comes back in a few days, and a little later each time you know it.'),
           line('Next:', ' skip it for now. It comes round once more at the end; skip it again and it waits for next time.'),
           line('Done:', ' stop whenever you like. Your answers are kept.'),
+          line('Edit card', ' (the pencil at the top): fix a card that\'s wrong, or delete it.'),
           fineMouse() ? line('Keys:', ' Space flips. 1 or ← Still learning, 2 or ↓ Next, 3 or → I know it.') : null),
         V.h('p.hint.study-how-make', { text: 'Make cards in any note: a line like "mitosis :: cell division", or a blank like "The {{mitochondria}} makes ATP".' }),
       ],
@@ -722,6 +752,36 @@ V.review = (() => {
     const passed = new Set();      // card ids passed over with Next and not answered since
     const fine = fineMouse();
     const card = V.h('button.flash-card', { type: 'button', onclick: () => flip() });
+    // Its menu (1.19.1: a right-click, a long press, the menu key): the answers, its note (to change the card), then
+    // the study screen's ⋯.
+    V.contextMenu(card, () => {
+      const c = queue[0];
+      if (over || !c) return [];
+      const row = V.data.notes.get(c.note);
+      return [
+        { label: flipped ? 'Show the question' : 'Show the answer', icon: 'cards', onClick: () => flip() },
+        { label: 'Still learning', icon: shape('again'), onClick: () => answer('still') },
+        { label: 'Next', icon: shape('skip'), onClick: () => answer('next') },
+        { label: 'I know it', icon: 'check', onClick: () => answer('know') },
+        { sep: true },
+        row && !row.deleted ? { label: 'Change it in its note', icon: 'edit', onClick: () => {
+          // (the screen's step back in a phone's history is taken first: the note opened before it would be closed by it)
+          const stepping = scr.pushed && history.state && history.state.vault === 'study';
+          let opened = false;
+          const go = () => {
+            if (opened) return;
+            opened = true;
+            window.removeEventListener('popstate', go);
+            setTimeout(() => V.notes.open(c.note));
+          };
+          if (stepping) { window.addEventListener('popstate', go); setTimeout(go, 700); }
+          scr.close();
+          if (!stepping) go();
+        } } : null,
+        { sep: true },
+        ...menu(),
+      ];
+    }, { label: 'This card: options' });
     const button = (cls, icon, label, key, kind) => V.h('button.btn.study-btn.' + cls, {
       type: 'button', dataset: { answer: kind }, 'aria-keyshortcuts': key, onclick: () => answer(kind),
     }, icon, V.h('span.study-btn-label', { text: label }), V.h('kbd.study-key', { text: key, 'aria-hidden': 'true' }));
@@ -744,7 +804,7 @@ V.review = (() => {
         V.h('span.flash-side', { text: flipped ? 'Answer' : many && row ? V.noteTitle(row) : '' }),
         V.h('span.flash-face', {},
           // (reading text: Quick read's pieces go in when it's on, js/reading.js)
-          flipped && c.kind !== 'blank' ? V.reading.area(V.h('span.flash-q', { text: c.term })) : null,
+          flipped && c.kind !== 'blank' ? V.reading.area(V.h('span.flash-q', { text: plainWords(c.term) })) : null,
           V.reading.area(V.h('span.flash-words' + (flipped && c.kind === 'blank' ? '.in-context' : ''), {},
             flipped ? answerOf(c) : question(c)))),
         V.h('span.flash-hint', {}, R.icon('flip'), flipped ? 'Tap to see the question' : fine ? 'Click or press Space to flip' : 'Tap to flip'));
@@ -756,6 +816,7 @@ V.review = (() => {
     function draw() {
       const c = queue[0];
       if (!c) { end(); return; }
+      scr.editable(true);
       const at = roundSize - queue.length + 1;
       scr.progress(`${round === 2 ? 'Once more · ' : practice ? 'Practice · ' : ''}${at} of ${roundSize}`, (at - 1) / roundSize);
       drawCard(c);
@@ -789,6 +850,15 @@ V.review = (() => {
         if (rating === AGAIN && round === 1) aside.push(c);
       }
       flipped = false;
+      onward();
+      if (!over) {
+        turn();
+        card.focus({ preventScroll: true });  // (so Space flips the next card, not the button just pressed)
+      }
+    }
+
+    /* The next card: once more round the ones set aside when the first go is through, else the end. */
+    function onward() {
       if (!queue.length && round === 1 && aside.length) {
         round = 2;
         queue = shuffled ? shuffle(aside) : aside;
@@ -796,10 +866,20 @@ V.review = (() => {
         roundSize = queue.length;
       }
       draw();
-      if (!over) {
-        turn();
-        card.focus({ preventScroll: true });  // (so Space flips the next card, not the button just pressed)
-      }
+    }
+
+    /* The top's Edit card: the card showing fixed in its note (it stays on the screen, as it is now), or taken out. */
+    function editNow() {
+      const c = queue[0];
+      if (over || !c) return;
+      editCard(c, { onDone: (fresh) => {
+        if (over || queue[0] !== c) return;
+        aside = aside.flatMap((x) => (x !== c ? [x] : fresh ? [fresh] : []));
+        if (fresh) queue[0] = fresh;
+        else { queue.shift(); roundSize = Math.max(0, roundSize - 1); flipped = false; }
+        onward();
+        if (!over) card.focus({ preventScroll: true });
+      } });
     }
 
     function toggleShuffle() {
@@ -831,6 +911,7 @@ V.review = (() => {
 
     function end() {
       over = true;
+      scr.editable(false);
       scr.progress('', 1);
       scr.ended(true);
       tellStudied();
@@ -897,6 +978,7 @@ V.review = (() => {
       name: 'cards',
       keys,
       menu,
+      edit: () => editNow(),
       leave: ({ closing }) => {
         if (closing && !over && first.size && queue.length) V.toast('Saved. The rest wait for next time.');
         if (closing) tellStudied();
@@ -909,8 +991,165 @@ V.review = (() => {
     return scr;
   }
 
+  /* -- fixing a card where it shows up (1.19.1; the owner: AI-made cards that "do stupid things", for their buddy too):
+     the study screen's Edit card (and Learn's, by a wrong answer) changes the card's own line in its note, or takes it
+     out. Its progress goes with it when its question changes. */
+
+  const LINE_LEAD = /^\s*(?:[-*]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+|#{1,3}\s+)?/;
+  const TAGS_END = /(?:\s+#(?=\p{N}*\p{L})[\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*)+$/u;
+
+  /* A note's words as they are now (the open note's copy, with what was just typed), or null when it can't be changed. */
+  function wordsNow(id) {
+    const row = V.data.notes.get(id);
+    if (!row || row._purge || row.deleted || row.locked) return null;
+    if (V.editor.openId() === id && V.editor.current()) return V.editor.current().locked ? null : V.editor.words();
+    return String(row.body || '');
+  }
+
+  /* New words (and a change to its row) for note `id`: through the editor when it's the open one. */
+  async function writeNote(id, words, change = null) {
+    if (V.editor.openId() === id && V.editor.current()) {
+      V.editor.setWords(words);
+      if (V.editor.words() !== words) throw new Error('The note couldn\'t take the change just now. Close it, then try again.');
+      if (change) await V.editor.update((note) => change(note), { draw: false });
+      await V.editor.settled();
+      return;
+    }
+    const row = V.data.notes.get(id);
+    const copy = { ...row, body: words, extra: { ...(row.extra || {}) } };
+    if (change) change(copy);
+    await V.cloud.save('notes', copy);
+  }
+
+  /* The sheet for `card`: its question and answer (a blank: its sentence), Save, or Delete card. onDone(fresh): the
+     card as it is now, or null once it's taken out. */
+  function editCard(card, { onDone = () => {}, onClose = () => {} } = {}) {
+    const id = card.note;
+    const lineOf = (words) => {
+      const found = V.study.cards(words).find((c) => c.key === card.key && c.kind === card.kind);
+      return found ? found.line : -1;
+    };
+    const openIt = () => { if (shown) shown.close(); R.openNote(id); };
+    // (null when no sheet opens: what can't be done is said in a toast)
+    const cant = (words_, more) => { V.toast(words_, more); return null; };
+    if (V.notetaker && V.notetaker.listeningTo && V.notetaker.listeningTo() === id) {
+      return cant('The note-taker is writing into this card\'s note. Stop it first, then fix the card.');
+    }
+    const words = wordsNow(id);
+    if (words === null) return cant('That card\'s note can\'t be changed just now.');
+    if (lineOf(words) < 0) return cant('That card has changed in its note since. Open the note to fix it.', { action: 'Open', onAction: openIt });
+    const field = (cls, label, value, rows) => {
+      const box = V.h('textarea.field.' + cls, { rows, value, 'aria-label': label, spellcheck: 'true' });
+      return { box, row: V.h('label.label.card-edit-field', {}, V.h('span', { text: label }), box) };
+    };
+    const blank = card.kind === 'blank';
+    const lineNow = words.split('\n')[lineOf(words)] || '';
+    const q = blank ? field('card-edit-blank', 'Sentence', lineNow.replace(LINE_LEAD, '').trim(), 3) : field('card-edit-q', 'Question', card.term, 2);
+    const a = blank ? null : field('card-edit-a', 'Answer', card.answer, 2);
+    const error = V.h('p.error-text', { role: 'alert' });
+    const grow = (box) => {
+      if (CSS.supports && CSS.supports('field-sizing', 'content')) return;
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight + 2}px`;
+    };
+    const tidy = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+
+    /* The note's words with this card's line changed (`line`), or taken out (null); false when it isn't there. */
+    const changed = (line) => {
+      const now = wordsNow(id);
+      const at = now === null ? -1 : lineOf(now);
+      if (at < 0) { error.textContent = 'That card changed in its note meanwhile. Close this and look again.'; return false; }
+      const lines = now.split('\n');
+      const old = lines[at];
+      if (line === null) lines.splice(at, 1); else lines[at] = line(old);
+      return { words: lines.join('\n'), at, old };
+    };
+
+    const save = async () => {
+      let made;
+      if (blank) {
+        const text = tidy(q.box.value);
+        if (text.includes('::') || !V.study.cards(text).some((c) => c.kind === 'blank')) {
+          error.textContent = 'Put the hidden word in {{ }}, like: The {{mitochondria}} makes ATP.';
+          return true;
+        }
+        made = changed((old) => LINE_LEAD.exec(old)[0] + text);
+      } else {
+        const question = tidy(q.box.value).replace(/::/g, ':');
+        const answer = tidy(a.box.value).replace(/::/g, ':');
+        if (!question || !answer) { error.textContent = 'A card needs a question and an answer.'; return true; }
+        made = changed((old) => LINE_LEAD.exec(old)[0] + `${question} :: ${answer}` + ((TAGS_END.exec(old.replace(/\s+$/, '')) || [''])[0]));
+      }
+      if (!made) return true;
+      const row = V.data.notes.get(id);
+      const fresh = cardsOf({ ...row, body: made.words }, made.words).find((c) => c.line === made.at && c.kind === card.kind) || null;
+      const moved = fresh && fresh.key !== card.key;
+      // (its progress goes with it to its new code; pending answers too)
+      const waiting = pending.get(id);
+      if (moved && waiting && card.key in waiting) { waiting[fresh.key] = waiting[card.key]; delete waiting[card.key]; }
+      try {
+        await writeNote(id, made.words, (note) => {
+          const kept = isObject((note.extra || {}).cards) ? { ...note.extra.cards } : {};
+          if (moved && kept[card.key] && !kept[fresh.key]) kept[fresh.key] = kept[card.key];
+          note.extra = { ...(note.extra || {}), cards: V.study.prune(kept, V.study.cards(made.words)) };
+        });
+      } catch (error_) {
+        error.textContent = error_.message || 'That couldn\'t be saved. Try again.';
+        return true;
+      }
+      version++;
+      V.toast('Card fixed.', { ms: 2400 });
+      onDone(fresh ? { ...fresh, state: current(fresh) } : null);
+      return false;
+    };
+
+    const remove = async (close) => {
+      const made = changed(null);
+      if (!made) return;
+      try {
+        await writeNote(id, made.words, (note) => {
+          const kept = isObject((note.extra || {}).cards) ? note.extra.cards : {};
+          note.extra = { ...(note.extra || {}), cards: V.study.prune(kept, V.study.cards(made.words)) };
+        });
+      } catch (error_) {
+        error.textContent = error_.message || 'That couldn\'t be saved. Try again.';
+        return;
+      }
+      version++;
+      onDone(null);  // (before the sheet closes: its onClose sees it was changed)
+      close();
+      V.toast('Card deleted.', { ms: 6000, action: 'Undo', onAction: () => {
+        const now = wordsNow(id);
+        if (now === null) return;
+        const lines = now.split('\n');
+        lines.splice(Math.min(made.at, lines.length), 0, made.old);
+        writeNote(id, lines.join('\n')).then(() => { version++; }).catch(V.problem);
+      } });
+    };
+
+    const sheet = V.sheet({
+      title: 'Edit card',
+      onClose,
+      content: [
+        V.h('p.hint.card-edit-from', { text: `In "${V.noteTitle(V.data.notes.get(id) || {})}"` }),
+        q.row, a ? a.row : null,
+        V.h('p.hint.card-edit-tip', { text: blank ? 'The word in {{ }} is the one hidden.'
+          : 'Short answers work best in Learn\'s quiz. More to say? Put it after " — ".' }),
+        error,
+      ],
+      actions: [
+        { label: 'Delete card', kind: 'danger-quiet', onClick: async (close) => { await remove(close); return true; } },
+        { label: 'Save', kind: 'primary', onClick: () => save() },
+      ],
+    });
+    sheet.el.classList.add('card-edit-sheet');
+    for (const box of sheet.el.querySelectorAll('textarea')) { grow(box); box.addEventListener('input', () => grow(box)); }
+    requestAnimationFrame(() => { const box = (a || q).box; if (box.isConnected) { box.focus({ preventScroll: true }); box.setSelectionRange(box.value.length, box.value.length); } });
+    return sheet;
+  }
+
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
     dueByFolder, nextDue, ahead,
-    start, study, session, screen, question, answerOf, shuffle, cardsOf, pending: () => pending, shown: () => shown };
+    start, study, session, screen, question, answerOf, shuffle, cardsOf, editCard, pending: () => pending, shown: () => shown };
 })();

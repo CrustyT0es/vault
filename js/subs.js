@@ -310,16 +310,34 @@ V.subs = (() => {
     else window.open(href, '_blank', 'noopener');
   }
 
+  /* A subscription's menu (1.19.1: a right-click, a long press or the menu key, wherever it shows): Edit, Pause or
+     Resume, Cancel here (its link), Delete with an Undo. Asked as it opens, from the list as it is now. */
+  function subItems(id) {
+    const sub = stored().find((s) => s.id === id);
+    if (!sub || !on()) return [];
+    const failed = () => V.toast(NOT_SAVED, { kind: 'err', ms: 5000 });
+    return [
+      { label: 'Edit...', icon: 'edit', onClick: () => edit(list().find((s) => s.id === id) || sub) },
+      { label: sub.paused ? 'Resume' : 'Pause', icon: sub.paused ? 'play' : 'stop', onClick: () => save({ ...sub, paused: !sub.paused })
+        .then(() => V.toast(sub.paused ? `${sub.name} is back on Today.` : `${sub.name} is paused: left off Today and the total.`)).catch(failed) },
+      sub.link ? { label: 'Cancel it on its site', icon: 'open', onClick: () => openLink(sub.link) } : null,
+      { sep: true },
+      { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(sub.id)
+        .then(() => V.toast(`Deleted ${sub.name}.`, { action: 'Undo', onAction: () => save(sub).catch(failed) })).catch(failed) },
+    ];
+  }
+  const subMenu = (el, id, name) => V.contextMenu(el, () => subItems(id), { label: `${name}: options` });
+
   function todayRow({ sub, days }, today) {
     const trial = sub.trial;
     const title = trial ? `${sub.name} trial ${days === 0 ? 'ends today' : days === 1 ? 'ends tomorrow' : `ends in ${days} days`}`
       : `${sub.name} renews ${when(sub.next, today)}`;
-    return V.h('div.sub-soon' + (trial ? '.trial' : ''), { dataset: { sub: sub.id } },
+    return subMenu(V.h('div.sub-soon' + (trial ? '.trial' : ''), { dataset: { sub: sub.id } },
       initial(sub),
       V.h('button.sub-soon-text', { type: 'button', onclick: () => edit(sub) },
         V.h('strong', { text: title }),
         V.h('span', { text: trial ? 'Cancel if you don\'t want it' : `${money(sub.price, sub.currency)}${perWords(sub)}` })),
-      trial ? cancelButton(sub, '.small') : V.h('span.sub-price', { text: money(sub.price, sub.currency) }));
+      trial ? cancelButton(sub, '.small') : V.h('span.sub-price', { text: money(sub.price, sub.currency) })), sub.id, sub.name);
   }
 
   function todayCard() {
@@ -354,6 +372,7 @@ V.subs = (() => {
           lead: () => initial(now),
           action: now.trial && now.link ? () => cancelButton(now, '.small') : null,
           open: () => edit(list().find((s) => s.id === now.id) || sub), openTitle: 'Change it',
+          menu: () => subItems(now.id),
         });
         one = rolled({ ...now, trial: false }, V.addDays(now.next, 1));  // (the one after: paid, once a trial has ended)
       }
@@ -379,14 +398,14 @@ V.subs = (() => {
   function listRow(sub, today) {
     const days = between(today, sub.next);
     const warn = !sub.paused && sub.trial && days <= Math.max(3, sub.remind_days);
-    return V.h('div.sub-row' + (sub.paused ? '.paused' : '') + (warn ? '.trial' : ''), { dataset: { sub: sub.id } },
+    return subMenu(V.h('div.sub-row' + (sub.paused ? '.paused' : '') + (warn ? '.trial' : ''), { dataset: { sub: sub.id } },
       V.h('button.sub-row-main', { type: 'button', 'aria-label': `${sub.name}: ${line(sub, today)}, ${money(sub.price, sub.currency)} ${oftenWords(sub)}. Edit`,
         onclick: () => edit(sub) },
       initial(sub),
       V.h('span.sub-row-text', {}, V.h('strong', { text: sub.name }),
         V.h('span', {}, sub.trial && !sub.paused ? V.h('span.sub-chip', { text: 'Trial' }) : null, line(sub, today))),
       V.h('span.sub-row-price', {}, V.h('strong', { text: money(sub.price, sub.currency) }),
-        V.h('span', { text: perWords(sub).trim() }))));
+        V.h('span', { text: perWords(sub).trim() })))), sub.id, sub.name);
   }
 
   function drawList() {
@@ -542,6 +561,6 @@ V.subs = (() => {
   }
 
   // (save/remove/stored/validDate/MOST: the Chat tab's tools, js/chattools.js, go through the same path and checks)
-  return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, dayItems, money, line, monthly, save, remove,
+  return { open, edit, subItems, list, soon, totals, rolled, refused, tidy, todayCard, dayItems, money, line, monthly, save, remove,
     stored, validDate, safeLink, when, perWords, on, setOn, settingsRow, OFF_WORDS, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
 })();

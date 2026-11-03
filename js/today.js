@@ -502,6 +502,13 @@
     if (filter && V.notes.setFilter) V.notes.setFilter(filter);
   }
 
+  /* "More options" (1.19.1): a right-click, a long press or the keyboard's menu key on what Today shows opens what can
+     be done with it (V.contextMenu): a note's own menu (js/notes.js noteItems) with Today's own first (Tick it off,
+     Study), a day's, a deck's. */
+  const noteMenu = (el, id, lead = []) => V.contextMenu(el, () => V.notes.noteItems(id, { lead: typeof lead === 'function' ? lead() : lead }),
+    // (a double click on a row or a card opens its note; Jump back in's buttons open with one)
+    { label: `${V.noteTitle(V.data.notes.get(id) || {})}: options`, open: el.matches('button') ? null : () => open(id) });
+
   /* The note's words with one line's box flipped, or null when that line isn't what was drawn any more. */
   function flipped(words, index, raw) {
     const lines = String(words).split('\n');
@@ -698,12 +705,14 @@
         V.h('span', { text: row.text }), icon('chev')));
     }
     const onTick = row.kind === 'item' ? () => tickItem(note.id, row.item.index, row.item.raw) : () => tickNote(note.id);
-    return V.h('li.today-row' + (row.done ? '.done' : '') + (row.late ? '.late' : '') + (test ? '.test' : ''), { dataset: { id: note.id } },
+    // (a to-do of a note: ticked off from its menu too; a note's own Mark done is in the note's items)
+    const lead = row.kind === 'item' ? [{ label: row.done ? 'Untick it' : 'Tick it off', icon: 'check', onClick: onTick }] : [];
+    return noteMenu(V.h('li.today-row' + (row.done ? '.done' : '') + (row.late ? '.late' : '') + (test ? '.test' : ''), { dataset: { id: note.id } },
       tick(row.done, `${test ? 'Test: ' : ''}${row.text}: ${row.done ? 'not done' : 'done'}`, onTick, `t:${row.key}`),
       V.h('div.today-row-text', {},
         V.h('strong', {}, test ? [V.icon('target', 'dg-test'), V.h('span.sr-only', { text: 'Test: ' })] : null, row.text),
         row.kind === 'item' ? whereLine(note) : noteSub(note),
-        chip(row.chip)));
+        chip(row.chip))), note.id, lead);
   }
 
   /* A note on one of the coming days: ticked from here (its first to-do, or the note), like Today's. */
@@ -716,7 +725,7 @@
     const note = item.note;
     const folder = folderOf(note);
     const rule = item.rule;
-    return V.h('li.today-row.dg-repeat', { dataset: { id: note.id, day: item.day } },
+    return noteMenu(V.h('li.today-row.dg-repeat', { dataset: { id: note.id, day: item.day } },
       V.h('span.dg-lead', { 'aria-hidden': 'true' }, R().icon('repeat')),
       V.h('button.today-row-text.dg-open', { type: 'button', title: 'Open the note', onclick: () => open(note.id), dataset: { key: `o:${item.key}` } },
         V.h('strong', { text: item.text }),
@@ -724,7 +733,7 @@
           V.h('span', { text: note.locked ? 'Locked note' : folder ? folder.name : 'Open it' })),
         chip({ text: item.at ? R().clock(item.at) : R().repeatText(rule), cls: item.at ? 'soon' : 'plain', bell: !!item.at, repeat: true,
           said: R().repeatText(rule) + (item.at ? ` · ${R().clock(item.at)}` : ''),
-          spoken: `${item.at ? `reminder at ${spokenTime(item.at)}, ` : ''}repeats ${spokenRule(rule)}` })));
+          spoken: `${item.at ? `reminder at ${spokenTime(item.at)}, ` : ''}repeats ${spokenRule(rule)}` }))), note.id);
   }
 
   /* Another part's thing (js/subs.js: a renewal): its own lead, words and button; never ticked here. */
@@ -733,12 +742,14 @@
     const opens = typeof item.open === 'function';
     const data = {};
     for (const [key, value] of Object.entries(item.data || {})) data[key] = String(value);
-    return V.h('li.today-row.dg-extra' + (item.warn ? '.warn' : ''), { dataset: { ...data, day: item.day } },
+    const row = V.h('li.today-row.dg-extra' + (item.warn ? '.warn' : ''), { dataset: { ...data, day: item.day } },
       V.h('span.dg-lead', { 'aria-hidden': 'true' }, make(item.lead)),
       V.h(opens ? 'button.today-row-text.dg-open' : 'div.today-row-text', opens
         ? { type: 'button', title: item.openTitle || null, onclick: item.open, dataset: { key: `o:${item.key}` } } : {},
       V.h('strong', { text: item.text }), item.line ? V.h('span.today-sub', {}, V.h('span', { text: String(item.line) })) : null),
       make(item.action));
+    // (its part's own menu: js/subs.js's Edit, Pause, Delete...)
+    return typeof item.menu === 'function' ? V.contextMenu(row, item.menu, { label: `${item.text}: options` }) : row;
   }
 
   const itemRow = (item) => (item.kind === 'repeat' ? repeatRow(item) : item.kind === 'extra' ? extraRow(item) : noteRow(item));
@@ -925,10 +936,11 @@
     const when = V.parseDate(card.day).toLocaleDateString(undefined, { weekday: V.wide() ? 'long' : 'short', month: 'short', day: 'numeric' });
     const days = daysFrom(at.today, card.day);
     if (card.ask) {
-      return V.h('div.today-box.today-test.ask', { dataset: { id: note.id } },
+      return noteMenu(V.h('div.today-box.today-test.ask', { dataset: { id: note.id } },
         V.h('div.test-top', {}, daysTile(days), V.h('div.test-text', {}, V.h('strong', { text: RV().testName(note) }), V.h('span', { text: when }))),
         V.h('div.test-go', {}, V.button('What\'s on the test?', { kind: first ? 'primary' : 'tonal', icon: 'target',
-          onClick: () => V.exams.picker(note.id) })));
+          onClick: () => V.exams.picker(note.id) }))), note.id,
+      [{ label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(note.id) }]);
     }
     const plan = card.plan;
     const covers = RV().coversOf(note).map((d) => RV().deckName(d)).join(', ');
@@ -939,7 +951,13 @@
       ? V.button('Study', { kind: first ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('test:' + note.id) })
       : V.aiCards ? V.button('Make cards', { kind: first ? 'primary' : 'tonal', icon: 'spark', onClick: () => V.aiCards.forTest(note.id) })
         : V.button('Open', { onClick: () => open(note.id) });
-    return V.h('div.today-box.today-test', { dataset: { id: note.id } },
+    // (its menu: Study or Make cards, what's on it, then the note's own)
+    const lead = () => [
+      plan.count ? { label: `Study for ${plan.name}`, icon: 'cards', onClick: () => RV().start('test:' + note.id) }
+        : V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.forTest(note.id) } : null,
+      V.exams ? { label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(note.id) } : null,
+    ];
+    return noteMenu(V.h('div.today-box.today-test', { dataset: { id: note.id } },
       V.h('div.test-top', {}, daysTile(days),
         V.h('button.test-text', { type: 'button', title: 'Open the test note', onclick: () => open(note.id), dataset: { key: `o:${note.id}` } },
           V.h('strong', { text: plan.name }), V.h('span', { text: covers ? `${when} · ${covers}` : when }))),
@@ -947,7 +965,7 @@
         V.h('i', { style: { width: `${Math.round((known / plan.count) * 100)}%` } })) : null,
       V.h('p.test-nums', {}, plan.count ? [V.h('span', {}, V.h('b', { text: `${known} of ${plan.count}` }), ' known'),
         V.h('span.pace', { text: pace })] : V.h('span.pace', { text: pace })),
-      V.h('div.test-go', {}, go));
+      V.h('div.test-go', {}, go)), note.id, lead);
   }
 
   function testsSection(cards, lead = true) {
@@ -958,6 +976,20 @@
       rest > 0 ? { label: `${rest} more`, onClick: () => toNotes('review') } : null);
   }
 
+  /* The flash cards' menu (1.19.1): study, the Flash cards page, cards made with AI. */
+  const cardsMenu = (el, due) => V.contextMenu(el, () => [
+    due ? { label: `Study ${due} now`, icon: 'cards', onClick: () => RV().start('all') }
+      : { label: 'Practise anyway', icon: 'cards', onClick: () => RV().start('all') },
+    { label: 'Open Flash cards', icon: 'open', onClick: () => toNotes('review') },
+    V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.pickFolder() } : null,
+  ], { label: 'Flash cards: options' });
+  /* A deck's (a folder of cards due today): study it, open the folder, more cards for it. */
+  const deckMenu = (el, d) => V.contextMenu(el, () => [
+    { label: `Study ${d.name}`, icon: 'cards', onClick: () => RV().start(d.deck) },
+    d.folder ? { label: `Open ${d.folder.name}`, icon: 'open', onClick: () => toNotes(d.folder.id) } : null,
+    d.folder && V.aiCards ? { label: 'Make more cards with AI', icon: 'spark', onClick: () => V.aiCards.forFolder(d.folder.id) } : null,
+  ], { label: `${d.name}: options` });
+
   /* Flash cards (1.18, the owner: "the flashcards are chaotic"): how many to study today and one Study button; the
      folders they're in only when there are two or more (one folder would only say the same number again), and the
      share for a test only when it's a part of them (all of them is no news). */
@@ -965,8 +997,8 @@
     if (!at.list.length) return null;
     const total = at.list.filter((c) => RV().isDue(c, at)).length;
     if (!total) {
-      return part('cards', 'Flash cards', V.h('div.today-box.today-cards.done', {},
-        V.h('strong', { text: 'All done for today' }), V.h('p.hint', { text: RV().nextDue(at) })));
+      return part('cards', 'Flash cards', cardsMenu(V.h('div.today-box.today-cards.done', {},
+        V.h('strong', { text: 'All done for today' }), V.h('p.hint', { text: RV().nextDue(at) })), 0));
     }
     const plan = at.plans.find((p) => p.days <= 6);
     const forTest = plan ? at.list.filter((c) => RV().isDue(c, at) && plan.covers(c)).length : 0;
@@ -977,18 +1009,18 @@
     const decks = all.length > 1 ? all : [];
     const shown = decks.slice(0, decks.length > MOST_DECKS ? MOST_DECKS - 1 : MOST_DECKS);
     const rest = decks.length - shown.length;
-    return part('cards', 'Flash cards', V.h('div.today-box.today-cards' + (decks.length ? '' : '.one-deck'), {},
+    return part('cards', 'Flash cards', cardsMenu(V.h('div.today-box.today-cards' + (decks.length ? '' : '.one-deck'), {},
       V.h('div.fc-top', {}, V.h('p.fc-n', {}, V.h('b', { text: String(total) }),
         V.h('span', { text: (total === 1 ? 'card to study today' : 'cards to study today') + (one ? ` in ${one.name}` : '') })),
         // (beside a test's Study, the screen's second strong button since 1.18: plain, it didn't look like the way in)
         V.button('Study', { kind: primary ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('all') })),
       forTest && forTest < total ? V.h('p.fc-note', {}, V.icon('target'), V.h('span', { text: `Includes ${forTest} for ${which} test` })) : null,
-      decks.length ? V.h('div.today-decks', {}, shown.map((d) => V.h('button.today-deck', { type: 'button', onclick: () => RV().start(d.deck),
+      decks.length ? V.h('div.today-decks', {}, shown.map((d) => deckMenu(V.h('button.today-deck', { type: 'button', onclick: () => RV().start(d.deck),
         title: `Study ${d.name}`, dataset: { deck: d.deck, key: `d:${d.deck}` } },
       d.folder && d.folder.icon ? V.h('span.emo', { text: d.folder.icon, 'aria-hidden': 'true' }) : V.icon('folder'),
-      V.h('span.deck-name', { text: d.name }), V.h('b', { text: String(d.due) }), icon('chev'))),
+      V.h('span.deck-name', { text: d.name }), V.h('b', { text: String(d.due) }), icon('chev')), d)),
       rest > 0 ? V.h('button.today-deck.more', { type: 'button', onclick: () => toNotes('review'), dataset: { key: 'd:more' } },
-        V.h('span.deck-name', { text: `+${rest} more` }), icon('chev')) : null) : null));
+        V.h('span.deck-name', { text: `+${rest} more` }), icon('chev')) : null) : null), total));
   }
 
   function editedLabel(note) {
@@ -1005,12 +1037,12 @@
     return part('jump', 'Jump back in', V.h('div.today-jump', {}, notes.map((note) => {
       const folder = folderOf(note);
       const snippet = note.locked ? 'Locked' : V.notes.plain(note, false);
-      return V.h('button.today-note', { type: 'button', onclick: () => open(note.id), dataset: { id: note.id, key: `j:${note.id}` } },
+      return noteMenu(V.h('button.today-note', { type: 'button', onclick: () => open(note.id), dataset: { id: note.id, key: `j:${note.id}` } },
         V.h('span.tn-title', {}, note.pinned ? V.icon('pin-on', 'tn-pin') : null, note.locked ? V.icon('lock') : null,
           V.h('span', { text: V.noteTitle(note) })),
         V.h('span.tn-snip', { text: snippet || ' ' }),
         V.h('span.tn-foot', {}, folder ? [emoji(folder), V.h('span.tn-folder', { text: folder.name })] : V.h('span.tn-folder'),
-          V.h('span.tn-when', { text: editedLabel(note) })));
+          V.h('span.tn-when', { text: editedLabel(note) }))), note.id);
     })), { label: 'All notes', onClick: () => toNotes('all') });
   }
 
@@ -1133,6 +1165,21 @@
     }
   }
 
+  /* A day of the strip's menu (1.19.1): what's on it (the list under the strip), a new note due that day, Upcoming. */
+  function dayMenu(el, day, today) {
+    const words = dayWords(day, today);
+    const name = words.name === 'Today' || words.name === 'Tomorrow' ? words.name.toLowerCase() : `${words.name}, ${words.date}`;
+    return V.contextMenu(el, () => [
+      { label: `See ${day < today ? 'what\'s left' : name === 'today' || name === 'tomorrow' ? `what's due ${name}` : `${words.name}`}`, icon: 'calendar',
+        onClick: () => goToDay(day) },
+      day >= today ? { label: `New note due ${name}`, icon: 'plus', onClick: () => {
+        if (V.wide()) V.go('notes');
+        V.notes.create(V.TEMPLATES[0], { due: day }, { fresh: true }).catch(V.problem);
+      } } : null,
+      { label: 'Open Upcoming', icon: 'clock', onClick: () => toNotes('due') },
+    ], { label: `${words.said}: options` });
+  }
+
   function weekStrip(week, now, startDay = '') {
     const today = V.dateText(now);
     const focusDay = week.cells.some((c) => c.day === stripFocus) ? stripFocus : today;
@@ -1151,11 +1198,11 @@
         body = V.h('span.wd-item', {}, cell.first ? emoji(folderOf(cell.first)) : null, V.h('span', { text: cell.text }),
           cell.more ? V.h('span.wd-more', { text: `+${cell.more}` }) : null);
       } else body = V.h('span.wd-item', {}, V.h('span.none', { text: 'Nothing due' }));
-      // (a tap takes the list under it to that day: js/today.js goToDay)
-      return V.h('button.wday' + (cell.today ? '.today' : '') + (cell.past ? '.past' : ''), { type: 'button',
+      // (a tap takes the list under it to that day: js/today.js goToDay; its menu: dayMenu)
+      return dayMenu(V.h('button.wday' + (cell.today ? '.today' : '') + (cell.past ? '.past' : ''), { type: 'button',
         tabindex: cell.day === focusDay ? '0' : '-1', 'aria-current': cell.today ? 'date' : null, onclick: () => goToDay(cell.day),
         dataset: { day: cell.day, week: String(cell.week), key: `w:${cell.day}` } },
-      V.h('span.wd-label', { text: cell.label }), body);
+      V.h('span.wd-label', { text: cell.label }), body), cell.day, today);
     }));
     // (`data-week`: the week in sight, kept by stripState; from the start, so a phone's title doesn't come and go as
     // Today is drawn: it moves, smoothly, only once the strip has been scrolled, `.live`)

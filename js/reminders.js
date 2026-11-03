@@ -690,6 +690,23 @@ V.reminders = (() => {
   }
   const setRepeat = (id, repeat) => set(id, { repeat });
 
+  /* "Remind me in an hour" / "Remind me tomorrow" (a note's menu, 1.19.1): its reminder moved on (an hour from now, or
+     tomorrow at its own time; the day it's due goes with it, as the reminder sheet does), with an Undo. Not for a
+     repeating one (that would move every one after it too). */
+  async function snooze(id, how) {
+    const note = latest(id);
+    const was = note && remindAt(note);
+    if (!was || repeatOf(note)) return null;
+    const before = { due: note.due || null, at: was.toISOString() };
+    const at = how === 'tomorrow'
+      ? atOn(plusDays(midnight(new Date()), 1), [was.getHours(), was.getMinutes()])
+      : new Date(Math.ceil((Date.now() + 3600000) / 60000) * 60000);
+    const done = await set(id, { at });
+    V.toast(`Reminder moved to ${how === 'tomorrow' ? 'tomorrow at ' : ''}${clock(at)}`,
+      { action: 'Undo', onAction: () => set(id, before).catch(V.problem) });
+    return done;
+  }
+
   /* -- the phone's calendar */
 
   const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');  // 20261030T130000Z
@@ -1156,7 +1173,8 @@ V.reminders = (() => {
         const when = at && !note.done ? remindLabel(note, now)
           : part.key === 'later' || part.key === 'overdue' ? dayLabel(dayOf(note), now) : 'Move';
         const repeats = !note.done && !!repeatOf(note);
-        return V.h('div.up-row' + (note.done ? '.done' : '') + (repeats ? '.repeats' : ''), { dataset: { id: note.id } },
+        // (its tick and its day pressed with the right button, or held: the note's menu, as its card's: 1.19.1)
+        return V.contextMenu(V.h('div.up-row' + (note.done ? '.done' : '') + (repeats ? '.repeats' : ''), { dataset: { id: note.id } },
           V.h('button.up-tick', { type: 'button', 'aria-pressed': String(!!note.done),
             'aria-label': note.done ? `${V.noteTitle(note)}: not done` : `${V.noteTitle(note)}: mark done`,
             onclick: () => toggleDone(note.id) }, V.icon('check')),
@@ -1164,7 +1182,8 @@ V.reminders = (() => {
           V.h('button.up-when' + (days < 0 && !note.done ? '.late' : ''), { type: 'button', title: 'Move it, or change its reminder',
             'aria-label': `When: ${when}${repeats ? `. ${repeatLine(note, now)}` : ''}. Change it`, onclick: () => edit(note.id),
             title: repeats ? repeatLine(note, now) : null },
-          icon(repeats ? 'repeat' : at && !note.done ? 'bell' : 'calendar'), V.h('span', { text: when })));
+          icon(repeats ? 'repeat' : at && !note.done ? 'bell' : 'calendar'), V.h('span', { text: when }))),
+        () => V.notes.noteItems(note.id), { label: `${V.noteTitle(note)}: options` });
       }),
     ]);
   }
@@ -1292,7 +1311,7 @@ V.reminders = (() => {
   const api = { parse, label, dayLabel, clock, remindAt, remindLabel, dayOf, calendarLink, ics, noteLink, consider, edit,
     cardChip, inUpcoming, pending, group, groupOf, toggleDone, upcoming, schedule, notify, icon, change, latest, openNote,
     // repeating (1.16.1)
-    set, setRepeat, repeatOf, cleanRule, repeatText, repeatLine, nextWords, occurrence, upNext, hasPassed, moveOn, putBack,
+    set, setRepeat, snooze, repeatOf, cleanRule, repeatText, repeatLine, nextWords, occurrence, upNext, hasPassed, moveOn, putBack,
     doneOnce, fits, nextAfter, rrule, ruleKey };
   return api;
 })();

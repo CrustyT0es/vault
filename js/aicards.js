@@ -125,11 +125,164 @@ V.aiCards = (() => {
 
   const clean = (text, most) => String(text || '').replace(/\s+/g, ' ').trim().replace(/^\*\*(.+)\*\*$/, '$1').slice(0, most).trim();
 
-  /* The cards in the AI's answer: "question :: answer" lines and lines with a {{blank}}, each as Wefty reads it (a line
-     js/study.js doesn't take for a card is dropped, and so is anything else the AI wrote). `cut`: the answer ran out of
-     room, so its last line may be half a card. */
-  function parse(text, cut = false) {
+  /* -- tidying what the AI wrote (1.19.1; the owner: when Gemini makes the cards "sometimes it does stupid things").
+     Gemini numbers and bullets its lines, bolds the question, labels them "Q:" and "A:" (on one line or two), writes
+     a Markdown table, starts the answer by saying the question again ("Osmosis is the diffusion of water..."), gives
+     two or three sentences, hides "the" in a blank or the whole sentence, and asks the same thing twice. Each card is
+     put right here (the note-taker's and Chat's too), so Learn has short answers to quiz. */
+
+  const Q_LABEL = /^(?:q|question|front|card\s*\d+)\s*:\s*/i;
+  const A_LABEL = /^(?:a|answer|back|definition)\s*:\s*/i;
+  const TABLE_HEAD = /^(?:q|a|question|answer|term|definition|front|back|word|meaning|card)$/i;
+  const LINK_WORD = /^(?:is|are|was|were|means|mean|refers\s+to|describes|es|son|era|fue|est|sont)\s+(?:(?:called|known\s+as|defined\s+as)\s+)?/i;
+  const ARTICLES = new Set(['the', 'a', 'an', 'el', 'la', 'los', 'las', 'un', 'una', 'le', 'les']);
+  const LINKS = new Set(['is', 'are', 'was', 'were', 'means', 'mean', 'refers', 'describes', 'es', 'son', 'era', 'fue', 'est', 'sont']);
+  const SMALL = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'of', 'and', 'or', 'to', 'in', 'on', 'at', 'it',
+    'its', 'this', 'that', 'by', 'for', 'as', 'with', 'el', 'la', 'los', 'las', 'de', 'y', 'un', 'una', 'es']);
+  const foldWord = (word) => String(word || '').normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const stem = (word) => (word.length > 3 ? word.replace(/(?:es|s)$/, '') : word);
+  const wordsOfText = (text) => String(text || '').split(/\s+/).map(foldWord).filter(Boolean);
+  const capital = (text) => text.replace(/^(\s*["“(]?)(\p{Ll})/u, (m, a, b) => a + b.toUpperCase());
+
+  /* A card's words without what the AI dressed them in: marks, `code` ticks, a list mark or number, quotes round all of it. */
+  function bare(text) {
+    let s = String(text || '').trim().replace(LEAD, '');
+    s = V.format.unmark(s).replace(/`([^`]*)`/g, '$1').replace(/^[*_]{1,3}(?=\S)|(?<=\S)[*_]{1,3}$/g, '').trim();
+    const quoted = /^["“'‘](.+)["”'’]$/.exec(s);
+    if (quoted && !/["“”]/.test(quoted[1])) s = quoted[1].trim();
+    return s.replace(/\s+/g, ' ');
+  }
+
+  /* "Osmosis is the diffusion of water" for "What is osmosis?": the answer without the question said again ("The
+     diffusion of water"). Only when the answer starts with the question's own words, then "is" (or the question's
+     verb, for "What does the nucleus contain?": "The nucleus contains the cell's DNA" -> "The cell's DNA"). */
+  function restated(question, answer) {
+    const asked = new Set(wordsOfText(question).map(stem));
+    const lastAsked = stem(wordsOfText(question).pop() || '');
+    const parts = answer.split(/\s+/);
+    let content = 0;
+    let last = -1;
+    for (let i = 0; i < parts.length; i++) {
+      const word = foldWord(parts[i]);
+      if (!word) break;
+      if (ARTICLES.has(word)) continue;
+      if (LINKS.has(word) || !asked.has(stem(word))) break;
+      content += 1;
+      last = i;
+    }
+    // The other way round: "Ottawa is the capital of Canada" for "What is the capital of Canada?" -> "Ottawa".
+    const flipped = /^(.+?)\s+(?:is|are|was|were)\s+(.+?)[.!]?$/i.exec(answer);
+    if (!content && flipped && flipped[1].split(/\s+/).length <= 5) {
+      const said = wordsOfText(flipped[2]).filter((w) => !SMALL.has(w));
+      if (said.length && said.filter((w) => asked.has(stem(w))).length / said.length >= 0.75) return flipped[1].trim();
+    }
+    if (!content || last >= parts.length - 1) return answer;
+    const rest = parts.slice(last + 1).join(' ');
+    const link = LINK_WORD.exec(rest);
+    if (link) return rest.slice(link[0].length).trim() ? capital(rest.slice(link[0].length).trim()) : answer;
+    if (content >= 2 && /^(?:what|which|who|where|how|when)\s+(?:does|do|did)\b/i.test(question)
+      && stem(foldWord(parts[last])) === lastAsked) return capital(rest);
+    return answer;
+  }
+
+  /* A long answer as its short part, then " — " and the rest: "Ribosomes. They build proteins." -> "Ribosomes — They
+     build proteins.", "The powerhouse of the cell, producing ATP..." -> "The powerhouse of the cell — producing ATP...".
+     A short one loses its full stop. */
+  function shortened(answer) {
+    if (/\s[—–]\s/.test(answer)) return answer.replace(/^(.+?)\.(\s+[—–]\s)/, '$1$2');
+    const breaks = [...answer.matchAll(/[.!?](?=\s+["“(]?\p{Lu})/gu)].filter((m) => {
+      const before = answer.slice(0, m.index + 1);
+      return !/(?:^|\s)(?:\p{Lu}|Mr|Mrs|Ms|Dr|St|Sr|Jr|vs|etc|e\.g|i\.e|U\.S|No)\.$/u.test(before);
+    });
+    if (breaks.length) {
+      const at = breaks[0].index;
+      const head = answer.slice(0, at).trim();
+      const tail = answer.slice(at + 1).trim();
+      if (head && tail) return `${head} — ${tail}`;
+    }
+    if (answer.split(/\s+/).length > 6) {
+      const clause = /,\s+(?=(?:[a-z]\w*ing|which|because|so|meaning|allowing|making|used|as)\b)/.exec(answer);
+      if (clause && answer.slice(0, clause.index).split(/\s+/).length >= 2) {
+        return `${answer.slice(0, clause.index).trim()} — ${answer.slice(clause.index + clause[0].length).trim()}`;
+      }
+    }
+    return answer.replace(/(?<![\p{Lu}.]|\b(?:etc|vs|approx))\.$/u, '');
+  }
+
+  /* One "question :: answer" card tidied: { q, a }, or null when there's no card left in it. */
+  function tidyCard(question, answer) {
+    const q = clean(bare(question).replace(Q_LABEL, ''), Q_MOST).replace(/::/g, ':');
+    let a = bare(answer).replace(A_LABEL, '').replace(/\{\{\s*([^{}]*?)\s*\}\}/g, '$1').replace(/::/g, ':');
+    if (!q || !a) return null;
+    a = clean(shortened(restated(q, a)), A_MOST);
+    if (!a || squash(q) === squash(a)) return null;
+    return { q, a };
+  }
+
+  /* A fill-in-the-blank line tidied: a blank hiding a small word ("{{The}} play"), most of the line, or a word the line
+     shows anyway is let go (its braces taken off); null when no blank is left. */
+  function tidyBlank(line) {
+    const text = bare(line);
+    const holes = V.format.blanks(text);
+    let out = '';
+    let at = 0;
+    let kept = 0;
+    for (const hole of holes) {
+      const word = hole.word.trim();
+      const outside = ` ${wordsOfText((text.slice(0, hole.start) + ' ' + text.slice(hole.end)).replace(/\{\{|\}\}/g, ' ')).join(' ')} `;
+      const said = wordsOfText(word);
+      const bad = !said.length || said.every((w) => SMALL.has(w)) || said.length > 5
+        || !outside.trim().split(' ').some((w) => w && !SMALL.has(w)) || outside.includes(` ${said.join(' ')} `);
+      out += text.slice(at, hole.start) + (bad ? word : `{{${word}}}`);
+      if (!bad) kept += 1;
+      at = hole.end;
+    }
+    out += text.slice(at);
+    return kept ? clean(out, Q_MOST + A_MOST) : null;
+  }
+
+  /* The AI's lines as card lines: a Markdown table's rows, "Q: ..." with "A: ..." (one line or two), and "**term**:
+     definition" (only when it wrote no "::" at all) made into "question :: answer". */
+  function asLines(text) {
     const lines = String(text || '').replace(/\r/g, '').split('\n');
+    const any = lines.some((l) => l.includes('::'));
+    const out = [];
+    const labelled = (line, label) => {
+      const m = new RegExp(`^(?:${label})\\s*:\\s*(.+)$`, 'i').exec(bare(line));
+      return m ? m[1].trim() : null;
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i].trim();
+      const row = /^\|(.+)\|$/.exec(raw);
+      if (row) {
+        const cells = row[1].split('|').map((c) => c.trim());
+        if (cells.length >= 2 && !cells.every((c) => /^:?-{2,}:?$/.test(c)) && !(TABLE_HEAD.test(bare(cells[0])) && TABLE_HEAD.test(bare(cells[1])))
+          && cells[0] && cells[1]) out.push(`${cells[0]} :: ${cells[1]}`);
+        continue;
+      }
+      if (!raw.includes('::')) {
+        const both = /^(?:q|question)\s*:\s*(.+?)\s+(?:a|answer)\s*:\s*(.+)$/i.exec(bare(raw));
+        if (both) { out.push(`${both[1]} :: ${both[2]}`); continue; }
+        const question = labelled(raw, 'q|question|front');
+        if (question) {
+          let j = i + 1;
+          while (j < lines.length && j <= i + 2 && !lines[j].trim()) j++;
+          const answer = j < lines.length ? labelled(lines[j], 'a|answer|back') : null;
+          if (answer) { out.push(`${question} :: ${answer}`); i = j; continue; }
+        }
+        const term = !any && /^(?:[-*•]\s+|\d{1,3}[.)]\s+)?\*\*(.+?)\*\*\s*[:—–-]\s+(.+)$/.exec(raw);
+        if (term && term[1].split(/\s+/).length <= 8) { out.push(`${term[1]} :: ${term[2]}`); continue; }
+      }
+      out.push(lines[i]);
+    }
+    return out;
+  }
+
+  /* The cards in the AI's answer: "question :: answer" lines and lines with a {{blank}}, tidied (above), each as Wefty
+     reads it (a line js/study.js doesn't take for a card is dropped, and so is anything else the AI wrote), and none
+     asking what one before it asked. `cut`: the answer ran out of room, so its last line may be half a card. */
+  function parse(text, cut = false) {
+    const lines = asLines(text);
     if (cut && lines.length > 1) lines.pop();
     const out = [];
     for (const raw of lines) {
@@ -137,15 +290,68 @@ V.aiCards = (() => {
       if (!line || /^```/.test(line) || /^#/.test(line)) continue;
       const qa = /^(.+?)\s*::\s*(.+)$/.exec(line);
       if (qa) {
-        const q = clean(qa[1].replace(/^Q\s*[:.]\s+/i, ''), Q_MOST);
-        const a = clean(qa[2].replace(/::/g, ':').replace(/^A\s*[:.]\s+/i, ''), A_MOST);
-        if (q && a && !q.includes('{{')) out.push({ kind: 'qa', q, a });
+        if (qa[1].includes('{{')) continue;
+        const card = tidyCard(qa[1], qa[2]);
+        if (card) out.push({ kind: 'qa', ...card });
         continue;
       }
-      if (line.includes('{{') && V.format.blanks(line).length) out.push({ kind: 'blank', text: clean(line, Q_MOST + A_MOST) });
+      if (line.includes('{{') && V.format.blanks(line).length) {
+        const text_ = tidyBlank(line);
+        if (text_) out.push({ kind: 'blank', text: text_ });
+      }
     }
-    return out.filter((c) => V.study.cards(lineOf(c)).length > 0);
+    return once(out.filter((c) => V.study.cards(lineOf(c)).length > 0));
   }
+
+  /* Cards with no twin before them: the same question (keyOf), or the same answer to nearly the same question ("What is
+     the chemical symbol for sodium?" and "What is the symbol for sodium?", both "Na"). */
+  function once(cards) {
+    const keys = new Set();
+    const kept = [];
+    const content = (text) => new Set(wordsOfText(text).filter((w) => !SMALL.has(w) && !/^(?:what|which|who|when|where|how|does|do|did)$/.test(w)).map(stem));
+    for (const card of cards) {
+      const key = keyOf(card);
+      if (keys.has(key)) continue;
+      if (card.kind === 'qa') {
+        const asks = content(card.q);
+        const answer = squash(card.a.split(/\s+[—–]\s+/)[0]);
+        const twin = kept.some((k) => {
+          if (k.kind !== 'qa' || squash(k.a.split(/\s+[—–]\s+/)[0]) !== answer) return false;
+          const other = content(k.q);
+          const both = [...asks].filter((w) => other.has(w)).length;
+          return both / (new Set([...asks, ...other]).size || 1) >= 0.6;
+        });
+        if (twin) continue;
+      }
+      keys.add(key);
+      kept.push(card);
+    }
+    return kept;
+  }
+
+  /* The note-taker's notes (js/notetaker.js) with their "## Flash cards" part tidied the same way. */
+  function tidySection(notes) {
+    const lines = String(notes || '').split('\n');
+    const head = lines.findIndex((l) => /^\s{0,3}#{1,3}\s*flash ?cards\s*$/i.test(l));
+    if (head < 0) return notes;
+    let end = lines.length;
+    for (let i = head + 1; i < lines.length; i++) if (/^\s{0,3}#{1,6}\s+\S/.test(lines[i])) { end = i; break; }
+    const cards = parse(lines.slice(head + 1, end).join('\n')).map(lineOf);
+    const after = lines.slice(end);
+    return [...lines.slice(0, head + 1), ...cards, ...(after.length ? ['', ...after] : [])].join('\n').replace(/\n{3,}/g, '\n\n');
+  }
+
+  /* The rules every card the AI makes follows (Make flash cards, and the note-taker's "Also make flash cards"). */
+  const RULES = [
+    'Each card tests one fact, and its question makes sense on its own (without the notes) and has one clear answer.',
+    'Keep each answer short: a word, a name, a number or date, or a few words (at most 6 when you can). Never start the '
+      + 'answer by saying the question again ("Osmosis is ..."): just the answer. If more is worth knowing, put it '
+      + 'after " — " (a space, a long dash, a space), like: Ribosomes — they build proteins from amino acids.',
+    'A list goes in one answer, with commas ("solid, liquid and gas"). Two answers that mean the same go with " / " '
+      + 'between them ("to speak / to talk").',
+    'No numbers, bullets, labels like "Q:" or "A:", bold or other Markdown on a card\'s line. Never make two cards that '
+      + 'ask the same thing, and never one whose answer is in its own question.',
+  ];
 
   /* `words` with these card lines added: at the end of its Flash cards part (the last "# Flash cards" heading's, up to
      the next heading), else under a new "# Flash cards" heading at the end, above a note-taker's transcript when it
@@ -360,14 +566,15 @@ V.aiCards = (() => {
     return [
       'You make flash cards for a student from their own notes, for Wefty, their notes app.',
       'Answer with the cards only, one card a line, each in one of these two forms, and nothing else (no title, numbers, '
-        + 'bullets, headings, blank lines or other words):',
+        + 'bullets, labels, headings, blank lines or other words):',
       '<a question or a term> :: <its short answer>',
       'A sentence with one key word or short phrase in double curly brackets, like: The {{mitochondria}} release energy from food.',
-      'Mostly use the first form. Use the second only for a fact best remembered in its sentence (at most one card in four).',
+      'Mostly use the first form. Use the second only for a key name, term, number or date best remembered in its sentence '
+        + '(at most one card in four): never hide a small word like "the" or "is", or most of the sentence.',
       `Make up to ${most} cards: one for each important fact, term, definition, date, formula or idea. Leave out what isn't `
         + 'worth studying (to-dos, plans, reminders, things to bring).',
+      ...RULES,
       'Use only what the notes say: never add facts, numbers or names that aren\'t in them. Write in the language of the notes.',
-      'Each question must make sense on its own, without the notes. Keep each answer short: a few words, or one sentence at most.',
       'Lines in the notes already written as "question :: answer", or with {{ }}, are cards the student already has: never '
         + 'repeat them or ask the same thing another way.',
       'Never write "::" or "{{" anywhere else. If nothing is worth a card, answer with just: NONE',
@@ -788,5 +995,6 @@ V.aiCards = (() => {
     shown: (note, text) => !note.locked && !O().isTemplate(note) && !!String(text || '').trim() });
 
   return { forNote, forFolder, forTest, pickFolder, start, makeAndAdd, parse, withCards, withoutCards, keysIn, keyOf,
-    instructions, skippedLine, Refusal, waits: { CHUNK, MOST_LETTERS, MOST_CARDS }, showing: () => !!open };
+    instructions, skippedLine, Refusal, waits: { CHUNK, MOST_LETTERS, MOST_CARDS }, showing: () => !!open,
+    tidyCard, tidyBlank, tidySection, RULES };
 })();

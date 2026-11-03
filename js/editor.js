@@ -567,6 +567,10 @@ V.editor = (() => {
     const boxes = [...previewing];
     previewing.clear();
     for (const area of boxes) if (area.isConnected) setLook(area);
+    if (span) {  // (words picked in a copy made again are picked in the new one)
+      for (const area of boxes) unpaint(area);
+      drawSpanSoon();
+    }
   }
 
   /* A new box's formatted copy, at once (the note opens, or is drawn again, with its words formatted from the first
@@ -649,6 +653,7 @@ V.editor = (() => {
     if (field.classList.contains('previewing') === on) return;
     field.classList.toggle('previewing', on);
     if (!on) grow(area);  // (a box measured while it lay over its copy takes its own height again)
+    drawSpanSoon();  // (words picked across boxes are drawn where they show now)
   }
 
   /* The boxes that lost (or got) the caret change their look together once the caret has settled, so a word the
@@ -872,7 +877,8 @@ V.editor = (() => {
     let last = null;
     let rolling = 0;
     const pick = () => {
-      if (!last || area.value !== value || document.activeElement !== area) return;
+      // (dragged on into another box, the pick across boxes takes over: see span)
+      if (!last || span || area.value !== value || document.activeElement !== area) return;
       if (!rows) rows = copyOf(area);
       const to = rows && placeAt(rows, last.clientX, last.clientY);
       if (!to) return;
@@ -882,7 +888,7 @@ V.editor = (() => {
     };
     const roll = () => {
       rolling = 0;
-      if (!last || !scroller) return;
+      if (!last || !scroller || span) return;
       const sight = scroller.getBoundingClientRect();
       const by = last.clientY < sight.top + EDGE ? last.clientY - sight.top - EDGE
         : last.clientY > sight.bottom - EDGE ? last.clientY - sight.bottom + EDGE : 0;
@@ -1081,6 +1087,573 @@ V.editor = (() => {
     return box ? box.top : row.getBoundingClientRect().top;
   }
 
+  /* -- words picked across boxes (1.19.1; the owner: "Shift click does not work for highlighting text, nor highlighting
+     text at all"). Each heading, tick-box item and run of lines is a box of its own, and a browser picks words in one
+     box only: a drag, a Shift+click, Shift and an arrow, or Ctrl+A stopped at the edge of the box with the caret. So a
+     pick reaching into other boxes is kept here: `span`, from `anchor` (where it started) to `focus` (where it ends
+     now), each { i: the box, at: a place in its words as written }. The box with the caret picks its own part itself
+     (the browser's own picking: Copy from its menu, the screen reader); every other box's part is drawn under its
+     letters (.block-pick), on its formatted copy when it shows one. Copy, Cut, typing over it, Backspace, Delete,
+     Enter, Paste and the mark buttons act on all of it, each as one Undo step, as in any document.
+     Made by: a mouse dragged out of a box into another; Shift+click (or Shift+drag) in another box; Shift and an arrow
+     (or Home/End, with Ctrl the note's start or end) from a box's edge; Ctrl+A again once a box's words are all
+     picked (the whole note). Put down by a click, an arrow, Esc, or the words changing. */
+  let span = null;
+  let spanPress = null;   // a mouse held down in a box: { area, i, from, measure (its copies of words), last, rolling }
+  let spanFrame = 0;
+  window.addEventListener('resize', () => drawSpanSoon());  // (lines wrap elsewhere in a narrower window)
+  // A formatted copy's letters are picked the way the browser picks words (over a ==highlight==, under the letters),
+  // where it can (CSS.highlights: Chrome 105, Safari 17.2); elsewhere, and for a box's own words, a colour under them.
+  const pickMarks = window.CSS && CSS.highlights && window.Highlight ? new Highlight() : null;
+  if (pickMarks) CSS.highlights.set('wefty-pick', pickMarks);
+
+  const fieldsNow = () => (parts.blocks && parts.blocks.isConnected ? [...parts.blocks.querySelectorAll('.block-input')] : []);
+  const earlier = (p, q) => p.i < q.i || (p.i === q.i && p.at < q.at);
+  const spanEnds = () => (earlier(span.focus, span.anchor) ? [span.focus, span.anchor] : [span.anchor, span.focus]);
+  // where box `i`'s line (its first) starts in the note's text (serialize)
+  const lineStart = (i) => blocks.slice(0, i).reduce((sum, b) => sum + lineOf(b).length + 1, 0);
+
+  /* The words picked as written: a heading or an item picked whole from its start takes its "# " or "- [ ] " along
+     (pasted into a note, it's a heading or an item again); a pick ending at the very start of a box ends with the new
+     line before it. */
+  function spanText() {
+    const [a, b] = spanEnds();
+    const words = serialize();
+    const from = lineStart(a.i) + (a.at === 0 && b.i > a.i ? 0 : prefix(blocks[a.i]) + a.at);
+    const to = lineStart(b.i) + (b.at === 0 && b.i > a.i ? 0 : prefix(blocks[b.i]) + b.at);
+    return words.slice(from, Math.max(from, to));
+  }
+
+  /* The picked words replaced by `insert` (nothing: taken out), as one Undo step; the first box keeps its kind (a
+     heading picked from its middle into the words under it stays a heading, with the rest of those words), and the
+     caret goes just after what was put in. */
+  function spanReplace(insert) {
+    if (!span) return;
+    const [a, b] = spanEnds();
+    const words = serialize();
+    const from = lineStart(a.i) + prefix(blocks[a.i]) + a.at;
+    const to = lineStart(b.i) + prefix(blocks[b.i]) + b.at;
+    finishWord();
+    checkpoint();
+    clearSpan();
+    const next = words.slice(0, from) + insert + words.slice(to);
+    fill(next);
+    const head = next.slice(0, from + insert.length).split('\n');
+    placeCaret({ line: head.length - 1, col: head[head.length - 1].length });
+    saveSoon();
+    V.lock.touch();
+    afterChange(true);
+    const area = document.activeElement;
+    if (area && area.matches && area.matches('.block-input')) tell('body', area, null);
+  }
+
+  /* A mark button (or its keys) with words picked across boxes: each box's part marked, or, when they all are
+     already, unmarked (js/format.js: toggleMark, on the boxes' words a line per line), in place (no box rebuilt). */
+  function spanMark(mark) {
+    const [a, b] = spanEnds();
+    const texts = blocks.slice(a.i, b.i + 1).map((block) => block.text);
+    const joined = texts.join('\n');
+    const at = (p) => texts.slice(0, p.i - a.i).reduce((sum, t) => sum + t.length + 1, 0) + p.at;
+    const next = V.format.toggleMark(joined, at(span.anchor), at(span.focus), mark);
+    if (!next || next.value === joined) return;
+    finishWord();
+    checkpoint();
+    const lines = next.value.split('\n');
+    let n = 0;
+    const words = blocks.map((block, i) => {
+      if (i < a.i || i > b.i) return { ...block };
+      const count = block.text.split('\n').length;
+      const text = lines.slice(n, n + count).join('\n');
+      n += count;
+      return { ...block, text };
+    });
+    const fields = fieldsNow();
+    putIn(words, fields);
+    // the same words picked again, marks and all (where they are now)
+    const back = (offset) => {
+      let k = a.i;
+      let rest = offset;
+      while (k < b.i && rest > blocks[k].text.length) { rest -= blocks[k].text.length + 1; k++; }
+      return { i: k, at: Math.min(rest, blocks[k].text.length) };
+    };
+    const forward = !earlier(span.focus, span.anchor);
+    const start = back(Math.min(next.start, next.end));
+    const end = back(Math.max(next.start, next.end));
+    setSpan(forward ? start : end, forward ? end : start);
+    saveSoon();
+    V.lock.touch();
+    afterChange(true);
+    pressedSoon();
+  }
+
+  /* Picks from `anchor` to `focus` (in one box: the box's own picking, with the caret in it). */
+  function setSpan(anchor, focus, measure) {
+    const fields = fieldsNow();
+    if (!fields[anchor.i] || !fields[focus.i]) return;
+    if (anchor.i === focus.i) {
+      const area = fields[anchor.i];
+      clearSpan();
+      if (document.activeElement !== area) area.focus({ preventScroll: true });
+      area.setSelectionRange(Math.min(anchor.at, focus.at), Math.max(anchor.at, focus.at), focus.at < anchor.at ? 'backward' : 'forward');
+      relit(area);
+      return;
+    }
+    span = { anchor, focus };
+    // The caret stays in the box it's in when that's one of the picked ones (nothing changes its look), else goes to
+    // the box the pick started in.
+    const [a, b] = spanEnds();
+    const own = fields.indexOf(document.activeElement);
+    if (own < a.i || own > b.i) fields[anchor.i].focus({ preventScroll: true });
+    drawSpan(measure);
+  }
+
+  function clearSpan() {
+    if (spanFrame) cancelAnimationFrame(spanFrame);
+    spanFrame = 0;
+    const had = !!span;
+    span = null;
+    if (!had) return;
+    unpaint();
+  }
+
+  /* What's drawn picked in each box now (a box -> { key, layer, ranges }), so a pick moving on draws only the boxes
+     whose part changed (a drag over a long note stays smooth). */
+  let painted = new Map();
+
+  function unpaint(area) {
+    const boxes = area ? [area] : [...painted.keys()];
+    for (const box of boxes) {
+      const done = painted.get(box);
+      if (!done) continue;
+      painted.delete(box);
+      if (pickMarks) for (const range of done.ranges) pickMarks.delete(range);
+      if (done.layer) {
+        if (done.layer.parentElement) done.layer.parentElement.classList.remove('spanned');
+        done.layer.remove();
+      }
+    }
+    if (!area) painted = new Map();
+  }
+
+  const drawSpanSoon = () => { if (span && !spanFrame) spanFrame = requestAnimationFrame(() => { spanFrame = 0; drawSpan(); }); };
+
+  /* The pick shown: the box with the caret picks its part itself; every other box's part is drawn under its letters. */
+  function drawSpan(measure) {
+    if (!span || !parts.blocks) return;
+    const fields = fieldsNow();
+    const [a, b] = spanEnds();
+    const keep = new Set();
+    for (let i = a.i; i <= b.i; i++) {
+      const area = fields[i];
+      if (!area) continue;
+      const from = i === a.i ? a.at : 0;
+      const to = i === b.i ? b.at : area.value.length;
+      if (area === document.activeElement) {  // (its own picking: anything drawn in it before goes, below)
+        area.setSelectionRange(from, to, i === span.anchor.i && earlier(span.focus, span.anchor) ? 'backward' : 'forward');
+        relit(area);
+        continue;
+      }
+      // (drawn again only when its part, its words, its look or its width changed)
+      const key = [from, to, i < b.i, area.value, isPreviewing(area), area.parentElement.clientWidth].join('|');
+      keep.add(area);
+      const done = painted.get(area);
+      if (done && done.key === key && (!done.layer || done.layer.isConnected)) continue;
+      unpaint(area);
+      painted.set(area, { key, ...paintPart(area, from, to, i < b.i, measure) });
+    }
+    for (const area of [...painted.keys()]) if (!keep.has(area)) unpaint(area);
+  }
+
+  /* Box `area`'s words `from`-`to` drawn picked (`more`: the pick goes on past its end, so its last line's end is
+     picked too, as a browser shows a new line picked). */
+  function paintPart(area, from, to, more, measure) {
+    const field = area.parentElement;
+    const view = isPreviewing(area) ? previews.get(area) : null;
+    let rows = view && view.el ? view.el : null;
+    let made = null;
+    if (!rows) {
+      // (a press keeps its copies of the boxes' words while it's held: see pointAt)
+      const kept = measure && measure.get(area);
+      if (kept && kept.words === area.value && kept.el.isConnected) rows = kept.el;
+      else {
+        rows = made = copyOf(area);
+        if (made && measure) { measure.set(area, { el: made, words: area.value }); made = null; }
+      }
+    }
+    const ranges = [];
+    if (!field || !rows) return { layer: null, ranges };
+    const own = !!pickMarks && !!view && rows === view.el;  // (the formatted copy's letters, picked as the browser would)
+    const origin = field.getBoundingClientRect();
+    const zoom = field.currentCSSZoom || 1;  // (a page zoomed: what's measured is zoomed, what's set gets zoomed again)
+    const marks = [];
+    const add = (box, width) => marks.push([(box.left - origin.left) / zoom, (box.top - origin.top) / zoom,
+      (width ?? box.width) / zoom, box.height / zoom]);
+    const lines = area.value.split('\n');
+    const range = document.createRange();
+    const sliver = Math.max(4, parseFloat(getComputedStyle(field).fontSize) * 0.3) * zoom;
+    let start = 0;
+    [...rows.children].forEach((row, n) => {
+      const line = lines[n] ?? '';
+      const end = start + line.length;
+      let last = null;
+      if (from < end && to > start) {
+        const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+        while (walk.nextNode()) {
+          const node = walk.currentNode;
+          const place = places.get(node);
+          if (!place || !node.length) continue;
+          const a = Math.max(from - start - place.col, 0);
+          const b = Math.min(to - start - place.col, node.length);
+          if (a >= b) continue;
+          const piece = own ? document.createRange() : range;
+          piece.setStart(node, a);
+          piece.setEnd(node, b);
+          if (own) { pickMarks.add(piece); ranges.push(piece); }
+          for (const box of piece.getClientRects()) {
+            if (box.width <= 0) continue;
+            if (!own) add(box);
+            last = box;
+          }
+        }
+      }
+      // the line's end picked (the new line after it, or, after the box's last line, the next box)
+      const past = n < lines.length - 1 ? to > end : more && to >= end;
+      if (past && from <= end) {
+        if (last) add({ left: last.right, top: last.top, height: last.height }, sliver);
+        else {
+          const box = row.getBoundingClientRect();
+          add({ left: box.left, top: box.top, height: box.height }, sliver);
+        }
+      }
+      start = end + 1;
+    });
+    if (made) made.remove();
+    if (!marks.length) return { layer: null, ranges };
+    const layer = V.h('div.block-pick', { 'aria-hidden': 'true' });
+    for (const [left, top, width, height] of marks) {
+      const mark = V.h('i');
+      Object.assign(mark.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+      layer.append(mark);
+    }
+    field.classList.add('spanned');
+    field.prepend(layer);
+    return { layer, ranges };
+  }
+
+  /* The box nearest (x, y) and the place in its words there: { i, at } (above the first box: its start; below the
+     last: its end). `measure`: a press's own copies of the boxes' words as written, kept while it's held. */
+  function pointAt(x, y, measure) {
+    const fields = fieldsNow();
+    if (!fields.length) return null;
+    let best = 0;
+    let far = Infinity;
+    fields.forEach((area, i) => {
+      const box = area.parentElement.getBoundingClientRect();
+      const off = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
+      if (off < far) { far = off; best = i; }
+    });
+    const area = fields[best];
+    const box = area.parentElement.getBoundingClientRect();
+    if (best === 0 && y < box.top) return { i: 0, at: 0 };
+    if (best === fields.length - 1 && y > box.bottom) return { i: best, at: area.value.length };
+    return { i: best, at: placeOf(area, x, y, measure) };
+  }
+
+  function placeOf(area, x, y, measure) {
+    if (isPreviewing(area)) {
+      const place = mapPoint(area, x, y);
+      if (place) return place.at;
+    }
+    let rows = measure ? measure.get(area) : null;
+    if (rows && (rows.words !== area.value || !rows.el.isConnected)) rows = null;
+    if (!rows) {
+      const made = copyOf(area);
+      if (!made) return area.selectionStart || 0;
+      rows = { el: made, words: area.value };
+      if (measure) measure.set(area, rows);
+    }
+    const spot = placeAt(rows.el, x, y);
+    if (!measure) rows.el.remove();
+    return spot ? placeIn(area.value, spot) : 0;
+  }
+
+  /* Where a pick going on from the box with the caret starts: the far end of its own picked words. */
+  function ownAnchor() {
+    const fields = fieldsNow();
+    const area = document.activeElement;
+    const i = fields.indexOf(area);
+    if (i < 0) return null;
+    return { i, at: area.selectionDirection === 'backward' ? area.selectionEnd : area.selectionStart };
+  }
+
+  /* A press in the note's words (caught before the boxes hear it). Shift+click in another box picks on to there (and
+     Shift+drag goes on picking); a click without Shift puts a pick across boxes down; a press in a box is watched, so
+     dragged into another box the pick goes on there. A right click on the words picked keeps them (its menu's Copy
+     copies them all). */
+  function spanDown(event) {
+    if (reading || !parts.blocks || !parts.blocks.isConnected) return;
+    const target = event.target;
+    const inBlocks = parts.blocks.contains(target);
+    // (the note's margins beside the words, and the page under them)
+    const beside = !inBlocks && !!target.matches && target.matches('.editor-scroll, .editor-body')
+      && event.clientY >= parts.blocks.getBoundingClientRect().top
+      && event.clientX - target.getBoundingClientRect().left - target.clientLeft <= target.clientWidth;  // (never its scroll bar)
+    if (!inBlocks && !beside) return;
+    if (event.button === 2 && span && inBlocks && target.closest('.block-field.spanned, .block-input')) {
+      event.preventDefault();  // (the box with the caret keeps it, so the menu acts on the pick)
+      return;
+    }
+    if (event.button !== 0) return;
+    const area = inBlocks ? target.closest('.block-input') : null;
+    if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const from = span ? span.anchor : ownAnchor();
+      const measure = new Map();
+      const to = from && pointAt(event.clientX, event.clientY, measure);
+      if (to && (span || to.i !== from.i || !area)) {  // (in the box with the caret itself, the box's own Shift+click)
+        event.preventDefault();
+        event.stopPropagation();
+        setSpan(from, to);
+        watchPress(event, fieldsNow()[from.i], from, measure);
+        return;
+      }
+      for (const rows of measure.values()) rows.el.remove();
+    }
+    clearSpan();
+    if (event.detail > 1) return;
+    if (area) watchPress(event, area, null, new Map());
+    else if (beside || (target.closest('.block, .blocks') && !target.closest('button, a, input, select, label, .link-chips'))) {
+      // Beside the words (a margin, between rows): a drag from there picks from the nearest words, as a document does;
+      // the browser's own picking would pick the boxes' formatted copies instead. (A plain click there is as before.)
+      event.preventDefault();
+      watchBlank(event);
+    }
+  }
+
+  function watchBlank(event) {
+    endPress();
+    const measure = new Map();
+    const press = { area: null, measure, move: null, up: null, rolling: 0 };
+    spanPress = press;
+    press.move = (moved) => {
+      if (!(moved.buttons & 1)) { endPress(); return; }
+      if (Math.abs(moved.clientX - event.clientX) <= STILL && Math.abs(moved.clientY - event.clientY) <= STILL) return;
+      const from = pointAt(event.clientX, event.clientY, measure);
+      const area = from && fieldsNow()[from.i];
+      press.measure = new Map();  // (handed on to the press below)
+      endPress();
+      if (!area) return;
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(from.at, from.at);
+      relit(area);
+      watchPress(moved, area, from, measure);
+      if (spanPress) spanPress.move(moved);
+    };
+    press.up = () => endPress();
+    document.addEventListener('mousemove', press.move);
+    document.addEventListener('mouseup', press.up);
+  }
+
+  /* A mouse held down in a box (`from`: where a Shift+click's pick starts): moved into another box, the pick goes on
+     there; held above or below the note, the note scrolls on with it. */
+  function watchPress(event, area, from, measure) {
+    endPress();
+    const fields = fieldsNow();
+    const press = { area, i: fields.indexOf(area), from, measure, last: null, rolling: 0 };
+    if (press.i < 0) return;
+    spanPress = press;
+    const scroller = area.closest('.editor-scroll');
+    const follow = () => {
+      if (spanPress !== press || !press.last) return;
+      const to = pointAt(press.last.clientX, press.last.clientY, measure);
+      if (!to) return;
+      if (!press.from) {
+        if (to.i === press.i) {  // back in its own box: the box's own picking again
+          if (span) {
+            const anchor = span.anchor;
+            clearSpan();
+            area.setSelectionRange(Math.min(anchor.at, to.at), Math.max(anchor.at, to.at), to.at < anchor.at ? 'backward' : 'forward');
+            relit(area);
+          }
+          return;
+        }
+        if (document.activeElement !== area) return;
+        press.from = span ? span.anchor : { i: press.i, at: area.selectionDirection === 'backward' ? area.selectionEnd : area.selectionStart };
+      }
+      setSpan(press.from, to, measure);
+    };
+    const roll = () => {
+      press.rolling = 0;
+      if (spanPress !== press || !press.last || !scroller || !span) return;
+      const sight = scroller.getBoundingClientRect();
+      const y = press.last.clientY;
+      const by = y < sight.top + EDGE ? y - sight.top - EDGE : y > sight.bottom - EDGE ? y - sight.bottom + EDGE : 0;
+      if (!by) return;
+      const was = scroller.scrollTop;
+      scroller.scrollTop += Math.max(-40, Math.min(40, by / 2));
+      if (scroller.scrollTop === was) return;
+      follow();
+      press.rolling = requestAnimationFrame(roll);
+    };
+    press.move = (moved) => {
+      if (!(moved.buttons & 1)) { endPress(); return; }
+      press.last = moved;
+      const outside = !press.from && !span;
+      if (outside) {
+        const box = area.parentElement.getBoundingClientRect();
+        if (moved.clientY >= box.top && moved.clientY <= box.bottom) return;  // still in its own box: the box picks
+      }
+      follow();
+      // (the browser's own picking in the box with the caret would fight it: the pick is kept here now)
+      if (span) moved.preventDefault();
+      if (span && !press.rolling) press.rolling = requestAnimationFrame(roll);
+    };
+    press.up = () => endPress();
+    document.addEventListener('mousemove', press.move);
+    document.addEventListener('mouseup', press.up);
+  }
+
+  function endPress() {
+    const press = spanPress;
+    if (!press) return;
+    spanPress = null;
+    document.removeEventListener('mousemove', press.move);
+    document.removeEventListener('mouseup', press.up);
+    if (press.rolling) cancelAnimationFrame(press.rolling);
+    for (const rows of press.measure.values()) rows.el.remove();
+    if (span) drawSpan();  // (the browser may have picked in the box with the caret as the mouse let go)
+  }
+
+  /* Keys for picking across boxes (caught before the boxes hear them). */
+  function spanKeys(event) {
+    if (event.isComposing || event.keyCode === 229 || reading) return;
+    const area = event.target;
+    if (!area || !area.matches || !area.matches('.block-input')) return;
+    const fields = fieldsNow();
+    const i = fields.indexOf(area);
+    if (i < 0) return;
+    const mod = event.ctrlKey || event.metaKey;
+    const key = event.key;
+    const last = fields.length - 1;
+    const stop = () => { event.preventDefault(); event.stopPropagation(); };
+    // Ctrl+A picks the box's words; again, the whole note.
+    if (mod && !event.altKey && !event.shiftKey && key.toLowerCase() === 'a') {
+      const all = area.selectionStart === 0 && area.selectionEnd === area.value.length;
+      if (last > 0 && (span || all)) {
+        stop();
+        setSpan({ i: 0, at: 0 }, { i: last, at: fields[last].value.length });
+      }
+      return;
+    }
+    const moves = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    if (!span) {
+      // Shift and an arrow at the edge of the box: on into the box next to it (Ctrl+Shift+Home/End: to the note's start
+      // or end). Inside the box, the box picks as ever.
+      if (!event.shiftKey || event.altKey || !moves.includes(key)) return;
+      const at = area.selectionDirection === 'backward' ? area.selectionStart : area.selectionEnd;
+      const anchor = { i, at: area.selectionDirection === 'backward' ? area.selectionEnd : area.selectionStart };
+      let to = null;
+      if (mod && key === 'End' && i < last) to = { i: last, at: fields[last].value.length };
+      else if (mod && key === 'Home' && i > 0) to = { i: 0, at: 0 };
+      else if (!mod || key === 'ArrowLeft' || key === 'ArrowRight') {
+        if (at === area.value.length && i < last && (key === 'ArrowRight' || key === 'ArrowDown')) to = stepFocus({ i, at }, key, mod, fields);
+        else if (at === 0 && i > 0 && (key === 'ArrowLeft' || key === 'ArrowUp')) to = stepFocus({ i, at }, key, mod, fields);
+      }
+      if (!to) return;
+      stop();
+      setSpan(anchor, to);
+      return;
+    }
+    if (mod && !event.altKey && ['c', 'x', 'v', 'z', 'y', 'b', 'i', 'u', 'h', 'k'].includes(key.toLowerCase())) return;  // (copy, cut, paste, Undo, marks: below and in shortcutKeys)
+    if (event.shiftKey && moves.includes(key)) {
+      stop();
+      const to = mod && key === 'End' ? { i: last, at: fields[last].value.length } : mod && key === 'Home' ? { i: 0, at: 0 }
+        : stepFocus(span.focus, key, mod, fields);
+      if (!to) return;
+      setSpan(span.anchor, to);
+      scrollToCaret(fields[to.i], to.at);
+      return;
+    }
+    const [a, b] = spanEnds();
+    if (moves.includes(key) || key === 'PageUp' || key === 'PageDown' || key === 'Escape') {
+      // Put down, the caret at its start (left, up) or end (right, down) as in any document; Esc: where it ended.
+      stop();
+      const to = key === 'Escape' ? span.focus : ['ArrowLeft', 'ArrowUp', 'Home', 'PageUp'].includes(key) ? a : b;
+      clearSpan();
+      focusBlock(to.i, to.at);
+      return;
+    }
+    if (key === 'Backspace' || key === 'Delete') { stop(); spanReplace(''); return; }
+    if (key === 'Enter' && !mod) { stop(); spanReplace('\n'); return; }
+    // (a letter typed; Ctrl+Alt is AltGr on Windows, which types letters too)
+    if (key.length === 1 && (!event.ctrlKey || event.altKey) && !event.metaKey) { stop(); spanReplace(key); return; }
+    if (key === 'Tab') clearSpan();
+  }
+
+  /* Where the end of a pick goes with an arrow (Ctrl: a word at a time; Home/End: its line's start or end), from
+     `p` in box `p.i`, on into the boxes either side at the edges. Lines are the words' own lines. */
+  function stepFocus(p, key, mod, fields) {
+    const value = fields[p.i].value;
+    const lineAt = value.lastIndexOf('\n', p.at - 1) + 1;
+    const found = value.indexOf('\n', p.at);
+    const lineEnd = found < 0 ? value.length : found;
+    const col = p.at - lineAt;
+    if (key === 'Home') return { i: p.i, at: lineAt };
+    if (key === 'End') return { i: p.i, at: lineEnd };
+    if (key === 'ArrowRight') {
+      if (p.at >= value.length) return p.i < fields.length - 1 ? { i: p.i + 1, at: 0 } : p;
+      if (!mod) return { i: p.i, at: p.at + 1 };
+      const rest = /^[^\p{L}\p{N}_]*[\p{L}\p{N}_']*/u.exec(value.slice(p.at));
+      return { i: p.i, at: p.at + Math.max(1, rest ? rest[0].length : 1) };
+    }
+    if (key === 'ArrowLeft') {
+      if (p.at <= 0) return p.i > 0 ? { i: p.i - 1, at: fields[p.i - 1].value.length } : p;
+      if (!mod) return { i: p.i, at: p.at - 1 };
+      const rest = /[\p{L}\p{N}_']*[^\p{L}\p{N}_]*$/u.exec(value.slice(0, p.at));
+      return { i: p.i, at: p.at - Math.max(1, rest ? rest[0].length : 1) };
+    }
+    if (key === 'ArrowDown') {
+      if (found >= 0) {
+        const next = value.indexOf('\n', found + 1);
+        return { i: p.i, at: found + 1 + Math.min(col, (next < 0 ? value.length : next) - found - 1) };
+      }
+      if (p.i >= fields.length - 1) return { i: p.i, at: value.length };
+      const below = fields[p.i + 1].value;
+      const first = below.indexOf('\n');
+      return { i: p.i + 1, at: Math.min(col, first < 0 ? below.length : first) };
+    }
+    if (key === 'ArrowUp') {
+      if (lineAt > 0) {
+        const prev = value.lastIndexOf('\n', lineAt - 2) + 1;
+        return { i: p.i, at: prev + Math.min(col, lineAt - 1 - prev) };
+      }
+      if (p.i <= 0) return { i: p.i, at: 0 };
+      const above = fields[p.i - 1].value;
+      const lastLine = above.lastIndexOf('\n') + 1;
+      return { i: p.i - 1, at: lastLine + Math.min(col, above.length - lastLine) };
+    }
+    return null;
+  }
+
+  /* Copy, Cut and Paste with words picked across boxes (the keys, the browser's menu): all of the pick. */
+  function spanClipboard(event) {
+    if (!span || reading) return;
+    const area = event.target;
+    if (!area || !area.matches || !area.matches('.block-input') || !parts.blocks.contains(area)) return;
+    const data = event.clipboardData;
+    if (event.type === 'paste') {
+      const words = data ? data.getData('text/plain') : '';
+      if (!words && data && data.files && data.files.length) { clearSpan(); return; }  // (a picture: the note's own way)
+      event.preventDefault();
+      event.stopPropagation();
+      spanReplace(words.replace(/\r\n?/g, '\n'));
+      return;
+    }
+    if (!data) return;
+    event.preventDefault();
+    data.setData('text/plain', spanText());
+    if (event.type === 'cut') spanReplace('');
+  }
+
   function focusBlock(index, where = 'end') {
     const fields = parts.blocks.querySelectorAll('.block-input');
     const field = fields[Math.max(0, Math.min(index, fields.length - 1))];
@@ -1193,6 +1766,7 @@ V.editor = (() => {
   }
 
   function drawBlocks(focus) {
+    clearSpan();
     const scroller = parts.blocks.closest('.editor-scroll');
     const top = scroller ? scroller.scrollTop : 0;
     lastField = null;
@@ -1217,6 +1791,7 @@ V.editor = (() => {
       'aria-label': block.type === 'check' ? 'Checklist item' : block.type === 'heading' ? 'Heading' : 'Note text',
       oninput: (event) => {
         lastInput = event.inputType || '';
+        if (span) clearSpan();  // (words changed some way not caught for it: see span)
         // A new line in a list item or heading (a keyboard that skipped the Enter key below) is tidied once the word
         // is done: changing the words mid-word would break the keyboard's word.
         if (oneLine(block) && !event.isComposing && area.value.includes('\n')) {
@@ -1232,7 +1807,13 @@ V.editor = (() => {
       // Its words as written while it has the caret, else formatted (see preview), and presses on its formatted words
       // landing on the letters pressed (see pressed).
       onfocus: () => gotCaret(area),
-      onblur: (event) => lookSoon(area, event.relatedTarget),
+      onblur: (event) => {
+        lookSoon(area, event.relatedTarget);
+        // The caret gone elsewhere (not to another of the boxes, not Wefty itself put in the background) puts a pick
+        // across boxes down.
+        const to = event.relatedTarget;
+        if (span && document.hasFocus() && !(to && parts.blocks.contains(to))) clearSpan();
+      },
       // The caret's line shows its marks (see letters), and the keyboard's word is underlined in the copy over it.
       onkeyup: lettersSoon,
       onpointerup: lettersSoon,
@@ -1357,6 +1938,19 @@ V.editor = (() => {
 
   function beforeInput(event, index, area) {
     const kind = event.inputType;
+    if (span && !event.isComposing) {
+      // Words picked across boxes, changed some way the keys didn't catch (the browser's menu, an emoji panel, a
+      // keyboard on the screen): all of the pick, as typing over it would.
+      const typed = /^insert(Text|ReplacementText)$/.test(kind) ? (event.data ?? (event.dataTransfer ? event.dataTransfer.getData('text/plain') : ''))
+        : /^insertFrom(Paste|Yank)/.test(kind) && event.dataTransfer ? event.dataTransfer.getData('text/plain')
+          : /^insert(LineBreak|Paragraph)$/.test(kind) ? '\n' : /^delete/.test(kind) ? '' : null;
+      if (typed !== null) {
+        event.preventDefault();
+        spanReplace(typed);
+        return;
+      }
+      if (kind !== 'historyUndo' && kind !== 'historyRedo') clearSpan();
+    }
     if (kind === 'historyUndo' || kind === 'historyRedo') {  // the browser's own Undo (a menu, a keyboard's key)
       event.preventDefault();
       if (kind === 'historyUndo') undo(); else redo();
@@ -1589,6 +2183,7 @@ V.editor = (() => {
   /* The toolbar's checklist button: the line the caret is on becomes a tick-box item (or a new one at the end). */
   function addChecklist() {
     if (reading) return;
+    clearSpan();  // (it's for the caret's line)
     finishWord();
     checkpoint();
     const at = here();
@@ -1616,6 +2211,7 @@ V.editor = (() => {
   /* The heading button: the caret's line becomes a heading; again, a smaller one; again, plain words. */
   function addHeading() {
     if (reading) return;
+    clearSpan();  // (it's for the caret's line)
     finishWord();
     checkpoint();
     const at = here();
@@ -1650,6 +2246,7 @@ V.editor = (() => {
   /* The list button: the caret's line (or the chosen lines) get "- "; again, numbers; again, plain words. */
   function toggleList() {
     if (reading) return;
+    clearSpan();  // (it's for the caret's line)
     finishWord();
     checkpoint();
     const at = here();
@@ -1682,6 +2279,7 @@ V.editor = (() => {
      finished first. */
   function wrap(mark) {
     if (reading) return;
+    if (span) { spanMark(mark); return; }
     const writing = wordInProgress();  // (the button is then for the word being written, caret at its end or not)
     finishWord();
     const at = here();
@@ -1723,6 +2321,7 @@ V.editor = (() => {
   /* The link button: the chosen words become a link ("[words](address)"), or a link goes in where the caret is. */
   async function addLink() {
     if (reading || !note) return;
+    clearSpan();  // (a link is made of words on one line)
     finishWord();
     const at = here();
     const field = at ? at.field : null;
@@ -1918,10 +2517,19 @@ V.editor = (() => {
     const list = ((note && note.attachments) || []).filter((a) => isPicture(a) || thumbMakers[a.kind]);
     const going = [...goingUp].filter((g) => g.picture && g.id === openId).map((g) => g.el);
     V.clear(parts.pictures, going, list.map((a) => {
-      if (!isPicture(a)) return thumbMakers[a.kind](a, openId);
+      if (!isPicture(a)) {
+        // (another part's thumbnail, js/ink.js's drawing: Open is a press on it, Remove takes it out with an Undo)
+        const made = thumbMakers[a.kind](a, openId);
+        return made instanceof Element ? V.contextMenu(made, () => [
+          { label: 'Open', icon: 'open', onClick: () => made.click() },
+          { sep: true },
+          { label: 'Remove', icon: 'trash', danger: true, onClick: () => removeFile(a) },
+        ], { label: 'Drawing: options' }) : made;
+      }
       const img = V.h('img', { alt: a.name || 'Picture', loading: 'lazy' });
       V.cloud.blob(a.path).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.classList.add('broken'));
-      return V.h('button.thumb', { type: 'button', onclick: () => viewPicture(a, img), 'aria-label': 'Open picture' }, img);
+      return V.contextMenu(V.h('button.thumb', { type: 'button', onclick: () => viewPicture(a, img), 'aria-label': 'Open picture' }, img),
+        () => pictureItems(a, img), { label: `${a.name || 'Picture'}: options` });
     }));
     parts.pictures.hidden = !list.length && !going.length;
     drawFiles();
@@ -1935,15 +2543,53 @@ V.editor = (() => {
     parts.files.hidden = !list.length && !going.length;
   }
 
+  /* A picture's menu (1.19.1: a right-click, a long press, the menu key): what its viewer does, and Remove (with an
+     Undo, as a file's x). */
+  function pictureItems(a, img) {
+    if (!note) return [];
+    return [
+      { label: 'Open', icon: 'open', onClick: () => viewPicture(a, img) },
+      { label: 'Save a copy', icon: 'download', onClick: () => saveCopy(a, 'picture.jpg') },
+      ...pictureActions.map((action) => ({ label: action.label, icon: action.icon, onClick: () => action.onClick(a, img, openId) })),
+      { sep: true },
+      { label: 'Remove', icon: 'trash', danger: true, onClick: () => removeFile(a) },
+    ];
+  }
+
+  /* A file's (or a recording's): open it, save a copy, play it, remove it. */
+  function fileItems(a, play = null) {
+    if (!note) return [];
+    const voice = a.kind === 'voice';
+    return [
+      play ? { label: playing && playing.path === a.path && !playing.audio.paused ? 'Pause' : 'Play', icon: 'play', onClick: play }
+        : { label: 'Open', icon: 'open', onClick: () => openFile(a) },
+      { label: 'Save a copy', icon: 'download', onClick: () => saveCopy(a, voice ? 'Voice memo' : 'file') },
+      { sep: true },
+      { label: 'Remove', icon: 'trash', danger: true, onClick: () => removeFile(a) },
+    ];
+  }
+
+  async function saveCopy(a, fallback) {
+    try {
+      const name = a.name || fallback;
+      const url = await V.cloud.link(a.path, { download: name });
+      if (V.desktop) await V.pc.call('saveFile', { id: '', url, name });
+      else window.open(url, '_blank');
+    } catch (error) {
+      V.problem(error);
+    }
+  }
+
   function fileRow(a) {
     if (/^audio\//.test(a.mime || '')) return audioRow(a);
     const kind = V.format.fileKind(a.mime, a.name);
-    return V.h('div.file-chip', { dataset: { path: a.path } },
+    return V.contextMenu(V.h('div.file-chip', { dataset: { path: a.path } },
       V.h('button.file-open', { type: 'button', title: `Open ${a.name || 'the file'}`, onclick: () => openFile(a) },
         V.h('span.file-badge', { text: kind.short.slice(0, 4), 'aria-hidden': 'true' }),
         V.h('span.file-text', {}, V.h('span.file-name', { text: a.name || 'File' }),
           V.h('span.file-meta', { text: `${kind.label} · ${V.size(a.size)}` }))),
-      V.iconButton('x', `Remove ${a.name || 'this file'}`, () => removeFile(a), 'file-remove'));
+      V.iconButton('x', `Remove ${a.name || 'this file'}`, () => removeFile(a), 'file-remove')), () => fileItems(a),
+    { label: `${a.name || 'File'}: options` });
   }
 
   const savedOnPc = new Map();  // a file's cloud path -> where the PC saved it (opened again from there)
@@ -1992,7 +2638,7 @@ V.editor = (() => {
     } });
     setTimeout(() => {
       const used = [...V.data.notes.values(), note].some((n) => n && (n.attachments || []).some((x) => x.path === a.path));
-      if (!undone && !used) V.cloud.remove([a.path]).catch(() => {});
+      if (!undone && !used) V.cloud.remove([a.path, a.preview].filter(Boolean)).catch(() => {});  // (a drawing's picture too)
     }, LET_GO_AFTER);
   }
 
@@ -2033,11 +2679,12 @@ V.editor = (() => {
     };
     ui.play.addEventListener('click', () => togglePlay(a, ui));
     if (playing && playing.path === a.path) { playing.ui = ui; showPlaying(); }
-    return V.h('div.file-chip.audio' + (voice ? '.voice' : ''), { dataset: { path: a.path } },
+    return V.contextMenu(V.h('div.file-chip.audio' + (voice ? '.voice' : ''), { dataset: { path: a.path } },
       ui.play,
       V.h('span.file-text', {}, V.h('span.file-name', { text: voice ? 'Voice memo' : a.name || 'Audio' }), ui.time,
         V.h('span.bar.audio-bar', {}, ui.fill)),
-      V.iconButton('x', voice ? 'Remove this voice memo' : `Remove ${a.name || 'this file'}`, () => removeFile(a), 'file-remove'));
+      V.iconButton('x', voice ? 'Remove this voice memo' : `Remove ${a.name || 'this file'}`, () => removeFile(a), 'file-remove')),
+    () => fileItems(a, () => togglePlay(a, ui)), { label: `${voice ? 'Voice memo' : a.name || 'Audio'}: options` });
   }
 
   function audioMeta(a) {
@@ -2324,6 +2971,7 @@ V.editor = (() => {
   /* `words` shown: in the boxes that are there when the note keeps its shape (nothing rebuilt, so the phone's
      keyboard stays up), else drawn again. */
   function fill(words) {
+    clearSpan();
     const next = parse(words);
     if (reading) { blocks = next; drawRead(); return; }
     const fields = [...parts.blocks.querySelectorAll('.block-input')];
@@ -2367,7 +3015,11 @@ V.editor = (() => {
     // Quick read's pieces (never a locked note's), each keeping its place in the note for a tap (js/reading.js), and the
     // reading ruler (shown while dyslexia-friendly text has it on)
     if (!note.locked) V.reading.area(shown.el, readMap);
-    parts.read = V.h('div.read-view', { onclick: readTap }, shown.el);
+    parts.read = V.h('div.read-view', {
+      onclick: readTap,
+      onpointerdown: (event) => { readPointer = event.pointerType; },
+      onmousedown: () => clearTimeout(readClick),  // (a second press: picking words, see readTap)
+    }, shown.el);
     V.reading.ruler(parts.read);
     V.clear(parts.body, parts.read, parts.pictures, parts.files);
   }
@@ -2391,13 +3043,44 @@ V.editor = (() => {
   }
 
   /* A tap on the words: back to writing, with the caret where the tap was. Links open and ticks tick instead, and
-     words picked to copy stay picked. */
+     words picked to copy stay picked. A mouse's click waits a moment first (1.19.1: a double click's first click took
+     the Read view away, so a word could never be picked there): a second click picks a word (a third, its line), and
+     so does a new press (a drag picking words); Shift+click picks on to there and Ctrl+click is left alone, as
+     anywhere. */
+  const READ_CLICK_WAIT = 400;  // ms a mouse's click on the Read view waits for a second one
+  let readClick = 0;
+  let readPointer = '';
   function readTap(event) {
     if (event.target.closest('a, button')) return;
+    clearTimeout(readClick);
     const picked = window.getSelection && window.getSelection();
     if (picked && !picked.isCollapsed && parts.read.contains(picked.anchorNode)) return;
-    setReading(false, readSpot(event.clientX, event.clientY));
+    if (event.detail > 1 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    const spot = readSpot(event.clientX, event.clientY);
+    if (readPointer !== 'mouse') { setReading(false, spot); return; }
+    const view = parts.read;
+    readClick = setTimeout(() => {
+      const now = window.getSelection && window.getSelection();
+      if (!reading || parts.read !== view || !view.isConnected) return;
+      if (now && !now.isCollapsed && view.contains(now.anchorNode)) return;
+      setReading(false, spot);
+    }, READ_CLICK_WAIT);
   }
+
+  /* Ctrl+A in the Read view picks the note's words (not the whole of Wefty round it). */
+  document.addEventListener('keydown', (event) => {
+    if (!reading || !parts.read || !parts.read.isConnected || event.isComposing) return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || (event.key || '').toLowerCase() !== 'a') return;
+    const target = event.target;
+    if (target !== document.body && target !== document.documentElement && !parts.read.contains(target)) return;
+    const body = parts.read.querySelector('.read-body') || parts.read;
+    event.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(body);
+    const picked = window.getSelection();
+    picked.removeAllRanges();
+    picked.addRange(range);
+  });
 
   function readSpot(x, y) {
     let node = null;
@@ -2585,6 +3268,13 @@ V.editor = (() => {
   }
 
   function moreMenu(anchor) {
+    V.menu(anchor, moreItems());
+  }
+
+  /* The note's ⋯ items: its ⋯ button, and a right-click (or the menu key) on the note where there are no words
+     (its top bars, the empty page under the words: 1.19.1). In the words themselves the browser's own menu stays. */
+  function moreItems() {
+    if (!note) return [];
     const archived = V.organise.isArchived(note);
     const template = V.organise.isTemplate(note);
     // Archived, or made a template again, here: saved at once (these live in `extra`, which the autosave doesn't
@@ -2594,7 +3284,7 @@ V.editor = (() => {
       queued = '';
       await save();
     };
-    V.menu(anchor, [
+    return [
       { label: 'Move to...', icon: 'folder-move', onClick: async () => {
         const id = note.id;
         const folder = await V.organise.chooseFolder({ current: note.folder_id });
@@ -2637,7 +3327,7 @@ V.editor = (() => {
         onClick: () => V.reading.toggle('quickHighlight') } : null,
       { label: 'Dyslexia-friendly text', icon: 'text', checked: V.reading.get().dyslexia, onClick: () => V.reading.toggle('dyslexia') },
       { label: 'Move to Trash', icon: 'trash', danger: true, onClick: trash },
-    ]);
+    ];
   }
 
   /* The note as it is in the editor now, for Export and Copy as text: its words as typed (an unlocked locked note's
@@ -2752,6 +3442,7 @@ V.editor = (() => {
   /* -- the whole thing */
 
   function drawBody() {
+    clearSpan();
     if (note.locked && !revealed) {
       V.clear(parts.body, V.h('div.locked-face', {}, V.icon('lock', 'big'),
         V.h('p', { text: 'This note is locked.' }),
@@ -3009,6 +3700,13 @@ V.editor = (() => {
         else if (reading && event.target.matches('.editor-scroll, .editor-body')) setReading(false);
       },
     }, parts.meta, parts.title, parts.body), parts.ask, parts.tools);
+    // Picking words across the boxes (see span): heard before the boxes themselves.
+    el.addEventListener('mousedown', spanDown, true);
+    el.addEventListener('keydown', spanKeys, true);
+    for (const type of ['copy', 'cut', 'paste']) el.addEventListener(type, spanClipboard, true);
+    // A right-click where there are no words: the note's ⋯ (a long press there is a phone's own; the ⋯ is in sight).
+    V.contextMenu(el, () => moreItems(), { label: 'Note options', touch: false,
+      skip: (target) => !(target.closest('.editor-bar, .note-meta') || target.matches('.editor-scroll, .editor-body, .blocks, .pictures, .files')) });
     drawBar();
     fillAsk();
     drawBody();
