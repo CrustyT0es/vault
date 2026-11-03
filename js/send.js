@@ -345,16 +345,61 @@ V.send = (() => {
     return true;
   }
 
-  async function text(words, { to = V.other, name = '' } = {}) {
+  /* Words (or a link) sent to device `to`. Resolves the transfer row (`quiet`: no toast: Chat says it itself). */
+  async function text(words, { to = V.other, name = '', quiet = false } = {}) {
     const clean = String(words || '').trim();
-    if (!clean) return;
+    if (!clean) return null;
     const link = V.isLink(clean);
-    await V.cloud.save('transfers', {
+    const row = await V.cloud.save('transfers', {
       id: V.uuid(), kind: link ? 'link' : 'text', name: (name || clean.split('\n')[0]).slice(0, 120),
       path: null, size: 0, mime: '', text: clean.slice(0, 200000), from_device: V.device, to_device: to,
       received_at: null, deleted: false, extra: {}, created_at: new Date().toISOString(),
     });
-    V.toast(`Sent to ${V.deviceName(to)}`);
+    if (!quiet) V.toast(`Sent to ${V.deviceName(to)}`);
+    return row;
+  }
+
+  /* Files sent straight to device `to`, without the tray (Chat's send_to_device, js/chattools.js): each with its
+     preview, through the same queue as Send (offline: they go when the internet's back). Resolves their ids, which
+     are their transfer rows' ids once they've gone up. */
+  async function sendFiles(list, { to }) {
+    if (!V.DEVICES.includes(to) || to === V.device) throw new Error('That isn\'t one of your other devices.');
+    const picked = [...(list || [])];
+    const big = picked.find((f) => f.size > MAX);
+    if (big) throw new Error(`${big.name} is over 50 MB, the most the free cloud takes.`);
+    const items = picked.map((file) => ({ id: V.uuid(), file, name: file.name || 'file', size: file.size, to,
+      mime: file.type || 'application/octet-stream', url: '', thumb: null, w: 0, h: 0, seconds: 0, making: true }));
+    preparing.push(...items);
+    for (const item of items) {
+      making = making.then(async () => {
+        const made = await preview(item.file);
+        if (made && made.blob) Object.assign(item, { thumb: made.blob, w: made.w, h: made.h, seconds: made.seconds,
+          url: URL.createObjectURL(made.blob) });
+      }).catch(() => {}).then(() => { item.making = false; drawQueue(); });
+      item.ready = making;
+    }
+    drawQueue();
+    await queue(items, to);
+    return items.map((item) => item.id);
+  }
+
+  /* Sent things taken back (Chat's Undo): one still waiting to go up is never sent (as "Don't send"), one that went is
+     taken out of Share on both ends (as its x). Resolves how many had already arrived there. */
+  async function unsend(ids) {
+    let arrived = 0;
+    for (const id of ids || []) {
+      if (await V.db.get('outgoing', id)) {
+        await V.db.del('outgoing', id);
+        V.emit('outgoing');
+        continue;
+      }
+      const row = V.data.transfers.get(id);
+      if (!row || row.deleted) continue;
+      if (row.received_at) arrived += 1;
+      await remove(row);
+    }
+    draw();
+    return arrived;
   }
 
   async function remove(transfer) {
@@ -1133,7 +1178,7 @@ V.send = (() => {
   window.addEventListener('online', runQueue);
 
   return {
-    render, files, text, runQueue, takeShared, unseen, deviceSetting,
+    render, files, text, sendFiles, unsend, runQueue, takeShared, unseen, deviceSetting,
     targets, preview,
     // For js/arrive.js's card: the preview, the big view, opening and marking what came as arrived.
     image, viewer, received, openHere, openLink, kindIcon,

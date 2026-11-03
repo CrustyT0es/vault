@@ -227,6 +227,14 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
   background: var(--accent); color: var(--on-accent); font: 600 10.5px/18px var(--font); text-align: center;
   box-shadow: 0 0 0 2px var(--surface); font-variant-numeric: tabular-nums;
 }
+/* Chat's dot (1.18): an answer is being written while another screen shows. It sits where the badge would, and only
+   when there's no number; it breathes gently (still with reduced motion, and while Wefty is out of sight). */
+.tab-dot {
+  position: absolute; top: -2px; left: 17px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface); animation: tab-dot-breathe 1.8s ease-in-out infinite;
+}
+@keyframes tab-dot-breathe { 50% { opacity: .4; } }
+@media (forced-colors: active) { .tab-dot { background: Highlight; } }
 /* Settings on a phone is a page of its own: its back arrow (and Back) leave it, so the tabs make way. */
 @media (max-width: 899px) { #app.ready[data-view=settings] .tabs { display: none; } }
 
@@ -251,6 +259,7 @@ html.away *, html.away *::before, html.away *::after { animation-play-state: pau
   .tab-icon, .tab .icon { width: 22px; height: 22px; }
   .tab .weave { width: 20px; }
   .badge { top: -6px; left: 13px; box-shadow: 0 0 0 2px var(--bg); }
+  .tab-dot { top: -3px; left: 15px; box-shadow: 0 0 0 2px var(--bg); }
   .tabs .rail-me { display: grid; width: 52px; height: 52px; margin-top: 6px; }
   .rail-me .av { width: 36px; height: 36px; }
   .rail-me[data-mark=ring]::after { width: 44px; height: 44px; }
@@ -2420,30 +2429,101 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .list.picking .up-row { grid-template-columns: minmax(0, 1fr); }
 .list.picking .up-tick, .list.picking .up-when { display: none; }
 
-/* flash cards */
-.study-top { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; }
-.study-progress { flex: 1; min-width: 0; margin: 0; color: var(--text-2); font: 500 13.5px/20px var(--font); font-variant-numeric: tabular-nums; }
-.study-shuffle.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
-.study-bar { display: block; height: 4px; margin-bottom: 14px; }
+/* flash cards: the study screen (1.18, js/review.js screen). The whole screen on a phone, a dialog from 700 px; over
+   the full-screen note (55) and the note-taker (58), under sheets and menus (60). From the top: the deck's name with
+   ⋯ and Done, "4 of 31" and its line, the card (it takes the room there is, so nothing under it ever moves), then the
+   three answers in one row. */
+.study-layer {
+  position: fixed; inset: 0; z-index: 59; display: flex; justify-content: center; align-items: stretch; background: var(--page);
+  opacity: 0; transition: opacity var(--d-2) var(--ease-out); --safe-top: var(--notch);
+}
+.study-layer.shown { opacity: 1; }
+.study-layer.leaving { opacity: 0; transition-timing-function: var(--ease-in); }
+.study { width: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--page); overflow: hidden; }
+@media (min-width: 700px) {
+  .study-layer { background: var(--scrim); align-items: center; padding: 24px; }
+  .study { max-width: 640px; height: min(760px, 100%); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-3); }
+  :root[data-black] .study { --page: var(--card); }  /* (a dialog stays a card in Pure black, as sheets do) */
+}
+.study-head {
+  display: flex; align-items: center; gap: 4px; min-height: 56px; flex: none;
+  padding: calc(6px + var(--safe-top)) max(10px, env(safe-area-inset-right, 0px)) 2px max(20px, env(safe-area-inset-left, 0px));
+}
+@media (min-width: 700px) { .study-head { padding-top: 8px; } }
+.study-title { flex: 1; min-width: 0; margin: 0; font: 600 18px/24px var(--font); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.study-head .study-more[hidden] { display: none; }
+.study.ended .study-head :is(.study-more, .study-done) { display: none; }  /* (the end has its own buttons) */
+.study-done { flex: none; min-height: 44px; padding: 0 14px; color: var(--accent-ink); font-size: 15px; }
+.study-done:hover { color: var(--accent-ink); }
+.study-where { display: grid; gap: 8px; flex: none; padding: 2px 20px 0; }
+.study-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.study-progress { margin: 0; min-width: 0; color: var(--text-2); font: 600 14px/20px var(--font); font-variant-numeric: tabular-nums; }
+.study-aside { flex: none; color: var(--muted); font: 500 13px/18px var(--font); font-variant-numeric: tabular-nums; }
+.study-bar { display: block; flex: none; height: 4px; }
+.study-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 20px; }
+.study-foot { flex: none; padding: 0 20px calc(16px + var(--safe-bottom)); }
+.study-foot:empty { display: none; }
+
+/* the card: tap to flip; what it's from on top, its words in the middle, how to flip at its foot */
 .flash-card {
-  display: grid; align-content: center; justify-items: center; gap: 12px; width: 100%; min-height: 230px; padding: 28px 22px 18px;
-  border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--page); color: var(--text); text-align: center;
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; min-height: 0; padding: 18px 20px; overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--card); color: var(--text); text-align: center;
   transition: background var(--d-2), border-color var(--d-2);
 }
+.study-stage > .flash-card { flex: 1 1 auto; }
 .flash-card:hover:not(:disabled) { border-color: var(--control); }
 .flash-card.flipped { background: var(--accent-wash); border-color: var(--accent-line); }
-.flash-card:disabled { cursor: default; }
-.flash-side { color: var(--muted); font: 600 12.5px/16px var(--font); }
+.flash-side { min-height: 18px; color: var(--muted); font: 600 13px/18px var(--font); overflow-wrap: anywhere; }
 .flash-card.flipped .flash-side { color: var(--accent-ink); }
-.flash-words { font: 600 22px/30px var(--font-display); letter-spacing: -.01em; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 34ch; }
-.flash-words.end { font: 500 16px/24px var(--font); color: var(--text-2); }
-.flash-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 500 12.5px/16px var(--font); }
-.flash-hint .icon { width: 14px; height: 14px; }
-.study-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-.study-actions > .wide-btn:only-child { grid-column: 1 / -1; }
-.study-actions .btn { min-height: 48px; }
-.btn.not-yet { color: var(--warn); }
-.study-hint { margin: 14px 0 0; }
+.flash-face { display: grid; justify-items: center; gap: 10px; width: 100%; margin: auto 0; }
+.flash-q { max-width: 36ch; color: var(--muted); font: 500 15px/22px var(--font); overflow-wrap: anywhere; white-space: pre-wrap; }
+.flash-words {
+  max-width: 30ch; font: 600 clamp(22px, 6.6vw, 28px)/1.3 var(--font-display); letter-spacing: -.01em;
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.flash-card[data-size="big"] .flash-words { font-size: clamp(26px, 8.4vw, 36px); }
+.flash-card[data-size="long"] .flash-words { max-width: 40ch; font: 500 18px/27px var(--font); }
+.flash-words.in-context { font-weight: 500; }
+.flash-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
+.flash-hint .icon { width: 15px; height: 15px; }
+.flash-card.turned .flash-face { animation: flash-turn var(--d-3) var(--ease-out); }
+@keyframes flash-turn { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .flash-card.turned .flash-face { animation: none; }
+  .study-layer { transition: none; }
+}
+
+/* the three answers: Still learning, Next, I know it (the screen's main button), all the same size */
+.study-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.btn.study-btn {
+  flex-direction: column; gap: 4px; min-height: 72px; padding: 10px 6px; border-radius: var(--r-lg);
+  font: 600 15px/19px var(--font); white-space: normal; text-align: center; overflow-wrap: anywhere;
+}
+.btn.study-btn .icon { width: 22px; height: 22px; }
+.btn.study-btn.still { color: var(--warn); }
+.btn.study-btn.skip { background: transparent; color: var(--text-2); }
+.btn.study-btn.skip:hover { background: var(--surface-2); color: var(--text); }
+.study-key { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .study-key { display: block; position: absolute; top: 6px; right: 6px; }
+  .btn.study-btn.know .study-key { color: var(--on-primary); background: transparent; border-color: color-mix(in oklab, var(--on-primary) 45%, transparent); }
+}
+
+/* the end ("Done for now"), and Learn's stop between sets */
+.study-end { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 4px; text-align: center; }
+.study-end-mark { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 6px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); }
+.study-end-mark .icon { width: 30px; height: 30px; }
+.study-end h3 { margin: 0; font: 600 24px/30px var(--font-display); letter-spacing: -.01em; }
+.study-end p { margin: 0; max-width: 32ch; color: var(--text-2); font: 500 16px/24px var(--font); overflow-wrap: anywhere; }
+.study-end .study-end-sum { color: var(--text); font-weight: 600; }
+.study-end-go { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.study-end-go.one { grid-template-columns: minmax(0, 1fr); }
+.study-end-go .btn { min-height: 52px; white-space: normal; text-align: center; }
+/* "How flash cards work" (the ⋯) */
+.study-how { display: grid; gap: 10px; margin: 4px 0 12px; padding-left: 20px; color: var(--text-2); font: 400 15px/22px var(--font); }
+.study-how strong { color: var(--text); font-weight: 600; }
+.sheet-body > .study-how-make { margin: 0; text-align: left; }
 
 /* the focus timer */
 .focus-box { display: grid; justify-items: center; gap: 6px; padding: 18px 0 16px; }
@@ -2563,18 +2643,18 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .heading-block.h3 .block-preview { color: var(--text-2); }
 .check-row.done .block-preview { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); color: var(--muted); }
 
-/* the Review page, in the Notes tab's list */
+/* the Flash cards page, in the Notes tab's list (1.18: one button, Study, and the decks under it) */
 .list.review { gap: 8px; }
 .review-head { display: grid; gap: 12px; padding: 14px 14px 14px 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); }
 .review-today { margin: 0; color: var(--text-2); font: 500 14px/22px var(--font); font-variant-numeric: tabular-nums; }
 .review-today strong { color: var(--text); font: 600 17px/24px var(--font); }
-.review-today .sep { color: var(--faint); }
-.review-today .part { white-space: nowrap; }
 .review-later { margin: -8px 0 0; }
-.review-go { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.review-go .btn { min-height: 44px; }
+.review-go { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.review-go .btn { min-height: 48px; font-size: 15px; }
 .list.review .list-section { margin: 12px 4px 0; }
-.deck-row, .test-row {
+.deck-row { display: block; min-width: 0; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); }
+.deck-main { width: 100%; }
+.test-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0;
   padding: 4px 8px 4px 4px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card);
 }
@@ -2598,22 +2678,23 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   min-width: 26px; height: 22px; padding: 0 7px; border-radius: 11px; flex: none; background: var(--accent-soft);
   color: var(--accent-ink); font: 600 12.5px/22px var(--font); text-align: center; font-variant-numeric: tabular-nums;
 }
-.deck-learn {
+.deck-chev { width: 18px; height: 18px; color: var(--faint); }
+.deck-go {
   position: relative; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; flex: none;
   border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--card); color: var(--text-2);
   font: 600 13px/1 var(--font); white-space: nowrap;
 }
-.deck-learn::after { content: ""; position: absolute; inset: -4px -2px; }  /* 44 px to a finger */
-.deck-learn .icon { width: 16px; height: 16px; }
-.deck-learn:hover { background: var(--surface-2); color: var(--text); }
+.deck-go::after { content: ""; position: absolute; inset: -4px -2px; }  /* 44 px to a finger */
+.deck-go .icon { width: 16px; height: 16px; }
+.deck-go:hover { background: var(--surface-2); color: var(--text); }
 .test-row { border-color: var(--accent-line); background: var(--accent-wash); }
-.test-row .deck-learn { background: var(--card); }
+.test-row .deck-go { background: var(--card); }
 .test-icon { width: 20px; height: 20px; margin-left: 4px; color: var(--accent-ink); }
 .test-text { flex: 1; min-width: 0; font: 600 14px/20px var(--font); font-variant-numeric: tabular-nums; }
 .test-row.soon { border-color: transparent; background: var(--warn-soft); }
 .test-row.soon .test-icon { color: var(--warn); }
 .review-empty .hint { max-width: 320px; }
-/* Review's "Make cards with AI" (js/aicards.js), under its two buttons and in the empty page */
+/* The page's "Make cards with AI" (js/aicards.js), under its button and in the empty page */
 .review-make { display: flex; justify-content: center; margin-top: -4px; }
 .review-make .btn { min-height: 44px; color: var(--accent-ink); }
 .review-empty .review-make { margin-top: 4px; }
@@ -2652,24 +2733,18 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .sheet-body > .aic .aic-foot { margin: 14px 0 0; text-align: left; }
 @media (pointer: coarse) { .aic-card .aic-tick { width: 24px; height: 24px; margin-top: 10px; } }
 
-/* reviewing: the answer buttons say when the card comes back; a blank is a line, its answer marked in its sentence */
-.study-actions .btn.two-line { flex-direction: column; gap: 0; line-height: 18px; min-height: 52px; }
-.btn-when { font: 500 12px/16px var(--font); opacity: .85; }
+/* a blank is a line, its answer marked in its sentence */
 .blank-gap { display: inline-block; width: 3.2em; height: .9em; margin: 0 .1em; border-bottom: 2.5px solid var(--accent); color: transparent; overflow: hidden; vertical-align: baseline; }
 .blank-fill { padding: 0 4px; border-radius: 5px; background: var(--accent-soft); color: var(--accent-ink); }
-.flash-words.in-context { font: 500 19px/28px var(--font); color: var(--text-2); }
 
-/* Learn */
-.learn-top { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 10px; }
-.learn-round { flex: 1; min-width: 0; margin: 0; font: 600 14px/20px var(--font); }
-.learn-count { flex: none; color: var(--muted); font: 500 13px/18px var(--font); font-variant-numeric: tabular-nums; }
+/* Learn, on the study screen: its question card, the choices or the box, and what was right */
+.study[data-mode="learn"] .study-stage { overflow: auto; overscroll-behavior: contain; }
 .learn-body { display: grid; gap: 12px; }
 .learn-card {
   display: grid; align-content: center; justify-items: center; gap: 10px; min-height: 150px; padding: 22px 20px;
-  border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--page); text-align: center;
+  border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--card); text-align: center;
 }
-.learn-card.end { min-height: 200px; }
-.learn-term { font: 600 21px/29px var(--font-display); letter-spacing: -.01em; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 34ch; }
+.learn-term { font: 600 22px/30px var(--font-display); letter-spacing: -.01em; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 34ch; }
 .learn-claim { display: grid; justify-items: center; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--text-2); font: 500 16px/24px var(--font); }
 .learn-claim-label { color: var(--muted); font: 600 12px/16px var(--font); }
 .learn-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -2768,6 +2843,7 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   .list.review .list-section { margin: 14px 12px 4px; }
   .review-head { margin: 2px 2px 6px; }
   .deck-row, .test-row { border-color: transparent; background: transparent; border-radius: var(--r-md); padding: 0 6px 0 0; }
+  .deck-row { padding: 0; }
   .deck-row + .deck-row { box-shadow: 0 -1px 0 var(--line-soft); }
   .test-row { background: var(--accent-wash); }
   .test-row.soon { background: var(--warn-soft); }
@@ -2886,8 +2962,11 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-tick .icon svg { stroke-width: 2.6; }
 .today-tick[aria-pressed=true]::before { background: var(--accent); border-color: var(--accent); }
 .today-tick[aria-pressed=true] .icon { visibility: visible; }
-.today-row-text { display: grid; gap: 2px; min-width: 0; }
+.today-row-text { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; min-width: 0; }
+.today-row-text > :not(.today-chip) { grid-column: 1; }
 .today-row-text strong { font: 500 15px/20px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* (the chip is in with the words since 1.18: at the row's end here, as before; under the title on a phone, below) */
+.today-row-text > .today-chip { grid-column: 2; grid-row: 1 / span 2; }
 .today-row.done strong { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 .today-where, .today-sub {
   display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; border: none; background: none; text-align: left;
@@ -2937,6 +3016,7 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 
 /* Flash cards due today */
 .today-cards { padding: 12px 16px 4px; }
+.today-cards.one-deck { padding-bottom: 12px; }
 .today-cards.done { display: grid; gap: 2px; padding: 16px; }
 .today-cards.done .hint { margin: 0; }
 .fc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 4px; }
@@ -3043,15 +3123,17 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .days-week { min-width: 0; }
 .day-group { min-width: 0; margin-top: 16px; border-radius: var(--r-lg); scroll-margin-top: 16px; }
 .days-week > .today-sec-head + .day-group { margin-top: 0; }
-.day-group.empty { margin-top: 10px; }
+/* (a day with nothing on it: never the class "empty", the empty screens' own, which centred it with 56 px of
+   padding above and below in 1.17) */
+.day-group.dg-empty { margin-top: 10px; }
 .dg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-height: 22px; margin: 0 2px 6px; }
-.day-group.empty .dg-head { margin-bottom: 0; }
+.day-group.dg-empty .dg-head { margin-bottom: 0; }
 .dg-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--text); font: 600 15px/22px var(--font); }
 .dg-title:focus { outline: none; }
 .dg-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
 .dg-name { flex: none; }
 .dg-date { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 500 13.5px/20px var(--font); }
-.day-group.empty .dg-name { color: var(--text-2); font-weight: 500; }
+.day-group.dg-empty .dg-name { color: var(--text-2); font-weight: 500; }
 .dg-meta { flex: none; color: var(--muted); font: 500 13px/18px var(--font); white-space: nowrap; }
 .dg-meta .late-w { color: var(--danger); font-weight: 600; }
 .dg-list { margin: 0; list-style: none; }
@@ -3125,6 +3207,86 @@ button.today-row-text {
   .today-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .today-col.right { order: 0; }
 }
+
+/* 1.18: a calm Today on a phone (the owner: "on my phone today felt really overwhelming", js/today.js). Under 900 px:
+   no title over the strip on this week, Quick actions one row of four small buttons, Today's own day near the top, a
+   row's time chip under its title (beside the folder), compact test and flash card cards, and a run of days with
+   nothing on them as one quiet line. */
+.day-gap { margin: 10px 2px 0; border-radius: 6px; color: var(--muted); font: 500 13.5px/20px var(--font); scroll-margin-top: 16px; }
+.days-week > .today-sec-head + .day-gap { margin-top: 0; }
+.day-gap:focus { outline: none; }
+.day-gap:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.day-gap.flash { animation: day-lit 1.8s ease-out; }
+@media (prefers-reduced-motion: reduce) { .day-gap.flash { animation: none; background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
+@media (forced-colors: active) { .day-gap.flash { outline: 2px solid Highlight; outline-offset: 6px; } }
+.days-more-n { color: var(--muted); font-weight: 500; }
+@media (max-width: 899px) {
+  .today-sec-head { margin-top: 20px; }
+  /* the strip: its title only while it's on another week (the list's "This week" is the one heading for this one) */
+  .today-week[data-week="0"] .today-week-title { visibility: hidden; }
+
+  /* Quick actions: one row of four, each an icon over its name (the big tiles took a third of the screen) */
+  .today-sec[data-section=quick] { padding-top: 14px; }
+  .today-tiles { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+  .today-tile, .today-tile.big {
+    grid-row: 1; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-height: 0;
+    padding: 4px 2px 6px; border: none; border-radius: var(--r-md); background: none; box-shadow: none; text-align: center;
+  }
+  .today-tile .tile-ic, .today-tile.big .tile-ic { width: 48px; height: 48px; border-radius: 15px; transition: transform var(--d-1) var(--ease-out); }
+  .today-tile .tile-ic .icon, .today-tile.big .tile-ic .icon { width: 22px; height: 22px; }
+  .today-tile:active .tile-ic { transform: scale(.94); }
+  .today-tile .tile-text, .today-tile.big .tile-text { align-self: stretch; justify-items: center; }
+  .today-tile .tile-label, .today-tile.big .tile-label { color: var(--text-2); font: 600 12.5px/16px var(--font); }
+  .today-tile .tile-text small, .today-tile.big .tile-text small { display: none; }
+  .today-tile .tile-count { box-shadow: 0 0 0 2px var(--bg); }
+
+  /* Today's own day, on its own near the top */
+  .today-col > .day-group.dg-top { margin-top: 22px; }
+  .day-group.dg-top > .dg-head { margin-bottom: 8px; }
+  h2.dg-title { font-size: 16px; }
+
+  /* a row: the title gets the whole width (two lines), the chip goes under it, at the end of the folder's line (or on
+     a line of its own when both don't fit); the box stays by the first line */
+  .today-row { align-items: start; padding: 2px 12px 8px 4px; }
+  .today-row-text { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 11px; }
+  button.today-row-text { align-content: flex-start; }
+  .today-row-text > strong {
+    flex: 1 0 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  }
+  .today-row-text > .today-sub, .today-row-text > .today-where { flex: 1 1 0; min-width: min(6.5em, 100%); }
+  .today-row-text > .today-chip { margin-left: auto; }
+  .today-more-row { padding-left: 52px; }
+
+  /* Tests coming up: smaller countdown, less padding (Study stays the one clear button, beside the numbers) */
+  .today-test { gap: 10px 12px; padding: 12px 14px; }
+  .today-days { width: 46px; height: 50px; border-radius: 11px; }
+  .today-days b { font-size: 21px; line-height: 24px; }
+  .today-days span { font-size: 11px; line-height: 14px; }
+  .today-days.word b { font-size: 11.5px; }
+  .today-test .test-text strong { font-size: 15.5px; line-height: 21px; }
+  .today-test .test-text span { font-size: 13.5px; line-height: 19px; }
+  .today-test .test-nums { font-size: 13.5px; line-height: 19px; }
+
+  /* Flash cards: the count and Study on one line, then the decks (none when one folder has them all) */
+  .today-cards { padding: 8px 14px 2px; }
+  .today-cards.one-deck { padding-bottom: 8px; }
+  /* (Study goes under the count when both don't fit on the line: big text on a small phone) */
+  .fc-top { flex-wrap: wrap; row-gap: 6px; min-height: 48px; padding-bottom: 2px; }
+  .fc-n { flex: 1 1 auto; flex-wrap: wrap; column-gap: 6px; min-width: min(9.5em, 100%); }
+  .fc-n b { font-size: 24px; line-height: 28px; }
+  .fc-note { padding-bottom: 6px; }
+  .today-deck { min-height: 44px; }
+}
+/* (a touch screen has nothing else in the strip's top row, so on this week the row folds away; scrolled to another
+   week it opens again, smoothly once the strip has been moved: `.live`) */
+@media (max-width: 899px) and (hover: none) and (pointer: coarse) {
+  .today-week-head { max-height: 40px; overflow: hidden; }
+  .today-week[data-week="0"] .today-week-head { max-height: 0; min-height: 0; margin-bottom: 0; opacity: 0; }
+  .today-week.live .today-week-head { transition: max-height .2s var(--ease-out), margin .2s var(--ease-out), opacity .2s; }
+}
+@media (max-width: 899px) and (hover: hover) { .today-tile:hover .tile-ic { background: var(--accent-soft); } }
+@media (prefers-reduced-motion: reduce) { .today-week.live .today-week-head, .today-tile .tile-ic { transition: none; } }
 /* ==== end Today ==== */
 /* ==== 1.16: Subscriptions (H) ==== */
 /* js/subs.js: "Coming up" on Today (a renewal soon; a trial ending, in amber), and the list in its sheet. */
@@ -3529,6 +3691,17 @@ html:has(#app.gate) .nt-strip { display: none; }
 .chat-waiting-actions .btn .icon { width: 15px; height: 15px; }
 .chat-row-waiting { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-ink); font: 500 12.5px/16px var(--font); }
 .chat-row-waiting > .icon { flex: none; width: 13px; height: 13px; }
+/* (1.18: the answer being written now, or one that ended while the chat wasn't shown) */
+.chat-row-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.chat-row-writing .chat-row-dot { animation: tab-dot-breathe 1.8s ease-in-out infinite; }
+.chat-row.unread .chat-row-title { font-weight: 650; }
+/* An answer cut off at this end, being finished: the words it had said, a little quieter, then "Finishing the
+   answer..." (with Stop while it waits for Wefty to be in sight). */
+.chat-partial .chat-md { color: var(--text-2); }
+.chat-finishing { flex-wrap: wrap; }
+.chat-finishing .btn { margin-left: auto; min-height: 32px; padding: 0 10px; gap: 6px; color: var(--text-2); font: 500 13px/18px var(--font); }
+.chat-finishing .btn:hover { color: var(--text); }
+.chat-finishing .btn .icon { width: 15px; height: 15px; }
 .chat-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .chat-sources-label { margin-right: 2px; color: var(--muted); font: 500 12.5px/1 var(--font); }
 .chat-source {
@@ -3537,26 +3710,52 @@ html:has(#app.gate) .nt-strip { display: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-source:hover { border-color: var(--line-strong); color: var(--text); }
-/* What Chat did in Wefty (js/chattools.js): a small chip each, "Added Higgsfield to Subscriptions · Open · Undo". */
-.chat-actions-done { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.chat-action {
-  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; max-width: 100%; min-height: 34px;
-  padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-2);
-  color: var(--text-2); font: 500 13px/18px var(--font);
+/* What Chat did in Wefty (js/chattools.js, 1.18): one calm card under the answer, a row each ("Made the folder
+   Badminton · Open · Undo": the words wrap, the buttons stay on the right), "N changes in Wefty · Undo all" on top
+   when there are several, the first few rows until "Show N more". An ask to delete waits above it on its own, with
+   Delete and Cancel. */
+.chat-actions-done { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 560px; }
+.chat-actions-card {
+  border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); overflow: hidden;
 }
-.chat-action-mark { flex: none; width: 15px; height: 15px; color: var(--accent-ink); }
-.chat-action-label { min-width: 0; margin-right: 4px; overflow-wrap: anywhere; }
+:where(:root[data-theme="dark"]) .chat-actions-card { box-shadow: inset 0 1px 0 var(--edge-hi); }
+.chat-actions-card.asks { border-color: var(--line-strong); background: var(--surface); }
+.chat-actions-head {
+  display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--line); color: var(--muted); font: 500 12.5px/18px var(--font);
+}
+.chat-actions-count { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-action-row + .chat-action-row { border-top: 1px solid var(--line); }
+.chat-action {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px;
+  min-height: 40px; padding: 3px 4px 3px 12px; color: var(--text-2); font: 500 13px/18px var(--font);
+}
+.chat-action-mark { width: 15px; height: 15px; color: var(--accent-ink); }
+.chat-action-label { min-width: 0; padding: 4px 0; overflow-wrap: anywhere; }
+.chat-action-btns { display: flex; align-items: center; justify-content: flex-end; }
 .chat-action-btn {
-  min-height: 28px; padding: 0 10px; border: 0; border-radius: 14px; background: none; color: var(--accent-ink);
-  font: 600 13px/18px var(--font); cursor: pointer;
+  min-height: 30px; padding: 0 10px; border: 0; border-radius: 15px; background: none; color: var(--accent-ink);
+  font: 600 13px/18px var(--font); cursor: pointer; white-space: nowrap;
 }
 .chat-action-btn:hover { background: var(--accent-soft); }
 .chat-action-btn:disabled { opacity: .5; cursor: default; }
-.chat-action.undone { background: none; }
+.chat-action-btn.danger { color: var(--danger); }
+.chat-action-btn.danger:hover { background: var(--danger-soft); }
 .chat-action.undone .chat-action-label { text-decoration: line-through; color: var(--muted); }
 .chat-action.undone .chat-action-mark { color: var(--muted); }
-.chat-action-done { padding: 0 8px; color: var(--muted); font: 500 12.5px/18px var(--font); }
-@media (pointer: coarse) { .chat-action-btn { min-height: 36px; } }
+.chat-action.declined .chat-action-label { text-decoration: none; }
+.chat-action-done { padding: 0 8px; color: var(--muted); font: 500 12.5px/18px var(--font); white-space: nowrap; }
+.chat-action.ask .chat-action-mark { color: var(--danger); }
+.chat-action.ask .chat-action-label { color: var(--text); }
+.chat-action-about { grid-column: 2 / -1; padding: 0 8px 6px 0; color: var(--muted); font: 400 12.5px/17px var(--font); }
+.chat-actions-more {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 40px; padding: 0 12px;
+  border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent-ink); font: 600 13px/18px var(--font);
+  cursor: pointer;
+}
+.chat-actions-more .icon { width: 15px; height: 15px; }
+.chat-actions-more:hover { background: var(--accent-soft); }
+@media (pointer: coarse) { .chat-action-btn { min-height: 36px; } .chat-action, .chat-actions-head, .chat-actions-more { min-height: 44px; } }
 .chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: -10px; }
 .chat-actions .btn { min-height: 34px; padding: 0 10px; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
 .chat-actions .btn:hover { color: var(--text); }

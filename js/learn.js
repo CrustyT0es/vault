@@ -1,10 +1,11 @@
-/* Vault: Learn mode (like Quizlet's Learn), for a note's flash cards (its Learn button), a folder, a #tag or everything
-   (the Review page). The cards go in groups of seven, each group through three rounds: pick the answer out of four,
-   then true or false, then type it. A miss comes back at the end of its round. Typing forgives capitals, accents,
-   punctuation, spaces and a typo or two (more in a longer answer), but never a wrong number or date; "I was right"
-   takes an answer it didn't. The wrong choices are other cards' answers from the same deck (from other notes when
-   it hasn't enough). It all feeds each card's schedule (js/review.js): a miss anywhere counts as "Not yet", a right
-   typed answer as "I knew it", saved in batches like Review's. All on this device: no AI, no internet needed. */
+/* Vault: Learn mode (like Quizlet's Learn), from the study screen's ⋯ (1.18: "Learn: quiz me", for the cards being
+   studied; js/review.js), a note's cards, a folder, a #tag or everything. The cards go in sets of seven, each set
+   through three rounds: pick the answer out of four, then true or false, then type it, with a stop between sets. A
+   miss comes back at the end of its round. Typing forgives capitals, accents, punctuation, spaces and a typo or two
+   (more in a longer answer), but never a wrong number or date; "I was right" takes an answer it didn't. The wrong
+   choices are other cards' answers from the same deck (from other notes when it hasn't enough). It all feeds each
+   card's schedule (js/review.js): a miss anywhere counts as "Still learning", a right typed answer as "I know it",
+   saved in batches like the cards'. All on this device: no AI, no internet needed. */
 'use strict';
 
 V.learn = (() => {
@@ -79,13 +80,13 @@ V.learn = (() => {
 
   /* -- a session */
 
-  /* A note's cards (its Learn button), as they're written now. */
+  /* A note's cards, as they're written now. */
   function forNote(id) {
     const row = V.data.notes.get(id);
     if (!row) return null;
     const words = V.editor.openId() === id && V.editor.words() !== null ? V.editor.words() : row.body;
     const list = RV.cardsOf(row, words);
-    if (!list.length) return V.toast('Write cards as "term :: definition" (or "The {{word}} in a sentence"), then press Learn.');
+    if (!list.length) return V.toast('Write cards as "term :: definition" (or "The {{word}} in a sentence"), then press Study.');
     return start({ title: V.noteTitle({ ...row, body: words || '' }) + ': learn', list, deck: 'note:' + id });
   }
 
@@ -99,9 +100,13 @@ V.learn = (() => {
     return start({ title: deck === 'all' ? 'Learn' : `Learn: ${RV.deckName(deck)}`, list, deck });
   }
 
-  function start({ title, list, deck = 'all' }) {
+  /* Learn on the study screen (js/review.js: its own, or `view`, the one the cards were on, from their ⋯). Sets of
+     seven, each through its rounds; between sets a stop: "Next set" or "Done for now". */
+  function start({ title, list, deck = 'all', view = null }) {
     const cards = [...list];
     if (!cards.length) return null;
+    const scr = view && !view.closed() ? view : RV.screen(title);
+    scr.setTitle(title);
     // With nothing to choose between (one card in all of Vault), only the typing round.
     const rounds = wrongOnes(cards[0], cards, 1).length ? ROUNDS : ROUNDS.filter((r) => r.kind === 'type');
     const groups = [];
@@ -111,21 +116,19 @@ V.learn = (() => {
     let queue = [];
     let asked = null;   // { card, kind, options, claim, truth }
     let answered = null; // after an answer: { right, typo, picked }
-    let steps = 0;      // answers right so far (each card counts once a round)
+    let steps = 0;      // answers right in this set so far (each card counts once a round)
     let learned = 0;
     let after = null;    // what Continue does
     let wait = null;     // the timer that moves on after a right answer
+    let live = true;     // (false once the screen has gone on to something else)
     const missed = new Set();
     const many = new Set(cards.map((c) => c.note)).size > 1;  // cards from several notes say which one
-    const ui = {
-      round: V.h('p.learn-round', { 'aria-live': 'polite' }),
-      count: V.h('span.learn-count'),
-      fill: V.h('i'),
-      body: V.h('div.learn-body'),
-    };
+    const ui = { body: V.h('div.learn-body') };
 
     function begin() {
       queue = RV.shuffle(groups[group]);
+      scr.ended(false);
+      if (!ui.body.isConnected) { V.clear(scr.stage, ui.body); V.clear(scr.foot); }
       ask();
     }
 
@@ -137,7 +140,8 @@ V.learn = (() => {
         learned += groups[group].length;
         group++;
         round = 0;
-        if (group < groups.length) return begin();
+        steps = 0;
+        if (group < groups.length) return pause();
         return finish();
       }
       const card = queue[0];
@@ -161,14 +165,17 @@ V.learn = (() => {
         : [card.before, V.h('mark.blank-fill', { text: claim }), card.after]));
     }
 
-    function draw() {
-      const total = cards.length * rounds.length;
-      ui.fill.style.width = `${(100 * steps) / total}%`;
-      ui.count.textContent = `${learned} of ${cards.length} learned`;
-      if (!asked) return;
-      const { card, kind } = asked;
+    function where() {
       const meta = rounds[round];
-      ui.round.textContent = `Round ${round + 1} of ${rounds.length} · ${meta.title}`;
+      const total = groups[group].length * rounds.length;
+      scr.progress(`Round ${round + 1} of ${rounds.length} · ${meta.title}`, steps / total,
+        groups.length > 1 ? `Set ${group + 1} of ${groups.length}` : '');
+    }
+
+    function draw() {
+      if (!asked) return;
+      where();
+      const { card, kind } = asked;
       const row = V.data.notes.get(card.note);
       const from = many && row ? V.noteTitle(row) : '';
       const head = V.h('div.learn-card', {}, from ? V.h('span.flash-side', { text: from }) : null, prompt(card, kind === 'truth' ? asked.claim : null));
@@ -196,6 +203,8 @@ V.learn = (() => {
         if (!answered) requestAnimationFrame(() => { if (input.isConnected) input.focus({ preventScroll: true }); });
       }
       V.clear(ui.body, head, answer, feedback());
+      const go = ui.body.querySelector('.learn-feedback .btn.primary');
+      if (go) requestAnimationFrame(() => { if (go.isConnected) go.focus({ preventScroll: true }); });
     }
 
     function feedback() {
@@ -224,7 +233,7 @@ V.learn = (() => {
       if (asked.kind === 'type') RV.grade(card, RV.GOOD);
       after = ask;
       draw();
-      if (asked.kind !== 'type') wait = setTimeout(() => { if (answered && answered.right && sheet.el.isConnected) ask(); }, 650);
+      if (asked.kind !== 'type') wait = setTimeout(() => { if (live && answered && answered.right) ask(); }, 650);
     }
 
     function wrong(picked) {
@@ -263,30 +272,46 @@ V.learn = (() => {
       right(false, picked);
     }
 
+    /* A set done, more to go: a stop, so a long deck never feels endless. */
+    function pause() {
+      asked = null;
+      const left = cards.length - learned;
+      scr.progress('', 1, '');
+      scr.ended(true);
+      V.clear(scr.stage, V.h('div.study-end.learn-pause', { role: 'status' },
+        V.h('span.study-end-mark', {}, V.icon('check')),
+        V.h('h3', { text: `Set ${group} done` }),
+        V.h('p.study-end-sum', { text: `${learned} of ${cards.length} learned so far.` }),
+        V.h('p.study-end-next', { text: `${left} more to go, ${Math.min(GROUP, left)} at a time.` })));
+      const go = V.button('Next set', { kind: 'primary', onClick: () => begin() });
+      V.clear(scr.foot, V.h('div.study-end-go', {}, V.button('Done for now', { onClick: () => scr.close() }), go));
+      requestAnimationFrame(() => { if (go.isConnected) go.focus({ preventScroll: true }); });
+    }
+
     function finish() {
       asked = null;
-      ui.fill.style.width = '100%';
-      ui.round.textContent = 'All done';
-      ui.count.textContent = `${cards.length} of ${cards.length} learned`;
-      V.clear(ui.body, V.h('div.learn-card.end', {},
-        V.h('span.flash-side', { text: 'All done' }),
-        V.h('span.learn-term', { text: `You learned all ${cards.length} card${cards.length === 1 ? '' : 's'}.` }),
-        V.h('span.hint', { text: missed.size ? `${missed.size} needed another go: they come back for review tomorrow.`
-          : 'Every one right the first time. Nice work!' })),
-      V.h('div.study-actions', {},
-        V.button('Learn again', { icon: 'learn', onClick: () => { sheet.close(); start({ title, list, deck }); } }),
-        V.button('Close', { kind: 'primary', onClick: () => sheet.close() })));
+      scr.progress('', 1, '');
+      scr.ended(true);
+      const done = V.button('Done', { kind: 'primary', onClick: () => scr.close() });
+      V.clear(scr.stage, V.h('div.study-end.learn-end', { role: 'status' },
+        V.h('span.study-end-mark', {}, V.icon('check')),
+        V.h('h3', { text: 'Done for now' }),
+        V.h('p.study-end-sum', { text: `You learned all ${cards.length} card${cards.length === 1 ? '' : 's'}.` }),
+        V.h('p.study-end-next', { text: missed.size ? `${missed.size} needed another go: they come back for review tomorrow.`
+          : 'Every one right the first time. Nice work!' })));
+      V.clear(scr.foot, V.h('div.study-end-go', {},
+        V.button('Learn again', { icon: 'learn', onClick: () => start({ title, list, deck, view: scr }) }), done));
+      requestAnimationFrame(() => { if (done.isConnected) done.focus({ preventScroll: true }); });
     }
 
     const keys = (event) => {
-      if (!ui.body.isConnected || event.ctrlKey || event.metaKey || event.altKey) return;
-      const inField = event.target.closest('input, textarea, select');
-      if (event.key === 'Enter' && answered && after && !event.target.closest('button')) {
+      const target = event.target && event.target.closest ? event.target : document.body;
+      if (event.key === 'Enter' && answered && after && !target.closest('button')) {
         event.preventDefault();
         after();
         return;
       }
-      if (inField || answered || !asked) return;
+      if (target.closest('input, textarea, select') || answered || !asked) return;
       if (asked.kind === 'choice' && /^[1-4]$/.test(event.key) && asked.options[Number(event.key) - 1] !== undefined) {
         event.preventDefault();
         pick(asked.options[Number(event.key) - 1]);
@@ -295,21 +320,30 @@ V.learn = (() => {
         pick(event.key.toLowerCase() === 't');
       }
     };
-    document.addEventListener('keydown', keys);
-    const sheet = V.sheet({
-      title,
-      wide: true,
-      content: [V.h('div.learn-top', {}, ui.round, ui.count), V.h('span.bar.study-bar', {}, ui.fill), ui.body],
-      onClose: () => {
+
+    /* Back to flipping the same cards (the ones due first, else all of them as practice). */
+    function flipInstead() {
+      const at = RV.now();
+      const due = cards.filter((c) => RV.isDue(c, at));
+      RV.session({ title, list: due.length ? due : cards, practice: !due.length, deck, many, view: scr });
+    }
+
+    scr.use({
+      name: 'learn',
+      keys,
+      menu: () => [{ label: 'Flip cards instead', icon: 'cards', onClick: flipInstead }],
+      leave: () => {
+        live = false;
         clearTimeout(wait);
-        document.removeEventListener('keydown', keys);
-        // A typed miss closed without Continue (or "I was right") still counts.
+        // A typed miss left without Continue (or "I was right") still counts.
         if (answered && !answered.right && asked && asked.kind === 'type') RV.grade(asked.card, RV.AGAIN);
+        answered = null;
         RV.flush();
       },
     });
+    scr.stage.append(ui.body);
     begin();
-    return sheet;
+    return scr;
   }
 
   return { fold, distance, slack, check, wrongOnes, forNote, forDeck, start, GROUP };

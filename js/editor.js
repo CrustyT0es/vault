@@ -2869,6 +2869,7 @@ V.editor = (() => {
       stripWatch.observe(strip);
     }
     el = V.h('article.editor', {
+      dataset: { place: `note:${note.id}` },  // (js/start.js puts a note's scroll back in Notes' side pane only on that note)
       ondragover: (event) => { if ([...event.dataTransfer.types].includes('Files')) { event.preventDefault(); event.stopPropagation(); el.classList.add('dropping'); } },
       ondragleave: () => el.classList.remove('dropping'),
       ondrop: (event) => {

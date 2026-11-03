@@ -3,15 +3,22 @@
    Top to bottom on every device: the greeting and the thread under it (on a Chromebook or the PC, 900 px and up, with
    the day's counts beside it), the days (1.17: a strip that scrolls sideways from this week's Monday to the Friday two
    weeks on, today first in view), then Quick actions across the whole width (1.17, the owner: "I want the notes thing
-   to be big across the top": New note and Note-taker big, Dictate and Flash cards, which opens Review, smaller under
-   them). Then, on a phone, one column: the days one by one (1.17, the owner: "the reminders should show up on the
-   dashboard too, like day by day stuff as well": Today, with each to-do of the notes due today or late and a box to
-   tick, then Tomorrow and the days after, each with its reminders and times, what's due, tests, a repeating one on
-   every day it comes back, and subscriptions renewing; see "the days, one by one" below), Tests coming up (a countdown
-   and how the flash cards for it are going), Flash cards due today (by the folder each card is in) and Jump back in
-   (pinned notes, then the ones edited last); wide, two columns (tests, flash cards and Jump back in on the left; the
-   days on the right). Every number comes from this device's own copy of the notes (it works offline and costs
-   nothing), through the same rules as Upcoming (js/reminders.js) and Review (js/review.js), so they always agree.
+   to be big across the top": New note and Note-taker big, Dictate and Flash cards, which opens the cards due, smaller
+   under them). Wide, two columns under them: tests, flash cards and Jump back in on the left; the days one by one on the
+   right (1.17, the owner: "the reminders should show up on the dashboard too, like day by day stuff as well": Today,
+   with each to-do of the notes due today or late and a box to tick, then Tomorrow and the days after, each with its
+   reminders and times, what's due, tests, a repeating one on every day it comes back, and subscriptions renewing; see
+   "the days, one by one" below).
+
+   A phone (1.18, the owner: "on my phone today felt really overwhelming"): one calm column, what matters now first.
+   The strip has no "This week" over it (the list's own heading is the one; a label shows only while the strip is on
+   another week), Quick actions are one row of four small buttons, then Today's to-dos, Tests coming up and Flash cards
+   (both compact, each with its one clear button), then the rest of this week (only the days with something
+   on them; a run of empty days is one quiet line, "Nothing due Tue – Thu"; next week only when asked: its button, a
+   tap on one of its days, or the strip moved there), then Jump back in. A row's title gets the row's whole width (two
+   lines), its time chip goes under it, beside the folder. Every number comes from this device's own copy of the notes
+   (it works offline and costs nothing), through the same rules as Upcoming (js/reminders.js) and Review
+   (js/review.js), so they always agree.
 
    Each part is drawn by section(), which catches and logs, so a bad row can't keep the app from opening (js/start.js's
    V.go is the second net: a Today that throws shows your notes instead). Other parts add their own sections with
@@ -28,7 +35,8 @@
      takes on a wide screen ('left': tests, flash cards, Jump back in; 'right': the days). `subs`: where Subscriptions
      (js/subs.js) goes: after the flash cards on a phone, in the right column when wide (only on the first-run screen
      since 1.17: elsewhere its renewals are on their days). (`quick` is kept for parts that read it: since 1.17 Quick
-     actions sit above the columns, never in one; `due` and `later` too: the days took both their places.) */
+     actions sit above the columns, never in one. Wide, the days took the places of `due` and `later`; on a phone since
+     1.18 Today's own day is `due` and the rest of the days are where `later` was, after the flash cards.) */
   const ORDER = { quick: 10, days: 20, due: 20, howto: 25, tests: 30, cards: 40, subs: 45, later: 50, devices: 55, jump: 60 };
   const MOST_DUE = 8;      // rows in Today's day before "N more in Upcoming"
   const MOST_PER_NOTE = 5; // a note's to-dos in Today's day before "+N more"
@@ -57,8 +65,12 @@
   let synced = false;  // the first sync this page life has finished (so a new device doesn't greet a long-time user)
   let stripFocus = '';  // the day the strip's one Tab stop is on (the arrow keys move it), kept across redraws
   let stripMoved = -Infinity;  // when the days were last scrolled or touched (a redraw waits until they rest)
-  let listWeeks = 0;   // how many of the strip's weeks the days' list shows (0: as many as today needs); only grows
+  let listWeeks = 0;   // how many of the strip's weeks the days' list shows (0: as many as today needs); only grows,
+                       // until Today is opened afresh (the logo from another screen) or the day turns
+  let leftAt = '';     // the day at the strip's start as it was last seen (Today opened again from a tab goes back there)
+  let backTo = '';     // (that day, for the draw that opens Today again)
   let daysOn = false;  // the days and their list are on Today (not the first-run screen)
+  let lastDays = null;  // the strip's days as last drawn: { today, days } (weeksShown between draws)
   let flashTimer = null;
 
   const showing = () => !!root && root.isConnected && root.dataset.tab === 'today';
@@ -291,6 +303,11 @@
      dayPlan() a draw. (It took the places of Due today and Later this week, so nothing shows twice; Subscriptions'
      own "Coming up" card only shows on the first-run screen, which has no days.)
 
+     On a phone (1.18) Today's own day stands on its own near the top (todaySection), and the list after the flash
+     cards holds the days after it: only the ones with something on them, each run of empty days one quiet line
+     (gapLine), and only this week (next week too only once nothing is left of this one) until the person asks for
+     more (the same three ways; the button says how much is on that week).
+
      A repeating note's next one is the note itself (its due date and reminder): it's ticked from its day like any
      other note, and a tick moves it on to the one after (js/reminders.js moveOn, with an Undo). Its later ones are
      worked out from its rule (reminders.js nextAfter: days on the wall clock, so 6 PM stays 6 PM across a clock
@@ -306,8 +323,17 @@
   /* The strip's week a day is in: 0 this week, 1 next week, 2 the one after. */
   const weekOf = (now, day) => Math.floor(daysFrom(V.dateText(mondayOf(now)), day) / 7);
   /* How many weeks the list shows: as many as the strip or a tap asked for, else this week, and next week too once
-     fewer than four days of this one are left (from Friday). */
-  const weeksShown = (now = new Date()) => Math.min(STRIP_WEEKS, Math.max(listWeeks, weekOf(now, V.addDays(V.dateText(now), 3)) + 1));
+     fewer than four days of this one are left (from Friday). A phone (1.18): this week only, unless nothing of it is
+     left after today (a Friday, Saturday or Sunday with nothing on the weekend), then next week too. */
+  function weeksShown(now = new Date(), wide = V.wide(), plan = null) {
+    let own = weekOf(now, V.addDays(V.dateText(now), 3)) + 1;
+    if (!wide) {
+      const today = V.dateText(now);
+      const days = plan ? plan.days : lastDays && lastDays.today === today ? lastDays.days : stripDays(now, liveNotes());
+      own = days.some((d) => d.week === 0 && d.day > today) ? 1 : 2;
+    }
+    return Math.min(STRIP_WEEKS, Math.max(listWeeks, own));
+  }
 
   const isTest = (note) => !note.locked && (RV().looksLikeTest(note) || !!RV().planFor(note));
 
@@ -383,7 +409,9 @@
       }
     }
     for (const items of byDay.values()) items.sort(inOrder);
-    return { today, end, byDay, due: due || dueRows(now, list), days: stripDays(now, list, new Set(byDay.keys())) };
+    const days = stripDays(now, list, new Set(byDay.keys()));
+    lastDays = { today, days };
+    return { today, end, byDay, due: due || dueRows(now, list), days };
   }
 
   /* The strip's days (1.17): this week's Monday (the one before, on a Sunday) to the Friday two weeks on. A school
@@ -573,7 +601,7 @@
   /* -- drawing */
 
   function head() {
-    const actions = [V.iconButton('search', 'Search your notes', () => { V.go('notes'); V.notes.search(); }, 'today-search')];
+    const actions = [V.iconButton('search', 'Search your notes', () => V.notes.search(), 'today-search')];  // (Notes at its top)
     if (menuItems.length) {
       const more = V.iconButton('more', 'More', () => V.menu(more, menuItems.map((item) => ({
         label: item.label, icon: item.icon || null, onClick: item.onClick }))), 'today-more');
@@ -620,19 +648,19 @@
   function quick() {
     // (a tile with a count is named with it: the badge is hidden from screen readers; a small tile's line under its
     // name is hidden on screens under 360 px, a big one keeps it)
-    const tile = (key, name, label, sub, onClick, { title = null, count = 0, big = false } = {}) => V.h('button.today-tile' + (big ? '.big' : ''), {
-      type: 'button', onclick: onClick, title, 'aria-label': count ? `${label}, ${sub}` : null, dataset: { key: `q:${key}` } },
+    const tile = (key, name, label, sub, onClick, { title = null, count = 0, big = false, said = '' } = {}) => V.h('button.today-tile' + (big ? '.big' : ''), {
+      type: 'button', onclick: onClick, title, 'aria-label': count ? `${label}, ${said || sub}` : null, dataset: { key: `q:${key}` } },
     V.h('span.tile-ic', {}, icon(name), count ? V.h('b.tile-count', { text: count > 99 ? '99+' : String(count), 'aria-hidden': 'true' }) : null),
     V.h('span.tile-text', {}, V.h('span.tile-label', { text: label }), V.h('small', { text: sub })));
-    // Flash cards: Review, with today's count when cards are due; with none due it still opens on the decks, Learn and
-    // practice (Notes' Review list).
+    // Flash cards (1.18): with cards due today it opens them straight away, one at a time (js/review.js); with none due
+    // it opens Notes' Flash cards page (the decks, and practice).
     const due = cardsDue();
     return part('quick', 'Quick actions', V.h('div.today-tiles', {},
       tile('new', 'plus', 'New note', 'Start writing', newNote, { title: V.appShortcuts ? 'New note (Ctrl+N)' : null, big: true }),
       V.notetaker ? tile('notetaker', 'listen', 'Note-taker', 'Record a class', () => V.notetaker.open(), { big: true }) : null,
       canDictate() ? tile('dictate', 'dictate', 'Dictate', 'Talk to type', dictate) : null,
-      V.review ? tile('cards', 'cards', 'Flash cards', due ? `${due} due today` : 'Review and learn', () => toNotes('review'),
-        { count: due }) : null));
+      V.review ? tile('cards', 'cards', 'Flash cards', due ? `Study ${due}` : 'All done today',
+        () => (cardsDue() ? RV().start('all') : toNotes('review')), { count: due, said: `${due} due today` }) : null));
   }
 
   /* -- the days' list (see "the days, one by one" above) */
@@ -646,7 +674,9 @@
   }
 
   /* A row with a box to tick: a to-do of a note (`row.item`), or a note with none (`row.kind` 'note'), or "+N more"
-     of a note's to-dos. Today's rows are dueRows(); a coming day's notes come through noteRow(). */
+     of a note's to-dos. Today's rows are dueRows(); a coming day's notes come through noteRow(). The chip (its time,
+     "3 days late") is in with the words since 1.18: at the row's end when wide, under the title on a phone, beside the
+     folder (styles.css), so a long title is never cut to "Test..." by it. */
   function todoRow(row, test = false) {
     const note = row.note;
     if (row.kind === 'more') {
@@ -658,8 +688,8 @@
       tick(row.done, `${test ? 'Test: ' : ''}${row.text}: ${row.done ? 'not done' : 'done'}`, onTick, `t:${row.key}`),
       V.h('div.today-row-text', {},
         V.h('strong', {}, test ? [V.icon('target', 'dg-test'), V.h('span.sr-only', { text: 'Test: ' })] : null, row.text),
-        row.kind === 'item' ? whereLine(note) : noteSub(note)),
-      chip(row.chip));
+        row.kind === 'item' ? whereLine(note) : noteSub(note),
+        chip(row.chip)));
   }
 
   /* A note on one of the coming days: ticked from here (its first to-do, or the note), like Today's. */
@@ -677,10 +707,10 @@
       V.h('button.today-row-text.dg-open', { type: 'button', title: 'Open the note', onclick: () => open(note.id), dataset: { key: `o:${item.key}` } },
         V.h('strong', { text: item.text }),
         V.h('span.today-sub', {}, emoji(folder), note.locked ? V.icon('lock') : null,
-          V.h('span', { text: note.locked ? 'Locked note' : folder ? folder.name : 'Open it' }))),
-      chip({ text: item.at ? R().clock(item.at) : R().repeatText(rule), cls: item.at ? 'soon' : 'plain', bell: !!item.at, repeat: true,
-        said: R().repeatText(rule) + (item.at ? ` · ${R().clock(item.at)}` : ''),
-        spoken: `${item.at ? `reminder at ${spokenTime(item.at)}, ` : ''}repeats ${spokenRule(rule)}` }));
+          V.h('span', { text: note.locked ? 'Locked note' : folder ? folder.name : 'Open it' })),
+        chip({ text: item.at ? R().clock(item.at) : R().repeatText(rule), cls: item.at ? 'soon' : 'plain', bell: !!item.at, repeat: true,
+          said: R().repeatText(rule) + (item.at ? ` · ${R().clock(item.at)}` : ''),
+          spoken: `${item.at ? `reminder at ${spokenTime(item.at)}, ` : ''}repeats ${spokenRule(rule)}` })));
   }
 
   /* Another part's thing (js/subs.js: a renewal): its own lead, words and button; never ticked here. */
@@ -710,8 +740,9 @@
   }
 
   /* One day of the list: its heading, then a list of what's on it (a list named by the heading), or "Nothing due" on
-     the heading's line. Today's holds what's due today or late, as Due today did (`data-section` still 'due'). */
-  function dayGroup(day, plan) {
+     the heading's line. Today's holds what's due today or late, as Due today did (`data-section` still 'due'). `top`:
+     a phone's Today, on its own near the screen's top (1.18), so its heading is one of the screen's h2s. */
+  function dayGroup(day, plan, top = false) {
     const today = plan.today;
     const isToday = day === today;
     const items = plan.byDay.get(day) || [];
@@ -741,37 +772,77 @@
       }
     }
     const empty = !rows.length;
-    return V.h('div.day-group' + (isToday ? '.today-sec.is-today' : '') + (empty ? '.empty' : ''),
+    // (never the class "empty": that's the empty screens' own, centred with 56 px above and below, which put a big gap
+    // round every day with nothing on it in 1.17)
+    return V.h('div.day-group' + (isToday ? '.today-sec.is-today' : '') + (empty ? '.dg-empty' : '') + (top ? '.dg-top' : ''),
       { dataset: isToday ? { day, section: 'due' } : { day } },
       V.h('div.dg-head', {},
-        V.h('h3.dg-title', { id, tabindex: '-1' }, V.h('span.sr-only', { text: words.said }),
+        V.h((top ? 'h2' : 'h3') + '.dg-title', { id, tabindex: '-1' }, V.h('span.sr-only', { text: words.said }),
           V.h('span.dg-name', { text: words.name, 'aria-hidden': 'true' }), V.h('span.dg-date', { text: words.date, 'aria-hidden': 'true' })),
         empty ? V.h('span.dg-meta.none', { text: 'Nothing due' }) : meta ? V.h('span.dg-meta', {}, meta) : null),
       empty ? null : V.h('ul.today-box.today-todo.dg-list', { 'aria-labelledby': id }, rows),
       after);
   }
 
+  /* A phone's run of days with nothing on them, as one quiet line (1.18): "Nothing due tomorrow", "Nothing due Thu",
+     "Nothing due Tue – Thu" (said in full words). A day tapped in the strip that's in it comes here. */
+  function gapLine(run, today) {
+    const first = run[0];
+    const last = run[run.length - 1];
+    const name = (day, names) => (daysFrom(today, day) === 1 && run.length === 1 ? 'tomorrow' : names[V.parseDate(day).getDay()]);
+    const shown = run.length === 1 ? name(first, SHORT_DAYS) : `${name(first, SHORT_DAYS)} – ${name(last, SHORT_DAYS)}`;
+    const said = run.length === 1 ? name(first, WEEKDAYS) : `${name(first, WEEKDAYS)} to ${name(last, WEEKDAYS)}`;
+    return V.h('p.day-gap', { id: `dgap-${first}`, tabindex: '-1', dataset: { day: first, to: last } },
+      V.h('span', { text: `Nothing due ${shown}`, 'aria-hidden': 'true' }), V.h('span.sr-only', { text: `Nothing due ${said}` }));
+  }
+
+  /* How many things are on a week of the strip after today (what "Show next week" says it will show). */
+  function weekCount(plan, week) {
+    return plan.days.filter((d) => d.week === week && d.day > plan.today).reduce((n, d) => n + (plan.byDay.get(d.day) || []).length, 0);
+  }
+
   /* The days' list: a part per week of the strip ("This week", "Next week", "Week of Nov 16"), each day of the strip
-     from today on, as far as weeksShown(); then "Show next week" until the strip's last week is in. */
-  function daysSection(plan, now) {
-    const shown = weeksShown(now);
+     from today on, as far as weeksShown(); then "Show next week" until the strip's last week is in. On a phone
+     (1.18) Today isn't in it (todaySection, near the top), empty days come in runs (gapLine), and the button says how
+     much is on the week it shows. */
+  function daysSection(plan, now, wide = V.wide()) {
+    const shown = weeksShown(now, wide, plan);
     const weeks = [];
     for (const { day, week } of plan.days) {
-      if (day < plan.today || week >= shown) continue;
+      if (day < plan.today || week >= shown || (!wide && day === plan.today)) continue;
       const last = weeks[weeks.length - 1];
       if (last && last.week === week) last.days.push(day); else weeks.push({ week, days: [day] });
     }
+    // (a phone on a Friday with nothing left this week: next week is in too, under a line saying so)
+    if (!wide && !weeks.some((w) => w.week === 0)) weeks.unshift({ week: 0, days: [] });
+    const body = (days) => {
+      if (wide) return days.map((day) => dayGroup(day, plan));
+      if (!days.length) return V.h('p.day-gap.none', { text: 'Nothing else this week' });
+      const out = [];
+      let run = [];
+      const flush = () => { if (run.length) out.push(gapLine(run, plan.today)); run = []; };
+      for (const day of days) {
+        if ((plan.byDay.get(day) || []).length) { flush(); out.push(dayGroup(day, plan)); } else run.push(day);
+      }
+      flush();
+      return out;
+    };
     const next = shown < STRIP_WEEKS ? plan.days.find((d) => d.week === shown) : null;
     const nextTitle = next ? weekTitle(shown, next.day) : '';
+    const count = next && !wide ? weekCount(plan, shown) : 0;
     return V.h('div.today-sec.today-daylist', { dataset: { section: 'days' } },
       weeks.map(({ week, days }, i) => V.h('section.days-week', { dataset: { week: String(week) } },
         V.h('div.today-sec-head', {}, V.h('h2', { id: `dw-${week}`, tabindex: '-1', text: weekTitle(week, days[0]) }),
           i === 0 ? V.h('button.today-link', { type: 'button', onclick: () => toNotes('due'), dataset: { key: 'link:days' } }, 'Upcoming') : null),
-        days.map((day) => dayGroup(day, plan)))),
+        body(days))),
       next ? V.h('button.days-more', { type: 'button', onclick: () => showWeek(shown), dataset: { key: 'days-more' } },
         V.h('span', { text: shown === 1 ? 'Show next week' : `Show the ${nextTitle.charAt(0).toLowerCase()}${nextTitle.slice(1)}` }),
+        wide ? null : V.h('span.days-more-n', { text: ` · ${count ? plural(count, 'thing') : 'nothing due'}` }),
         V.icon('down')) : null);
   }
+
+  /* A phone's Today (1.18): its own day, near the top, before the tests and flash cards. */
+  const todaySection = (plan) => dayGroup(plan.today, plan, true);
 
   /* The list drawn again on its own (a week more of it), keeping the focus. */
   function refreshDays() {
@@ -808,17 +879,19 @@
       listWeeks = Math.min(STRIP_WEEKS, weekOf(now, want) + 1);
       refreshDays();
     }
-    const groups = [...root.querySelectorAll('.day-group')];
-    const group = groups.find((g) => g.dataset.day === want) || groups.find((g) => g.dataset.day > want) || groups[groups.length - 1];
+    // (a day, or on a phone the quiet line for a run of empty days it's in: 1.18)
+    const spots = [...root.querySelectorAll('.day-group, .day-gap[data-day]')];
+    const holds = (el) => el.dataset.day === want || (!!el.dataset.to && el.dataset.day <= want && want <= el.dataset.to);
+    const group = spots.find(holds) || spots.find((g) => g.dataset.day > want) || spots[spots.length - 1];
     if (!group) { toNotes('due'); return; }
-    const title = group.querySelector('.dg-title');
+    const title = group.classList.contains('day-gap') ? group : group.querySelector('.dg-title');
     if (title) title.focus({ preventScroll: true });
     const box = group.getBoundingClientRect();
     const sight = root.getBoundingClientRect();
     if (box.top < sight.top || box.bottom > sight.bottom) {
       group.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     }
-    for (const lit of root.querySelectorAll('.day-group.flash')) lit.classList.remove('flash');
+    for (const lit of root.querySelectorAll('.day-group.flash, .day-gap.flash')) lit.classList.remove('flash');
     void group.offsetWidth;  // (lit from the start again)
     group.classList.add('flash');
     clearTimeout(flashTimer);
@@ -834,7 +907,8 @@
   function testCard(card, first) {
     const note = card.note;
     const at = RV().now();
-    const when = V.parseDate(card.day).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    // (a phone's card is the compact one, 1.18: "Thu, Nov 5", so the date and what it covers fit on one line)
+    const when = V.parseDate(card.day).toLocaleDateString(undefined, { weekday: V.wide() ? 'long' : 'short', month: 'short', day: 'numeric' });
     const days = daysFrom(at.today, card.day);
     if (card.ask) {
       return V.h('div.today-box.today-test.ask', { dataset: { id: note.id } },
@@ -848,7 +922,7 @@
     const pace = !plan.count ? 'No flash cards in it yet' : !plan.left ? 'All gone over' : plan.days <= 1 ? 'all today' : `about ${plan.perDay} a day`;
     // No cards in what it covers yet: AI makes some from those notes (js/aicards.js); the test's name still opens it.
     const go = plan.count
-      ? V.button('Study', { kind: first ? 'primary' : 'tonal', icon: 'learn', onClick: () => RV().start('test:' + note.id) })
+      ? V.button('Study', { kind: first ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('test:' + note.id) })
       : V.aiCards ? V.button('Make cards', { kind: first ? 'primary' : 'tonal', icon: 'spark', onClick: () => V.aiCards.forTest(note.id) })
         : V.button('Open', { onClick: () => open(note.id) });
     return V.h('div.today-box.today-test', { dataset: { id: note.id } },
@@ -870,29 +944,37 @@
       rest > 0 ? { label: `${rest} more`, onClick: () => toNotes('review') } : null);
   }
 
+  /* Flash cards (1.18, the owner: "the flashcards are chaotic"): how many to study today and one Study button; the
+     folders they're in only when there are two or more (one folder would only say the same number again), and the
+     share for a test only when it's a part of them (all of them is no news). */
   function cardsSection(at, primary) {
     if (!at.list.length) return null;
     const total = at.list.filter((c) => RV().isDue(c, at)).length;
     if (!total) {
-      return part('cards', 'Flash cards due today', V.h('div.today-box.today-cards.done', {},
+      return part('cards', 'Flash cards', V.h('div.today-box.today-cards.done', {},
         V.h('strong', { text: 'All done for today' }), V.h('p.hint', { text: RV().nextDue(at) })));
     }
     const plan = at.plans.find((p) => p.days <= 6);
     const forTest = plan ? at.list.filter((c) => RV().isDue(c, at) && plan.covers(c)).length : 0;
     const which = !plan ? '' : plan.days === 0 ? 'today\'s' : plan.days === 1 ? 'tomorrow\'s' : `${WEEKDAYS[V.parseDate(plan.day).getDay()]}'s`;
-    const decks = RV().dueByFolder(at);
+    const all = RV().dueByFolder(at);
+    // (one folder holding every card due: no row repeating the count and Study, its name is in the words, 1.18)
+    const one = all.length === 1 && all[0].due === total ? all[0] : null;
+    const decks = all.length > 1 ? all : [];
     const shown = decks.slice(0, decks.length > MOST_DECKS ? MOST_DECKS - 1 : MOST_DECKS);
     const rest = decks.length - shown.length;
-    return part('cards', 'Flash cards due today', V.h('div.today-box.today-cards', {},
-      V.h('div.fc-top', {}, V.h('p.fc-n', {}, V.h('b', { text: String(total) }), V.h('span', { text: total === 1 ? 'card to review' : 'cards to review' })),
-        V.button('Review', { kind: primary ? 'primary' : '', icon: 'cards', onClick: () => RV().start('all') })),
-      forTest ? V.h('p.fc-note', {}, V.icon('target'), V.h('span', { text: `Includes ${forTest} for ${which} test` })) : null,
-      V.h('div.today-decks', {}, shown.map((d) => V.h('button.today-deck', { type: 'button', onclick: () => RV().start(d.deck),
-        title: `Review ${d.name}`, dataset: { deck: d.deck, key: `d:${d.deck}` } },
+    return part('cards', 'Flash cards', V.h('div.today-box.today-cards' + (decks.length ? '' : '.one-deck'), {},
+      V.h('div.fc-top', {}, V.h('p.fc-n', {}, V.h('b', { text: String(total) }),
+        V.h('span', { text: (total === 1 ? 'card to study today' : 'cards to study today') + (one ? ` in ${one.name}` : '') })),
+        // (beside a test's Study, the screen's second strong button since 1.18: plain, it didn't look like the way in)
+        V.button('Study', { kind: primary ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('all') })),
+      forTest && forTest < total ? V.h('p.fc-note', {}, V.icon('target'), V.h('span', { text: `Includes ${forTest} for ${which} test` })) : null,
+      decks.length ? V.h('div.today-decks', {}, shown.map((d) => V.h('button.today-deck', { type: 'button', onclick: () => RV().start(d.deck),
+        title: `Study ${d.name}`, dataset: { deck: d.deck, key: `d:${d.deck}` } },
       d.folder && d.folder.icon ? V.h('span.emo', { text: d.folder.icon, 'aria-hidden': 'true' }) : V.icon('folder'),
       V.h('span.deck-name', { text: d.name }), V.h('b', { text: String(d.due) }), icon('chev'))),
       rest > 0 ? V.h('button.today-deck.more', { type: 'button', onclick: () => toNotes('review'), dataset: { key: 'd:more' } },
-        V.h('span.deck-name', { text: `+${rest} more` }), icon('chev')) : null)));
+        V.h('span.deck-name', { text: `+${rest} more` }), icon('chev')) : null) : null));
   }
 
   function editedLabel(note) {
@@ -1000,11 +1082,15 @@
   }
 
   /* After a scroll (or a draw): the arrows at the ends say so, the title names the week most of the days in sight are
-     in, and the Tab stop moves onto a day in sight (unless the keyboard is in the strip: then it's where the keys put
-     it). */
-  function stripState(nav) {
+     in (and `data-week` says which, so a phone shows the title only off this week: styles.css), and the Tab stop
+     moves onto a day in sight (unless the keyboard is in the strip: then it's where the keys put it). `moved`: after
+     the strip was scrolled (by a finger, a trackpad, its arrows, its keys), the only time the list grows to a later
+     week in sight (never from a draw or the window resizing, nor while the strip has no size to measure). */
+  function stripState(nav, moved = false) {
     const strip = nav && nav.querySelector('.today-week-days');
-    if (!strip || !strip.isConnected) return;
+    if (!strip || !strip.isConnected || !strip.clientWidth) return;
+    const first = firstShown(strip);
+    if (first) leftAt = first.dataset.day;
     const most = strip.scrollWidth - strip.clientWidth;
     const prev = nav.querySelector('.week-step.prev');
     const next = nav.querySelector('.week-step.next');
@@ -1019,6 +1105,7 @@
     if (title && week !== null) {
       const words = weekTitle(Number(week), shown.find((c) => c.dataset.week === week).dataset.day);
       if (title.textContent !== words) title.textContent = words;
+      if (nav.dataset.week !== week) nav.dataset.week = week;
     }
     if (!strip.contains(document.activeElement) && shown.length) {
       const stop = strip.querySelector('.wday[tabindex="0"]');
@@ -1026,13 +1113,13 @@
     }
     // A later week in sight: its days in the list too (it never shrinks back while Today is open).
     const far = Math.max(-1, ...shown.map((c) => Number(c.dataset.week)));
-    if (daysOn && far >= weeksShown()) {
+    if (moved && daysOn && far >= weeksShown()) {
       listWeeks = Math.min(STRIP_WEEKS, far + 1);
       refreshDays();
     }
   }
 
-  function weekStrip(week, now) {
+  function weekStrip(week, now, startDay = '') {
     const today = V.dateText(now);
     const focusDay = week.cells.some((c) => c.day === stripFocus) ? stripFocus : today;
     const days = V.h('div.today-week-days', { onkeydown: stripKeys }, week.cells.map((cell) => {
@@ -1056,7 +1143,9 @@
         dataset: { day: cell.day, week: String(cell.week), key: `w:${cell.day}` } },
       V.h('span.wd-label', { text: cell.label }), body);
     }));
-    const nav = V.h('nav.today-week', { 'aria-label': 'Days' },
+    // (`data-week`: the week in sight, kept by stripState; from the start, so a phone's title doesn't come and go as
+    // Today is drawn: it moves, smoothly, only once the strip has been scrolled, `.live`)
+    const nav = V.h('nav.today-week', { 'aria-label': 'Days', dataset: { week: String(Math.max(0, weekOf(now, startDay || today))) } },
       V.h('div.today-week-head', {}, V.h('p.today-week-title', { text: weekTitle(0, today) }),
         V.h('div.week-steps', {},
           V.h('button.week-step.prev', { type: 'button', 'aria-label': 'Earlier days', title: 'Earlier days', 'aria-disabled': 'true',
@@ -1072,7 +1161,7 @@
       stripMoved = performance.now();
       if (queued) return;
       queued = true;
-      requestAnimationFrame(() => { queued = false; stripState(nav); });
+      requestAnimationFrame(() => { queued = false; nav.classList.add('live'); stripState(nav, true); });
     }, { passive: true });
     days.addEventListener('focusin', (event) => {
       const cell = event.target.closest && event.target.closest('.wday');
@@ -1083,14 +1172,32 @@
   // (a window made wider or narrower: the days in sight change)
   window.addEventListener('resize', V.debounce(() => { if (showing()) stripState(root.querySelector('.today-week')); }, 150));
 
-  /* Today's top again: from the logo (here, or the rail's when wide, js/start.js), the page back at its top and the
-     days back to today. From another screen, it opens Today. */
+  /* Today's top again: from the logo (here, or the rail's when wide, js/start.js) or Today's tab tapped on Today, the
+     page back at its top and the days back to today; the weeks the list grew to stay. Tapped again once both are
+     there, the list goes back to how Today opens too (1.18: a phone shows this week until more is asked for, and with
+     each tab keeping its place that was the only way back): never while either is still on its way, as the strip
+     sliding back past later weeks would grow the list again. From another screen, it opens Today. */
   function toTop() {
-    if (!showing()) { V.go('today'); return; }
+    if (!showing()) { V.go('today', { top: true }); return; }
+    if (listWeeks && atStart()) {
+      listWeeks = 0;
+      refreshDays();
+      return;
+    }
     const smooth = !reducedMotion();
     root.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
     const strip = root.querySelector('.today-week-days');
     if (strip) stripTo(strip, V.dateText(new Date()), true);
+  }
+
+  // (the page at its top, and the strip with today at its start, as toTop leaves them)
+  function atStart() {
+    if (root.scrollTop > 1) return false;
+    const strip = root.querySelector('.today-week-days');
+    if (!strip || !strip.clientWidth) return true;
+    const today = V.dateText(new Date());
+    const home = daysIn(strip).find((c) => c.dataset.day >= today);
+    return !home || firstShown(strip) === home;
   }
 
   function line() {
@@ -1175,18 +1282,23 @@
     daysOn = !fresh;  // (before the other parts' sections are built: js/subs.js asks)
     const tests = section('tests', () => testCards(at, list)) || [];
     // (Quick actions aren't one of these any more: they go across the top, under the days, 1.17; the days' list took
-    // the places of Due today and Later this week)
+    // the places of Due today and Later this week. A phone, 1.18: Today's own day first, the rest of the days after
+    // the flash cards, where Later this week was.)
+    const daysPart = () => (due ? daysSection(plan || dayPlan(now, list, due), now, wide) : null);
     const ownParts = fresh ? [
       { id: 'howto', column: 'left', build: howTo },
       { id: 'devices', column: 'right', build: devicesSection },
       { id: 'jump', column: 'left', build: () => jumpSection(jumpBack(list)) },
     ] : [
-      { id: 'days', column: 'right', build: () => (due ? daysSection(plan || dayPlan(now, list, due), now) : null) },
+      ...(wide ? [{ id: 'days', column: 'right', build: daysPart }] : [
+        { id: 'due', column: 'right', build: () => (due ? todaySection(plan || dayPlan(now, list, due)) : null) },
+        { id: 'days', order: ORDER.later, column: 'right', build: daysPart },
+      ]),
       { id: 'tests', column: 'left', build: () => (Array.isArray(tests) ? testsSection(tests) : tests) },
       { id: 'cards', column: 'left', build: () => cardsSection(at, !(Array.isArray(tests) && tests.length)) },
       { id: 'jump', column: 'left', build: () => jumpSection(jumpBack(list)) },
     ];
-    const parts = [...ownParts.map((p) => ({ ...p, order: ORDER[p.id] })), ...extra].sort((a, b) => a.order - b.order);
+    const parts = [...ownParts.map((p) => ({ ...p, order: p.order || ORDER[p.id] })), ...extra].sort((a, b) => a.order - b.order);
     const built = parts.map((one) => ({ one, el: section(one.id, one.build) })).filter((x) => x.el);
     if (due === null) built.unshift({ one: { column: 'right', order: 0 }, el: V.h('p.today-trouble.hint', { text: 'Couldn\'t show this part.' }) });
     const column = (side) => built.filter((x) => !wide || x.one.column === side).map((x) => x.el);
@@ -1208,19 +1320,22 @@
       V.h('div.today-hello', {}, V.h('h1', { text: greeting(now) }), V.h('p.today-date', { text: date })),
       counts.length ? V.h('p.today-counts', {}, counts.map(([name, text]) => V.h('span', {}, name === 'cards' ? R().icon('cards') : V.icon(name), text))) : null);
     // The days at the top, on every device since 1.17 (a phone too), once there's something to show in them.
-    const strip = !fresh ? section('week', () => weekStrip(weekCells(now, list, due || [], plan), now)) : null;
+    // (the day the strip was at, put back after the redraw unless the day has turned over since; the strip's title
+    // starts on its week)
+    const oldStrip = root.querySelector('.today-week-days');
+    // (opened again from a tab, js/start.js: the day it was left at, as the old strip is gone by then)
+    const shownDay = oldStrip && oldStrip.clientWidth && drawnDay === V.dateText(now) ? (firstShown(oldStrip) || {}).dataset
+      : backTo && drawnDay === V.dateText(now) ? { day: backTo } : null;
+    const strip = !fresh ? section('week', () => weekStrip(weekCells(now, list, due || [], plan), now, shownDay && shownDay.day)) : null;
     const quickTop = section('quick', quick);
     const before = !known && !welcoming && !list.length ? V.h('p.today-quiet.today-getting', { text: 'Getting your notes…' }) : null;
     const welcomeText = fresh ? V.h('p.today-welcome', { text: 'Welcome to Wefty. Today fills up from your notes: give one a date, a test or some flash cards, and they show here.' }) : null;
 
-    // (what had the focus, how far Jump back in was scrolled, and the day the strip was at: put back after the redraw,
-    // unless the day has turned over since)
+    // (what had the focus and how far Jump back in was scrolled: put back after the redraw)
     const focused = root.contains(document.activeElement) && document.activeElement.closest('[data-key]');
     const focusKey = focused ? focused.dataset.key : null;
     const jump = root.querySelector('.today-jump');
     const scrolled = jump ? jump.scrollLeft : 0;
-    const oldStrip = root.querySelector('.today-week-days');
-    const shownDay = oldStrip && oldStrip.clientWidth && drawnDay === V.dateText(now) ? (firstShown(oldStrip) || {}).dataset : null;
 
     V.clear(root, V.h('div.page.today' + (wide ? '.wide' : '') + (fresh ? '.fresh' : ''), {},
       head(), greet, line(), strip, welcomeText, quickTop, before,
@@ -1246,12 +1361,15 @@
   function redraw() {
     try { draw(); } catch (error) { console.error(error); }
   }
-  // Changes come in bursts (a sync, a save): drawn once they settle, never under a note open over Today, and never
-  // under a finger or a trackpad moving the days (once they've rested a moment).
+  // Changes come in bursts (a sync, a save): drawn once they settle, never under a note open over Today, never under
+  // a finger or a trackpad moving the days (once they've rested a moment), and never while your picture's menu is open
+  // from Today's top row (a redraw took the button it hangs from away, and its Escape lost the focus with it: a
+  // device's own record, written a few seconds after the first sync, did that now and then).
   const covered = () => !!(V.editor && V.editor.covering && V.editor.covering());
+  const menuOpen = () => !!(root && root.querySelector('[aria-expanded="true"]'));
   const redrawSoon = V.debounce(() => {
     if (!showing() || covered()) return;
-    if (performance.now() - stripMoved < 700) { redrawSoon(); return; }
+    if (performance.now() - stripMoved < 700 || menuOpen()) { redrawSoon(); return; }
     redraw();
   }, 300);
 
@@ -1265,10 +1383,20 @@
     timer = setTimeout(() => { if (showing()) redraw(); }, Math.min(next - now, 2 ** 31 - 1));
   }
 
-  function render(container) {
+  /* `opts.back`: opened again from a tab (js/start.js puts the page's scroll back): the days where they were left and
+     the weeks the list had grown to. Else (the first time, the logo from another screen): from today. */
+  function render(container, opts = {}) {
     root = container;
-    listWeeks = 0;  // (opened again: the list starts from this week, as the strip starts from today)
-    draw();
+    if (!opts.back) listWeeks = 0;
+    backTo = opts.back ? leftAt : '';
+    try { draw(); } finally { backTo = ''; }
+  }
+
+  // Today's tab tapped while Today shows: its top, the days back to today (as the logo does; the list keeps its weeks).
+  function again() {
+    if (!showing()) return false;
+    toTop();
+    return true;
   }
 
   // (never for the clipboard or what's sent: Today shows neither, and a phone's clipboard in step writes one each time
@@ -1280,6 +1408,6 @@
   V.on('back', () => { if (showing() && V.today() !== drawnDay) redrawSoon(); });
   V.onWide(() => redraw());
 
-  Object.assign(V.today, { render, open, addSection, addMenuItem, addDayItems, showsDays, redraw, section, greeting, ORDER,
+  Object.assign(V.today, { render, again, open, addSection, addMenuItem, addDayItems, showsDays, redraw, section, greeting, ORDER,
     toTop, goToDay, dueRows, laterRows, testCards, jumpBack, stripDays, weekCells, dayPlan, itemsOf, tickItem, tickNote });
 })();

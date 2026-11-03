@@ -1,9 +1,10 @@
-/* Vault: the Review page (the Notes tab's "Review", beside Upcoming): every flash card due today from all the notes,
-   by folder and #tag ("Today: 34 cards · Biology 12 · Spanish 22"), and the cards themselves, one at a time.
+/* Vault: flash cards. The Flash cards page (the Notes tab's "Flash cards", beside Upcoming; "Review" before 1.18):
+   how many to study today, one Study button, then the decks by folder and #tag; and the study screen, the cards
+   themselves, one at a time (see "studying" below).
 
    When a card comes back is worked out by FSRS, the schedule Anki uses (vendor/fsrs.js, ts-fsrs 5.4.2, its own
-   default parameters, whole days): "Not yet" brings a card back tomorrow (and once more before the session ends), "I
-   knew it" in a few days, and each time it's known again the wait grows (3 days, then about 2 weeks, then 2 months).
+   default parameters, whole days): "Still learning" brings a card back tomorrow (and once more before the go ends), "I
+   know it" in a few days, and each time it's known again the wait grows (3 days, then about 2 weeks, then 2 months).
    A card is moved on once a day: going over it again the same day is practice, though missing it still brings it
    back tomorrow. Its progress is kept in its note's extra.cards (the card's code -> { due, s (stability), d
    (difficulty), last, n (times reviewed), l (times forgotten) }). Cards studied before FSRS still have their Leitner
@@ -16,7 +17,7 @@
 
    Tests: a note with a due date that says what it covers (folders and #tags, picked with its Test button, js/exams.js,
    or a line like "Covers: Biology, #cells") gets a cram plan. The covered cards that FSRS would only bring back after
-   the test are pulled forward, spread over the days left, so Review shows them too; once the test day has passed
+   the test are pulled forward, spread over the days left, so they come up to study too; once the test day has passed
    they go back to their own days (their FSRS state was never changed for it). */
 'use strict';
 
@@ -401,25 +402,25 @@ V.review = (() => {
     return V.h('span.dot-box', {}, V.icon('notes'));
   }
 
+  /* A deck: one button (its cards due today, else all of them as practice). Learn is in the study screen's ⋯. */
   function deckRow(row) {
-    const what = `${row.count} card${row.count === 1 ? '' : 's'}${row.due ? '' : ' · none due today'}`;
+    const what = `${row.count} card${row.count === 1 ? '' : 's'}${row.due ? '' : ' · all done today'}`;
     return V.h('div.deck-row' + (row.due ? '' : '.idle'), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
-      V.h('button.deck-main', { type: 'button', title: row.due ? `Review ${row.name}` : `Practise ${row.name}`,
-        onclick: () => start(row.deck) },
+      V.h('button.deck-main', { type: 'button', title: row.due ? `Study ${row.name}` : `Practise ${row.name}`,
+        'aria-label': row.due ? `Study ${row.name}: ${row.due} today` : `Practise ${row.name}`, onclick: () => start(row.deck) },
       badge(row), V.h('span.deck-text', {}, V.h('span.deck-name', { text: row.name }), V.h('span.deck-meta', { text: what })),
-      row.due ? V.h('span.deck-due', { text: String(row.due) }) : null),
-      V.h('button.deck-learn', { type: 'button', title: `Learn ${row.name}`, 'aria-label': `Learn ${row.name}`,
-        onclick: () => V.learn.forDeck(row.deck) }, V.icon('learn'), V.h('span', { text: 'Learn' })));
+      row.due ? V.h('span.deck-due', { text: String(row.due), 'aria-hidden': 'true' }) : null,
+      V.icon('chevron', 'deck-chev')));
   }
 
   function testRow(plan) {
     return V.h('div.test-row' + (plan.days <= 1 ? '.soon' : ''), { dataset: { id: plan.note.id } },
       V.h('button.test-main', { type: 'button', title: 'Open the test note', onclick: () => R.openNote(plan.note.id) },
         V.icon('target', 'test-icon'), V.h('span.test-text', { text: countdown(plan) })),
-      plan.count ? V.h('button.deck-learn', { type: 'button', title: `Review what ${plan.name} covers`,
-        onclick: () => start('test:' + plan.note.id) }, V.icon('cards'), V.h('span', { text: 'Review' }))
+      plan.count ? V.h('button.deck-go', { type: 'button', title: `Study what ${plan.name} covers`,
+        onclick: () => start('test:' + plan.note.id) }, V.icon('cards'), V.h('span', { text: 'Study' }))
         // (no cards in what it covers yet: js/aicards.js makes some from those notes)
-        : V.aiCards ? V.h('button.deck-learn.deck-make', { type: 'button', title: `Make flash cards for ${plan.name} with AI`,
+        : V.aiCards ? V.h('button.deck-go.deck-make', { type: 'button', title: `Make flash cards for ${plan.name} with AI`,
           onclick: () => V.aiCards.forTest(plan.note.id) }, V.icon('spark'), V.h('span', { text: 'Make cards' })) : null);
   }
 
@@ -427,31 +428,29 @@ V.review = (() => {
   const makeButton = () => (V.aiCards ? V.button('Make cards with AI', { kind: 'quiet', icon: 'spark',
     onClick: () => V.aiCards.pickFolder() }) : null);
 
+  /* Notes' Flash cards page (1.18: one way in, "Study 26", and the decks under it; Learn and practice live in the study
+     screen's ⋯, never beside it). */
   function page() {
     const at = now();
     if (!at.list.length) {
       return V.h('div.empty.review-empty', {}, V.mark(40),
         V.h('p', { text: 'No flash cards yet.' }),
-        V.h('p.hint', { text: 'Write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to review.' }),
+        V.h('p.hint', { text: 'Write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to study.' }),
         V.h('p.hint', { text: 'Or let AI make them from a folder of your notes.' }),
         V.h('div.review-make', {}, makeButton()));
     }
-    const line = todayLine(at);
+    const due = at.list.filter((c) => isDue(c, at)).length;
     const tests = at.plans;
     const rows = decks(at);
     const folders = rows.filter((r) => !r.tag);
     const tags = rows.filter((r) => r.tag);
     return [
       V.h('section.review-head', {},
-        V.h('p.review-today', {}, line
-          ? [V.h('strong', { text: `Today: ${line.count} card${line.count === 1 ? '' : 's'}` }),
-            line.parts.map((p) => [V.h('span.sep', { text: ' · ' }), V.h('span.part', { text: p })])]
-          : V.h('strong', { text: 'All done for today' })),
-        line ? null : V.h('p.hint.review-later', { text: nextDue(at) }),
+        V.h('p.review-today', {}, V.h('strong', { text: due ? `${due} card${due === 1 ? '' : 's'} to study today` : 'All done for today' })),
+        due ? null : V.h('p.hint.review-later', { text: nextDue(at) }),
         V.h('div.review-go', {},
           // ('tonal': the screen's main iris button is the new-note one beside it; in light it looks the same)
-          V.button(line ? `Review ${line.count}` : 'Practise', { kind: 'tonal', icon: 'cards', onClick: () => start('all') }),
-          V.button('Learn', { icon: 'learn', onClick: () => V.learn.forDeck('all') })),
+          V.button(due ? `Study ${due}` : `Practise all ${at.list.length}`, { kind: 'tonal', icon: 'cards', onClick: () => start('all') })),
         V.h('div.review-make', {}, makeButton())),
       tests.length ? [V.h('h2.list-section', {}, V.h('span', { text: 'Tests coming up' }), V.h('span.count', { text: String(tests.length) })),
         tests.map(testRow)] : null,
@@ -469,20 +468,162 @@ V.review = (() => {
     return `${n} card${n === 1 ? ' comes' : 's come'} back ${label === 'Tomorrow' ? 'tomorrow' : 'on ' + label}.`;
   }
 
-  /* -- reviewing */
+  /* -- studying (1.18; the owner: "The flashcards are chaotic too... If there could be a next feature too added
+     alongside I know or still learning").
 
-  /* A deck's cards due today, one at a time; with none due (or `practice`), all of them as a practice round. */
-  function start(deck = 'all', { practice = false } = {}) {
+     One screen over everything (a phone's whole screen, a dialog from 700 px): the deck's name with ⋯ and Done at the
+     top, "4 of 31" and a thin line under it, one card at a time, big and centred (a tap, or Space, flips it), and
+     three buttons that stay put whatever the card says: Still learning, Next and I know it. Learn, practising the whole
+     deck, Shuffle and how it all works are in its ⋯, never beside the card.
+
+     Still learning is FSRS's Again (back tomorrow) and I know it is Good, as "Not yet" and "I knew it" were. Next
+     grades nothing: the card is passed over and its FSRS state isn't touched. Every card goes by once ("4 of 31"); then
+     the ones still being learned and the ones passed over come round once more ("Once more · 2 of 5"), in the order
+     they were set aside. Next on that second look leaves the card as it was (still due, so it's there next time), so
+     Next can never go round for ever. Then "Done for now": how it went and what's next. Done, Esc or Back stop at any
+     card: the answers given are kept (saved in batches, as ever). */
+
+  const SHAPES = {  // (line icons on the same 24 grid as util.js's)
+    again: '<path d="M4.5 12a7.5 7.5 0 1 0 2.3-5.4L4.5 8.8"/><path d="M4.5 4.5v4.3h4.3"/>',
+    skip: '<path d="M5 12h13.5"/><path d="m13 6.5 5.5 5.5-5.5 5.5"/>',
+  };
+  const shape = (name) => { const span = V.icon(''); span.firstChild.innerHTML = SHAPES[name]; return span; };
+  const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+  const fineMouse = () => !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+
+  let shown = null;  // the study screen open now (one at a time)
+
+  /* The study screen, for a mode to draw in (the cards below, or Learn: js/learn.js). Returns { el, setTitle,
+     progress(text, part, aside), stage, foot, say, ended(on), use(mode), close, closed }. A mode is { name, keys(event), menu()
+     -> V.menu items, leave({ closing }) }: use() hands the screen to the next one (Learn from the cards' ⋯...), so one
+     screen (and one step in the phone's history, for Back) serves them all. */
+  function screen(title) {
+    let pushed = false;
+    if (shown) { pushed = shown.pushed; shown.close({ keepStep: true }); }
+    const previous = document.activeElement;
+    let mode = null;
+    let closed = false;
+    const ui = {
+      title: V.h('h2.study-title', { text: title }),
+      progress: V.h('p.study-progress', { 'aria-live': 'polite' }),
+      aside: V.h('span.study-aside', { hidden: true }),
+      fill: V.h('i'),
+      stage: V.h('div.study-stage'),
+      foot: V.h('div.study-foot'),
+      say: V.h('p.sr-only', { 'aria-live': 'polite' }),
+    };
+    ui.more = V.iconButton('more', 'More', () => openMenu(), 'study-more');
+    ui.more.setAttribute('aria-haspopup', 'menu');
+    ui.done = V.h('button.btn.quiet.study-done', { type: 'button', text: 'Done', title: 'Done for now', onclick: () => api.close() });
+    ui.panel = V.h('div.study', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      V.h('header.study-head', {}, ui.title, ui.more, ui.done),
+      V.h('div.study-where', {}, V.h('div.study-line', {}, ui.progress, ui.aside), V.h('span.bar.study-bar', {}, ui.fill)),
+      ui.stage, ui.foot, ui.say);
+    // (a .layer too, so what waits for sheets to close waits for it: Ctrl+N, an update's reload, picking's keys)
+    ui.layer = V.h('div.layer.study-layer', {}, ui.panel);
+
+    const items = () => (mode && mode.menu ? mode.menu().filter(Boolean) : []);
+    function openMenu() {
+      const list = items();
+      if (!list.length) return;
+      ui.more.setAttribute('aria-expanded', 'true');
+      V.menu(ui.more, list, { cls: 'study-menu', label: 'More', returnFocus: true,
+        onClose: () => ui.more.setAttribute('aria-expanded', 'false') });
+    }
+    // Something open over it (its ⋯, a sheet, a note): the keys are that one's.
+    const covered = () => {
+      for (let n = ui.layer.nextElementSibling; n; n = n.nextElementSibling) if (!n.matches('.nt-strip')) return true;
+      return false;
+    };
+    const keys = (event) => {
+      if (closed || covered()) return;
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); api.close(); return; }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+      if (mode && mode.keys) mode.keys(event);
+    };
+    const api = {
+      el: ui.panel,
+      get pushed() { return pushed; },
+      closed: () => closed,
+      setTitle(text) { ui.title.textContent = text; ui.panel.setAttribute('aria-label', text); },
+      /* Where you are ("4 of 31", and a word beside it), and the line under it filled to `part` (0 to 1). */
+      progress(text, part = 0, aside = '') {
+        ui.progress.textContent = text;
+        ui.aside.textContent = aside;
+        ui.aside.hidden = !aside;
+        ui.fill.style.width = `${Math.round(Math.max(0, Math.min(1, part)) * 1000) / 10}%`;
+      },
+      stage: ui.stage,
+      foot: ui.foot,
+      /* Words for a screen reader, said once (the flipped card's answer). */
+      say(text) { ui.say.textContent = ''; setTimeout(() => { ui.say.textContent = text; }, 30); },
+      /* The end of a go (or Learn's stop between sets): its own buttons only, none at the top. */
+      ended(on) { ui.panel.classList.toggle('ended', !!on); },
+      /* A mode takes the screen over; the one before lets go first. */
+      use(next) {
+        if (mode && mode.leave) mode.leave({ closing: false });
+        mode = next;
+        ui.panel.dataset.mode = next.name || '';
+        ui.panel.classList.remove('ended');
+        V.clear(ui.stage);
+        V.clear(ui.foot);
+        ui.more.hidden = !items().length;
+      },
+      /* Done, Esc, Back (`fromHistory`), or another study screen taking its place (`keepStep`: its step in the history
+         is the new one's). */
+      close({ fromHistory = false, keepStep = false } = {}) {
+        if (closed) return;
+        closed = true;
+        const was = mode;
+        mode = null;
+        try { if (was && was.leave) was.leave({ closing: true }); } catch (error) { console.error(error); }
+        document.removeEventListener('keydown', keys, true);
+        if (stilled) stilled.inert = false;  // (before the focus goes back there)
+        ui.layer.classList.add('leaving');
+        setTimeout(() => ui.layer.remove(), 180);
+        if (shown === api) shown = null;
+        if (pushed && !fromHistory && !keepStep && history.state && history.state.vault === 'study') history.back();
+        if (!keepStep && previous && previous.isConnected && previous.focus) previous.focus({ preventScroll: true });
+        flush();
+      },
+    };
+    // On a phone (and a Chromebook's browser) Back closes it, as it does a full-screen note (never on the PC).
+    if (!pushed && !V.desktop) {
+      try { history.pushState({ vault: 'study' }, ''); pushed = true; } catch (error) { /* (Done still closes it) */ }
+    }
+    document.addEventListener('keydown', keys, true);
+    document.getElementById('layers').append(ui.layer);
+    // A modal dialog: the app under it can't be reached while it shows (Tab, a switch, a screen reader's swipe never
+    // land on the tabs behind it). Sheets and menus opened over it are in #layers, beside it. Only what this made inert
+    // is given back.
+    const app = document.getElementById('app');
+    const stilled = app && !app.inert ? app : null;
+    if (stilled) stilled.inert = true;
+    requestAnimationFrame(() => ui.layer.classList.add('shown'));
+    shown = api;
+    return api;
+  }
+
+  window.addEventListener('popstate', () => {
+    if (shown && !(history.state && history.state.vault === 'study')) shown.close({ fromHistory: true });
+  });
+
+  const titleFor = (deck) => (!deck || deck === 'all' ? 'Flash cards' : deckName(deck));
+
+  /* A deck's cards due today, one at a time; with none due (or `practice`), all of them as practice. `view`: a study
+     screen already open, to go on in. */
+  function start(deck = 'all', { practice = false, view = null, skip = null } = {}) {
     const at = now();
     const mine = at.list.filter(inDeck(deck));
     if (!mine.length) return V.toast('No flash cards there yet.');
-    const due = practice ? [] : mine.filter((c) => isDue(c, at));
-    return session({ title: deck === 'all' ? 'Review' : `Review: ${deckName(deck)}`, list: due.length ? due : mine,
-      practice: !due.length, deck, many: new Set(mine.map((c) => c.note)).size > 1 });
+    // (`skip`: the cards of the go just ended, its skipped ones among them: they wait for next time)
+    const due = practice ? [] : mine.filter((c) => isDue(c, at) && !(skip && skip.has(c.id)));
+    return session({ title: titleFor(deck), list: due.length ? due : mine, practice: !due.length, deck,
+      many: new Set(mine.map((c) => c.note)).size > 1, view, skip });
   }
 
   /* The open note's own cards (its Study button), as they're written now. */
-  function study(id) {
+  function study(id, { view = null } = {}) {
     const row = V.data.notes.get(id);
     if (!row) return null;
     const words = V.editor.openId() === id && V.editor.words() !== null ? V.editor.words() : row.body;
@@ -490,8 +631,8 @@ V.review = (() => {
     if (!mine.length) return null;
     const at = now();
     const due = mine.filter((c) => isDue(c, at));
-    return session({ title: V.noteTitle({ ...row, body: words || '' }) + ': study', list: due.length ? due : mine,
-      practice: !due.length, deck: 'note:' + id, many: false });
+    return session({ title: V.noteTitle({ ...row, body: words || '' }), list: due.length ? due : mine,
+      practice: !due.length, deck: 'note:' + id, many: false, view });
   }
 
   /* The cards to go through first: the longest waiting, then new ones in the order they're written. */
@@ -520,122 +661,224 @@ V.review = (() => {
     return [card.before, V.h('mark.blank-fill', { text: card.answer }), card.after];
   }
 
-  function session({ title, list, practice = false, deck = 'all', many = false }) {
-    let queue = order(list);
-    let flipped = false;
+  /* How big a card's words are drawn: big when they're few and short, smaller when there are a lot of them. */
+  function sizeOf(text) {
+    const words = String(text || '');
+    const longest = Math.max(0, ...words.split(/\s+/).map((w) => w.length));
+    return words.length <= 22 && longest <= 12 ? 'big' : words.length > 110 ? 'long' : 'mid';
+  }
+
+  /* "How flash cards work" (the ⋯): what each button does, the keys, and how cards are made. */
+  function howItWorks() {
+    const line = (lead, rest) => V.h('li', {}, V.h('strong', { text: lead }), rest);
+    V.sheet({
+      title: 'How flash cards work',
+      content: [
+        V.h('ul.study-how', {},
+          line('Tap the card', ' to flip it and see the answer.'),
+          line('Still learning:', ' it comes round once more now, and again tomorrow.'),
+          line('I know it:', ' it comes back in a few days, and a little later each time you know it.'),
+          line('Next:', ' skip it for now. It comes round once more at the end; skip it again and it waits for next time.'),
+          line('Done:', ' stop whenever you like. Your answers are kept.'),
+          fineMouse() ? line('Keys:', ' Space flips. 1 or ← Still learning, 2 or ↓ Next, 3 or → I know it.') : null),
+        V.h('p.hint.study-how-make', { text: 'Make cards in any note: a line like "mitosis :: cell division", or a blank like "The {{mitochondria}} makes ATP".' }),
+      ],
+      actions: [{ label: 'Got it', kind: 'primary' }],
+    });
+  }
+
+  /* Cards, one at a time, on the study screen (`view`: one already open, to draw in rather than opening one). */
+  function session({ title, list, practice = false, deck = 'all', many = false, view = null, skip: before = null }) {
+    const scr = view && !view.closed() ? view : screen(title);
+    scr.setTitle(title);
     let shuffled = false;
-    let knew = 0;
-    let missed = 0;
-    let total = queue.length;
-    const missedIds = new Set();
-    const ui = {
-      progress: V.h('p.study-progress', { 'aria-live': 'polite' }),
-      fill: V.h('i'),
-      card: V.h('button.flash-card', { type: 'button', onclick: () => flip() }),
-      actions: V.h('div.study-actions'),
-      shuffle: V.h('button.chip.study-shuffle', { type: 'button', 'aria-pressed': 'false', onclick: () => toggleShuffle() },
-        R.icon('shuffle'), 'Shuffle'),
+    let queue = order(list);
+    let round = 1;                 // 1: every card once; 2: once more, the ones set aside
+    let roundSize = queue.length;
+    let aside = [];                // set aside in the first round (Still learning, or Next): they come round once more
+    let flipped = false;
+    let over = false;
+    const first = new Map();       // card id -> its first answer (AGAIN or GOOD)
+    const passed = new Set();      // card ids passed over with Next and not answered since
+    const fine = fineMouse();
+    const card = V.h('button.flash-card', { type: 'button', onclick: () => flip() });
+    const button = (cls, icon, label, key, kind) => V.h('button.btn.study-btn.' + cls, {
+      type: 'button', dataset: { answer: kind }, 'aria-keyshortcuts': key, onclick: () => answer(kind),
+    }, icon, V.h('span.study-btn-label', { text: label }), V.h('kbd.study-key', { text: key, 'aria-hidden': 'true' }));
+    const buttons = {
+      still: button('still', shape('again'), 'Still learning', '1', 'still'),
+      next: button('skip', shape('skip'), 'Next', '2', 'next'),
+      know: button('know.primary', V.icon('check'), 'I know it', '3', 'know'),
     };
-    const knownNow = () => list.filter((c) => known(current(c))).length;
-    // What's on top of a card: the note it's from (when there are several), and whether it's new.
-    const from = (card) => {
-      const row = V.data.notes.get(card.note);
-      const kind = !memory(current(card)) ? 'New card' : isDue({ ...card, state: current(card) }) ? 'Review' : 'Practice';
-      return many && row ? `${V.noteTitle(row)}${kind === 'New card' ? ' · New' : ''}` : kind;
-    };
-    const when = (label, words) => [V.h('span', { text: label }), V.h('small.btn-when', { text: words })];
+    const actions = V.h('div.study-actions', { role: 'group', 'aria-label': 'Your answer' }, buttons.still, buttons.next, buttons.know);
+
+    function drawCard(c) {
+      const row = V.data.notes.get(c.note);
+      const shownWords = flipped ? (c.kind === 'blank' ? c.term.replace(V.study.GAP, c.answer) : c.answer) : c.term;
+      card.dataset.size = sizeOf(shownWords);
+      card.classList.toggle('flipped', flipped);
+      card.classList.toggle('blank-card', c.kind === 'blank');
+      card.setAttribute('aria-label', flipped ? `Answer: ${c.answer}. Tap to see the question again`
+        : `${c.kind === 'blank' ? c.term.replace(V.study.GAP, 'blank') : c.term}. Tap to see the answer`);
+      V.clear(card,
+        V.h('span.flash-side', { text: flipped ? 'Answer' : many && row ? V.noteTitle(row) : '' }),
+        V.h('span.flash-face', {},
+          // (reading text: Quick read's pieces go in when it's on, js/reading.js)
+          flipped && c.kind !== 'blank' ? V.reading.area(V.h('span.flash-q', { text: c.term })) : null,
+          V.reading.area(V.h('span.flash-words' + (flipped && c.kind === 'blank' ? '.in-context' : ''), {},
+            flipped ? answerOf(c) : question(c)))),
+        V.h('span.flash-hint', {}, R.icon('flip'), flipped ? 'Tap to see the question' : fine ? 'Click or press Space to flip' : 'Tap to flip'));
+    }
+
+    // A new card, or the other side: its words come in softly (the card itself never moves; nothing with reduced motion).
+    const turn = () => { card.classList.remove('turned'); void card.offsetWidth; card.classList.add('turned'); };
 
     function draw() {
-      const card = queue[0];
-      const done = total - queue.length;
-      ui.fill.style.width = total ? `${(100 * done) / total}%` : '0%';
-      if (!card) {
-        ui.progress.textContent = `${knownNow()} of ${list.length} cards known`;
-        V.clear(ui.card, V.h('span.flash-side', { text: 'All done' }),
-          V.h('span.flash-words.end', { text: missed ? `You knew ${knew} of ${knew + missed}. The ones you missed come back tomorrow.`
-            : `You knew all ${knew}. Nice work!` }));
-        ui.card.disabled = true;
-        V.clear(ui.actions,
-          V.button('Learn these', { icon: 'learn', onClick: () => { sheet.close(); V.learn.start({ title: `Learn: ${deckName(deck)}`, list, deck }); } }),
-          V.button('Close', { kind: 'primary', onClick: () => sheet.close() }));
-        return;
-      }
-      ui.card.disabled = false;
-      ui.progress.textContent = `Card ${Math.min(done + 1, total)} of ${total} · ${knownNow()} of ${list.length} known`
-        + (practice ? ' · practice round' : '');
-      ui.card.classList.toggle('flipped', flipped);
-      ui.card.classList.toggle('blank-card', card.kind === 'blank');
-      ui.card.setAttribute('aria-label', flipped ? `Answer: ${card.answer}. Tap to see the question again`
-        : `${card.kind === 'blank' ? card.term.replace(V.study.GAP, 'blank') : card.term}. Tap to see the answer`);
-      V.clear(ui.card,
-        V.h('span.flash-side', { text: flipped ? 'Answer' : from(card) }),
-        // (reading text: Quick read's pieces go in when it's on, js/reading.js)
-        V.reading.area(V.h('span.flash-words' + (flipped && card.kind === 'blank' ? '.in-context' : ''), {}, flipped ? answerOf(card) : question(card))),
-        V.h('span.flash-hint', {}, R.icon('flip'), flipped ? 'Tap to see the question' : 'Tap to see the answer'));
-      const comes = preview(current(card));
-      V.clear(ui.actions, flipped
-        ? [V.h('button.btn.not-yet.two-line', { type: 'button', onclick: () => mark(false) }, when('Not yet', comes.again)),
-          V.h('button.btn.primary.two-line', { type: 'button', onclick: () => mark(true) }, when('I knew it', comes.good))]
-        : [V.button('Show answer', { kind: 'primary wide-btn', onClick: () => flip() })]);
+      const c = queue[0];
+      if (!c) { end(); return; }
+      const at = roundSize - queue.length + 1;
+      scr.progress(`${round === 2 ? 'Once more · ' : practice ? 'Practice · ' : ''}${at} of ${roundSize}`, (at - 1) / roundSize);
+      drawCard(c);
+      const comes = preview(current(c));
+      buttons.still.title = `Still learning: it comes back ${comes.again}`;
+      buttons.know.title = `I know it: it comes back ${comes.good}`;
+      buttons.next.title = round === 1 ? 'Next: skip it for now, it comes round again at the end' : 'Next: leave it for next time';
     }
 
     function flip() {
-      if (!queue.length) return;
+      if (over || !queue.length) return;
       flipped = !flipped;
-      draw();
+      drawCard(queue[0]);
+      turn();
+      if (flipped) scr.say(`Answer: ${queue[0].answer}`);
     }
 
-    function mark(itKnew) {
-      const card = queue.shift();
-      if (!card) return;
-      grade(card, itKnew ? GOOD : AGAIN);
-      if (itKnew) knew++;
-      else if (!missedIds.has(card.id)) {
-        missed++;
-        missedIds.add(card.id);
-        queue.push(card);  // once more before the end
-        total++;
+    function answer(kind) {
+      if (over) return;
+      const c = queue.shift();
+      if (!c) return;
+      if (kind === 'next') {
+        if (!first.has(c.id)) passed.add(c.id);
+        if (round === 1) aside.push(c);
+      } else {
+        const rating = kind === 'know' ? GOOD : AGAIN;
+        grade(c, rating);
+        if (!first.has(c.id)) first.set(c.id, rating);
+        passed.delete(c.id);
+        if (rating === AGAIN && round === 1) aside.push(c);
       }
       flipped = false;
+      if (!queue.length && round === 1 && aside.length) {
+        round = 2;
+        queue = shuffled ? shuffle(aside) : aside;
+        aside = [];
+        roundSize = queue.length;
+      }
       draw();
+      if (!over) {
+        turn();
+        card.focus({ preventScroll: true });  // (so Space flips the next card, not the button just pressed)
+      }
     }
 
     function toggleShuffle() {
       shuffled = !shuffled;
-      ui.shuffle.setAttribute('aria-pressed', String(shuffled));
-      ui.shuffle.classList.toggle('on', shuffled);
-      queue = shuffled ? shuffle(queue) : order(queue);
+      // Shuffled on the very first card, the whole deck is; later on, the card showing stays and the rest are.
+      const untouched = round === 1 && queue.length === roundSize && !flipped;
+      const [top, ...rest] = queue;
+      queue = untouched ? (shuffled ? shuffle(queue) : order(queue)) : top ? [top, ...(shuffled ? shuffle(rest) : order(rest))] : queue;
       flipped = false;
       draw();
+      V.toast(shuffled ? 'Shuffled' : 'Back in order', { ms: 1600 });
+    }
+
+    /* What's next, in a line: the test it's for, else what else is due, else when cards come back. */
+    function nextLine(at, more) {
+      const test = deck && deck.startsWith('test:') ? planFor(V.data.notes.get(deck.slice(5))) : null;
+      if (test) return countdown(test);
+      if (more) return `${plural(more, 'more card is', 'more cards are')} due today.`;
+      return nextDue(at);
+    }
+
+    function end() {
+      over = true;
+      scr.progress('', 1);
+      scr.ended(true);
+      const grades = [...first.values()];
+      const knew = grades.filter((r) => r === GOOD).length;
+      const learning = grades.length - knew;
+      const left = passed.size;
+      const at = now();
+      // (other cards due: never the ones skipped (here, or in the go before that led here), which wait for next time,
+      // or any of this go's own)
+      const skip = new Set([...(before || []), ...passed, ...list.map((c) => c.id)]);
+      const more = at.list.filter((c) => isDue(c, at) && !skip.has(c.id)).length;
+      const sum = !grades.length ? 'You skipped every card.'
+        : knew === grades.length ? (knew === 1 ? 'You knew it. Nice work!' : `You knew all ${knew}. Nice work!`)
+          : `You knew ${knew} of ${grades.length}.`;
+      const lines = [];
+      if (learning) lines.push(learning === 1 ? 'The one you\'re still learning comes back tomorrow.' : `The ${learning} you're still learning come back tomorrow.`);
+      if (left) lines.push(left === 1 ? 'The one you skipped waits for next time.' : `The ${left} you skipped wait for next time.`);
+      if (!lines.length) lines.push(nextLine(at, more));
+      const go = [];
+      if (more) go.push(V.button(`Study ${more} more`, { icon: 'cards', onClick: () => start('all', { view: scr, skip }) }));
+      else if (list.length > 1 && V.learn) go.push(V.button('Quiz me on these', { icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) }));
+      const done = V.button('Done', { kind: 'primary', onClick: () => scr.close() });
+      go.push(done);
+      V.clear(scr.stage, V.h('div.study-end', { role: 'status' },
+        V.h('span.study-end-mark', {}, V.icon('check')),
+        V.h('h3', { text: 'Done for now' }),
+        V.h('p.study-end-sum', { text: sum }),
+        lines.map((text) => V.h('p.study-end-next', { text }))));
+      V.clear(scr.foot, V.h('div.study-end-go' + (go.length === 1 ? '.one' : ''), {}, go));
+      requestAnimationFrame(() => { if (done.isConnected) done.focus({ preventScroll: true }); });
     }
 
     const keys = (event) => {
-      if (!ui.card.isConnected || event.target.closest('input, textarea, select')) return;
-      if (event.key === ' ' && event.target === ui.card) return;  // the card's own click flips it
-      if ((event.key === ' ' || event.key === 'Enter') && !event.target.closest('button')) { event.preventDefault(); flip(); }
-      else if (flipped && (event.key === 'ArrowRight' || event.key === 'k')) { event.preventDefault(); mark(true); }
-      else if (flipped && (event.key === 'ArrowLeft' || event.key === 'n')) { event.preventDefault(); mark(false); }
+      if (over) return;
+      const key = event.key;
+      const on = event.target && event.target.closest ? event.target : document.body;
+      if (on.closest('input, textarea, select, [contenteditable]')) return;
+      if (on === card && (key === ' ' || key === 'Enter')) return;  // (the card's own click flips it)
+      if (key === ' ' || key === 'ArrowUp') {
+        if (key === ' ' && on.closest('button')) return;  // (a button the keyboard is on: Space presses it)
+        event.preventDefault();
+        flip();
+      } else if (key === '1' || key === 'ArrowLeft') { event.preventDefault(); answer('still'); }
+      else if (key === '2' || key === 'ArrowDown') { event.preventDefault(); answer('next'); }
+      else if (key === '3' || key === 'ArrowRight') { event.preventDefault(); answer('know'); }
     };
-    document.addEventListener('keydown', keys);
-    const sheet = V.sheet({
-      title,
-      wide: true,
-      content: [
-        V.h('div.study-top', {}, ui.progress, ui.shuffle),
-        V.h('span.bar.study-bar', {}, ui.fill),
-        ui.card,
-        ui.actions,
-        V.h('p.hint.study-hint', { text: 'Cards come from lines like "photosynthesis :: how plants make food" and blanks like "The {{mitochondria}} makes ATP". Each one comes back just before you\'d forget it.' }),
-      ],
-      onClose: () => { document.removeEventListener('keydown', keys); flush(); },
+
+    const menu = () => {
+      const whole = now().list.filter(inDeck(deck));
+      return [
+        V.learn ? { label: 'Learn: quiz me', icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) } : null,
+        !practice && whole.length > list.length ? { label: `Practise all ${whole.length} cards`, icon: 'cards',
+          onClick: () => session({ title, list: whole, practice: true, deck, many: new Set(whole.map((c) => c.note)).size > 1, view: scr }) } : null,
+        { node: (done) => V.h('button.menu-item.menu-switch', { type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(shuffled),
+          onclick: () => { done(); toggleShuffle(); } }, R.icon('shuffle'), V.h('span', { text: 'Shuffle' }),
+        V.h('span.menu-state', { text: shuffled ? 'On' : 'Off' })) },
+        { label: 'How flash cards work', icon: 'info', onClick: () => howItWorks() },
+      ];
+    };
+
+    scr.use({
+      name: 'cards',
+      keys,
+      menu,
+      leave: ({ closing }) => {
+        if (closing && !over && first.size && queue.length) V.toast('Saved. The rest wait for next time.');
+      },
     });
+    scr.stage.append(card);
+    scr.foot.append(actions);
     draw();
-    requestAnimationFrame(() => ui.card.focus({ preventScroll: true }));
-    return sheet;
+    requestAnimationFrame(() => { if (card.isConnected) card.focus({ preventScroll: true }); });
+    return scr;
   }
 
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
     dueByFolder, nextDue,
-    start, study, session, question, answerOf, shuffle, cardsOf, pending: () => pending };
+    start, study, session, screen, question, answerOf, shuffle, cardsOf, pending: () => pending, shown: () => shown };
 })();

@@ -2,8 +2,8 @@
 
    Flash cards: any line written "term :: definition" (or "Question? :: Answer") is a card, and so is each {{blank}}
    in a line ("The {{mitochondria}} makes ATP": "The ____ makes ATP", answer "mitochondria"; with two blanks in a line,
-   two cards, each showing the other one filled in). They make the Study and Learn buttons show. Studying flips through
-   the ones due (js/review.js schedules them with FSRS, the way Anki does); Learn quizzes them (js/learn.js). Each
+   two cards, each showing the other one filled in). They make the Study button show. Studying flips through the ones
+   due (js/review.js schedules them with FSRS, the way Anki does); its ⋯ has Learn, which quizzes them (js/learn.js). Each
    card's progress is kept in the note's extra.cards by a short code: a "term :: definition" card's made from its term
    and a blank's from its hidden word, so changing a definition, or the words round a blank, keeps its progress.
 
@@ -476,8 +476,7 @@ V.study = (() => {
   const hasCards = (note, text) => !note.locked && cards(text).length > 0;
   V.editor.addTool({ name: 'study', label: 'Study', icon: () => icon('cards'), keepCaret: false, onClick: studySheet,
     shown: hasCards });
-  V.editor.addTool({ name: 'learn', label: 'Learn', icon: () => V.icon('learn'), keepCaret: false, shown: hasCards,
-    onClick: () => { const id = V.editor.openId(); if (id) V.learn.forNote(id); } });
+  // (1.18: no Learn button beside it any more: Learn is in the study screen's ⋯, with the cards it quizzes.)
   V.editor.addTool({ name: 'focus', label: 'Focus timer', icon: () => icon('timer'), keepCaret: false, onClick: focusSheet });
   V.editor.addTool({ name: 'repeat', label: 'Repeat', icon: () => icon('repeat'), keepCaret: false, onClick: repeatSheet,
     shown: (note, text) => HAS_ITEMS.test(text || '') || !!(note.extra && note.extra.reset) });

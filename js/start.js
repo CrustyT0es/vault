@@ -35,11 +35,14 @@
 
   V.tab = () => current;  // the screen's own id: 'today', 'notes', 'send', 'files', 'clips', 'claude' or 'settings'
   V.navTab = () => NAV_OF[current] || '';  // the tab it's under ('' for Settings)
+  /* `opts.top`: opened at its top, whatever place it was left at (the logo, a tab tapped again, a search from another
+     screen). Otherwise a screen opened again is back where it was left (below). */
   V.go = (view, opts = {}) => {
     if (view === 'chat') view = 'claude';  // the Chat tab, by its name since 1.8.3
     if (view === 'share') view = sharePart();
     if (!VIEWS[view]) view = 'notes';  // (an id this version doesn't know)
     const was = current;
+    if (shell && shown && was) keepPlace(was);  // (before anything is drawn over it)
     current = view;
     if (!shell) return;
     if (!shown) { askedFirst = view; return; }  // (main() shows it, once this device's notes are loaded)
@@ -47,6 +50,168 @@
     else if (view !== 'settings' && was === 'settings') leftSettings();
     show(view, opts || {});
   };
+
+  /* ---------------------------------------------------------------- each screen's place (1.18)
+
+     The owner: "when you go to click notes or any tab then it refreshes and goes back to the default for the page."
+     A screen is still drawn afresh each time it's opened (so whatever changed while it was away shows), but the place
+     it was left at comes back: each module keeps its own state (Notes' folder and search, the chat open and the words
+     in its box, Share's part, Today's days), and this keeps how far each of the screen's lists was scrolled, by the
+     item at its top (a note that came in above it while away doesn't push the place down), else by pixels. A list
+     marked with `data-place` (Notes' list: its folder and search; a chat: its id; an open note: its id) only gets its
+     place back when it's still the same list. Tapping the tab you're on goes to its top (and then its start: each
+     module's `again`); the logo goes to Today's top; Settings opens at its top. */
+  const places = new Map();  // screen id -> { scrolls: [{ key, n, place, top, left, end, anchors }] }
+  const OWN_PLACE = '.today-week-days';  // (js/today.js keeps the days' place itself: they snap to a day)
+  const ANCHORS = '[data-id], [data-key], [data-turn], [data-day], [data-section]';
+  let placing = 0;  // the putting back going on (a newer one, or a person scrolling, ends it)
+
+  const placeOf = (el) => { const owner = el.closest('[data-place]'); return owner ? owner.dataset.place : ''; };
+  const keyOf = (el) => (el === shell.view ? 'view' : el.classList.length ? `${el.tagName.toLowerCase()}.${CSS.escape(el.classList[0])}` : '');
+  const findKey = (key, n) => (key === 'view' ? shell.view : shell.view.querySelectorAll(key)[n] || null);
+  // (the nearest box that scrolls up and down, as an item's place is measured in it)
+  function scrollerOf(el) {
+    for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+      if (up === shell.view) return up;
+      if (/(auto|scroll)/.test(getComputedStyle(up).overflowY)) return up;
+    }
+    return null;
+  }
+  function anchorSelector(el) {
+    for (const name of ['id', 'key', 'turn', 'day', 'section']) {
+      const value = el.dataset[name];
+      if (value === undefined || value === '') continue;
+      return `${el.tagName.toLowerCase()}${el.classList.length ? '.' + CSS.escape(el.classList[0]) : ''}[data-${name}="${CSS.escape(value)}"]`;
+    }
+    return '';
+  }
+  // The first few items at the box's top edge, and how far below the edge each starts.
+  function anchorsIn(box) {
+    const edge = box.getBoundingClientRect().top;
+    const found = [];
+    for (const el of box.querySelectorAll(ANCHORS)) {
+      const at = el.getBoundingClientRect();
+      if (!at.height || at.bottom <= edge + 1) continue;
+      if (found.some((one) => one.el.contains(el))) continue;  // (one item's own parts)
+      if (scrollerOf(el) !== box) continue;
+      const sel = anchorSelector(el);
+      if (sel) found.push({ el, sel, at: at.top - edge });
+      if (found.length === 3 || at.top - edge > box.clientHeight) break;
+    }
+    return found.map(({ sel, at }) => ({ sel, at }));
+  }
+  /* The item to put back at its place: the first one still followed by the next as it was (an item that moved, such as
+     a note edited elsewhere that went to the top of a list sorted by when it was edited, is passed over). */
+  function markIn(el, anchors) {
+    const found = anchors.map((one) => {
+      const mark = el.querySelector(one.sel);
+      return mark && scrollerOf(mark) === el ? { one, top: mark.getBoundingClientRect().top } : null;
+    });
+    for (let i = 0; i < found.length; i++) {
+      if (!found[i]) continue;
+      const next = found[i + 1];
+      if (i === found.length - 1 || (next && Math.abs((next.top - found[i].top) - (next.one.at - found[i].one.at)) <= 2)) return found[i];
+    }
+    return found.find(Boolean) || null;
+  }
+
+  function keepPlace(view) {
+    if (view === 'settings' || shell.view.dataset.tab !== view) return;
+    const scrolls = [];
+    try {
+      for (const el of [shell.view, ...shell.view.querySelectorAll('*')]) {
+        const top = el.scrollTop;
+        const left = el.scrollLeft;
+        if (!top && !left) continue;
+        if (el.matches(OWN_PLACE)) continue;
+        const key = keyOf(el);
+        if (!key) continue;
+        const n = key === 'view' ? 0 : [...shell.view.querySelectorAll(key)].indexOf(el);
+        // (at the very end of a list, such as a chat read to its newest message: at its end again, however long it got)
+        const end = top > 0 && el.scrollHeight - top - el.clientHeight < 4;
+        scrolls.push({ key, n, place: placeOf(el), top, left, end, anchors: top && !end ? anchorsIn(el) : [] });
+      }
+    } catch (error) { console.error(error); }
+    places.set(view, { scrolls });
+  }
+
+  /* Puts one list back: `true` once it's there (or it can't be: gone, another list now, or moved meanwhile by
+     something else, such as Notes' search opening at the list's top). */
+  function putOne(item) {
+    const el = item.el;
+    if (!el || !el.isConnected || placeOf(el) !== item.place) return true;
+    if (item.set !== undefined) {
+      const most = el.scrollHeight - el.clientHeight;
+      if (Math.abs(el.scrollTop - item.set) > 1 && el.scrollTop < most - 1) return true;
+    }
+    let there = !item.top;
+    if (item.end) {
+      el.scrollTop = el.scrollHeight;
+      there = el.scrollHeight - el.clientHeight >= item.top - 1 && el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+    } else if (item.top && item.anchors.length) {
+      const mark = markIn(el, item.anchors);
+      if (mark) {
+        const off = mark.top - el.getBoundingClientRect().top - mark.one.at;
+        if (Math.abs(off) > 0.5) el.scrollTop += off;
+        there = Math.abs(el.querySelector(mark.one.sel).getBoundingClientRect().top - el.getBoundingClientRect().top - mark.one.at) <= 1;
+      }
+    }
+    if (!there && item.top && !item.end) {
+      if (el.scrollTop !== item.top) el.scrollTop = item.top;
+      there = Math.abs(el.scrollTop - item.top) <= 1;
+    }
+    item.set = el.scrollTop;
+    if (item.left && el.scrollLeft !== item.left) el.scrollLeft = item.left;
+    return there && (!item.left || Math.abs(el.scrollLeft - item.left) <= 1);
+  }
+
+  /* The screen's lists back where they were: at once, and again each frame for a moment while what they hold is still
+     coming (a chat, a PC's folder), unless a person scrolls, taps or types meanwhile. */
+  function putBack(place) {
+    const ticket = ++placing;
+    const items = place.scrolls.map((item) => ({ ...item, el: findKey(item.key, item.n), done: false }));
+    const left = () => {
+      let count = 0;
+      for (const item of items) {
+        if (!item.done) item.done = putOne(item);
+        if (!item.done) count++;
+      }
+      return count;
+    };
+    if (!left()) return;
+    const until = performance.now() + 1500;
+    const again = () => {
+      if (ticket !== placing || !left() || performance.now() > until) return;
+      requestAnimationFrame(again);
+    };
+    requestAnimationFrame(again);
+  }
+  for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+    window.addEventListener(type, () => { placing++; }, { capture: true, passive: true });
+  }
+
+  /* A tab tapped: its screen, back where it was left; the one you're on: its top (each module's `again`: Notes then
+     goes back to all your notes, a phone's Chat to its list), else drawn afresh at its top, as before. A tap that
+     only took the note-taker's screen away (it covered the tab you're on) just shows that tab. */
+  let coveredTap = false;
+  const smoothly = () => (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+  document.addEventListener('click', (event) => {
+    if (event.target && event.target.closest && event.target.closest('#app > nav.tabs .tab')) {
+      coveredTap = !!document.querySelector('#layers > .nt-layer.shown');
+    }
+  }, true);  // (before js/notetaker.js's own, which takes its screen away: this file loads first)
+  function tapped(id) {
+    const covered = coveredTap;
+    coveredTap = false;
+    if (!shown || NAV_OF[current] !== id || covered) { V.go(id); return; }
+    places.delete(current);
+    const module = VIEWS[current]();
+    try {
+      if (module && typeof module.again === 'function' && module.again() !== false) return;
+    } catch (error) { console.error(error); }
+    if (shell.view.scrollTop > 0) shell.view.scrollTo({ top: 0, behavior: smoothly() });
+    else V.go(current, { top: true });
+  }
 
   // Share opens on the part used last on this device, or on Send while something sent here hasn't been seen yet.
   function sharePart() {
@@ -66,8 +231,12 @@
       else button.removeAttribute('aria-current');
     }
     if (shell.me) shell.me.classList.toggle('on', view === 'settings');
+    // (opened again: back where it was left, unless asked for its top; Settings always at its top)
+    if (opts.top) places.delete(view);
+    const place = view !== 'settings' && !fallen ? places.get(view) || null : null;
+    placing++;  // (a putting back still going on was for the screen before)
     try {
-      VIEWS[view]().render(shell.view, opts);
+      VIEWS[view]().render(shell.view, place ? { ...opts, back: true } : opts);
     } catch (error) {
       console.error(error);
       if (view !== 'notes' && !fallen) {
@@ -82,6 +251,9 @@
         V.button('Try again', { kind: 'primary', onClick: () => V.go(current) })));
     }
     shell.view.scrollTop = 0;
+    if (place && current === view) {
+      try { putBack(place); } catch (error) { console.error(error); }
+    }
     badge();
     V.emit('tab', current);
   }
@@ -120,16 +292,29 @@
   });
 
   /* The numbers on the tabs: on Share, what was sent here and not seen yet (js/share.js puts the same on its Send
-     part); on Chat, messages waiting to be sent. */
+     part); on Chat, messages waiting to be sent and answers that ended while they weren't shown (1.18). While another
+     screen shows, Chat has a small dot instead (no number) as long as an answer is being written. */
   function badge() {
     if (!shell) return;
     let count = 0;
     let waiting = 0;
+    let writing = false;
     try { count = V.send && V.send.unseen ? V.send.unseen() : 0; } catch (error) { console.error(error); }
-    try { waiting = V.chat && V.chat.waiting ? V.chat.waiting() : 0; } catch (error) { console.error(error); }
+    try { waiting = V.chat ? (V.chat.badge || V.chat.waiting)() : 0; } catch (error) { console.error(error); }
+    try { writing = !!(V.chat && V.chat.writing && V.chat.writing()) && current !== 'claude'; } catch (error) { console.error(error); }
     for (const [id, n] of [['share', count], ['claude', waiting]]) {
       const dot = shell.nav.querySelector(`[data-tab=${id}] .badge`);
       if (dot) { dot.textContent = n ? String(n) : ''; dot.hidden = !n; }
+    }
+    const working = shell.nav.querySelector('[data-tab=claude] .tab-dot');
+    if (working) working.hidden = !writing || !!waiting;
+    const said = shell.nav.querySelector('[data-tab=claude] .tab-said');
+    if (said) {
+      let sending = 0;
+      try { sending = V.chat && V.chat.waiting ? V.chat.waiting() : 0; } catch (error) { console.error(error); }
+      const fresh = Math.max(0, waiting - sending);
+      said.textContent = [writing ? 'writing an answer' : '', fresh ? `${fresh} new ${fresh === 1 ? 'answer' : 'answers'}` : '',
+        sending ? `${sending} waiting to send` : ''].filter(Boolean).map((part) => `, ${part}`).join('');
     }
   }
 
@@ -144,18 +329,18 @@
     const target = event.target;
     if (target && ((target.matches && target.matches('input, textarea, select')) || target.isContentEditable)) return;
     event.preventDefault();
-    V.go('notes');
+    V.go('notes', key === 'f' ? { top: true } : {});  // (the search box is at the list's top)
     if (key === 'n') V.notes.chooseTemplate({ fresh: true });
     else V.notes.search();
   });
 
-  /* The rail's logo (1.17, the owner: "click the logo at the top there and have it go to Today"): Today, or Today's
-     top again when it's showing (js/today.js). Only in the app: the setup and sign-in screens have their own
-     wordmark, which isn't a button. */
+  /* The rail's logo (1.17, the owner: "click the logo at the top there and have it go to Today"): Today's top, from
+     any screen (never the place Today was left at), or again when it's showing (js/today.js). Only in the app: the
+     setup and sign-in screens have their own wordmark, which isn't a button. */
   function goToday() {
     if (!shell || !app.classList.contains('ready') || app.classList.contains('gate')) return;
     if (shown && current === 'today' && V.today && V.today.toTop) { V.today.toTop(); return; }
-    V.go('today');
+    V.go('today', { top: true });
   }
 
   function buildShell() {
@@ -165,9 +350,11 @@
       V.mark(30, 'rail-mark', { colour: true }));
     const nav = V.h('nav.tabs', { 'aria-label': 'Wefty' }, home,
       NAV.map(([id, icon, label]) => V.h('button.tab', {
-        type: 'button', dataset: { tab: id }, onclick: () => V.go(id),
-      }, V.h('span.tab-icon', {}, V.icon(icon), id === 'share' || id === 'claude' ? V.h('span.badge', { hidden: true }) : null),
-      V.weave('tab-weave'), V.h('span.tab-label', { text: label }))),
+        type: 'button', dataset: { tab: id }, onclick: () => tapped(id),
+      }, V.h('span.tab-icon', {}, V.icon(icon), id === 'share' || id === 'claude' ? V.h('span.badge', { hidden: true, 'aria-hidden': id === 'claude' ? 'true' : null }) : null,
+        // (Chat's dot while an answer is written and another screen shows; what it and the badge say, for a screen reader)
+        id === 'claude' ? V.h('span.tab-dot', { hidden: true, 'aria-hidden': 'true', title: 'Writing an answer' }) : null),
+      V.weave('tab-weave'), V.h('span.tab-label', { text: label }), id === 'claude' ? V.h('span.sr-only.tab-said') : null)),
       V.h('span.rail-spacer'), me);
     const view = V.h('main.view');
     shell = { nav, view, me };

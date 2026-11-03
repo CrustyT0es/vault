@@ -210,7 +210,7 @@ V.aiCards = (() => {
     if (row.deleted) no('That note is in the Trash.');
     if (skipWhy(row) === 'locked') no('Wefty never reads a locked note to make flash cards.');
     if (O().isTemplate(row)) no('This is a template: make cards in a note made from it.');
-    if (O().isArchived(row)) no('This note is archived, so its cards wouldn\'t show in Review. Unarchive it first.');
+    if (O().isArchived(row)) no('This note is archived, so its cards wouldn\'t come up to study. Unarchive it first.');
     if (listening(id)) no('The note-taker is writing into this note. Stop it first, then make cards.');
     const words = wordsOf(row);
     if (!String(words || '').trim()) no('There\'s nothing in this note to make cards from yet.');
@@ -689,10 +689,12 @@ V.aiCards = (() => {
       const added = done.reduce((n, d) => n + d.added, 0);
       const first = done.find((d) => d.added);
       const into = done.filter((d) => d.added).length === 1 ? ` to "${first.title}"` : ` to ${plural(done.filter((d) => d.added).length, 'note')}`;
-      const openHere = first && V.editor && V.editor.openId() === first.target;
+      // What's next is studying them (1.18): the test's cards, or the note they went into (new cards are all due).
+      const studyThem = !added || !V.review ? null : scope.test ? () => V.review.start('test:' + scope.test)
+        : () => V.review.study(first.target);
       V.toast(added ? `Added ${plural(added, 'flash card')}${into}.${dropped ? ` ${plural(dropped, 'empty card')} left out.` : ''}`
-        : 'Those cards were already there, so nothing was added.', added && !openHere && first
-        ? { ms: 6000, action: 'Open', onAction: () => V.reminders.openNote(first.target) } : { ms: 5000 });
+        : 'Those cards were already there, so nothing was added.', studyThem
+        ? { ms: 6000, action: 'Study', onAction: studyThem } : { ms: 5000 });
     };
 
     const go = async () => {

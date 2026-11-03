@@ -2,7 +2,7 @@
    says what it covers: its Test button picks folders and #tags (kept in extra.exam: { covers: [folder ids, '#tags'],
    since: the day the plan began, for: the test day it was made for }), or a line in it does ("Covers: Biology,
    #cells"). Then a countdown shows on the note, on its card (in Upcoming too), on the folders it covers and on the
-   Review page: "Bio test in 3 days · 42 cards left · ~14 a day". The cram plan behind it is js/review.js's. */
+   Flash cards page: "Bio test in 3 days · 42 cards left · ~14 a day". The cram plan behind it is js/review.js's. */
 'use strict';
 
 V.exams = (() => {
@@ -37,7 +37,7 @@ V.exams = (() => {
     V.sheet({
       title: 'What\'s on the test?',
       content: [
-        V.h('p.hint.covers-about', { text: 'Pick the folders and tags its flash cards are in. Wefty counts down to the test day and spreads the cards you haven\'t gone over across the days left, in Review.' }),
+        V.h('p.hint.covers-about', { text: 'Pick the folders and tags its flash cards are in. Wefty counts down to the test day and spreads the cards you haven\'t gone over across the days left.' }),
         V.h('label.label', { text: 'Test day' }, day),
         V.h('div.label', { text: 'Folders' }), V.h('div.covers-list', {}, folders),
         tags.length ? [V.h('div.label', { text: 'Tags' }), V.h('div.covers-list', {}, tags)] : null,
@@ -99,7 +99,7 @@ V.exams = (() => {
       { dataset: { id: p.note.id } },
       V.h('button.exam-banner-main', { type: 'button', title: 'Open the test note', onclick: () => R.openNote(p.note.id) },
         V.icon('target', 'test-icon'), V.h('span', { text: RV.countdown(p) })),
-      p.count ? V.button('Review', { kind: 'quiet', icon: 'cards', onClick: () => RV.start('test:' + p.note.id) }) : null));
+      p.count ? V.button('Study', { kind: 'quiet', icon: 'cards', onClick: () => RV.start('test:' + p.note.id) }) : null));
   }
 
   V.editor.addTool({ name: 'test', label: 'Test', icon: () => V.icon('target'), keepCaret: false,

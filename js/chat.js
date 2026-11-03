@@ -35,6 +35,27 @@
    rounds go as words (madeNote), as tool_use blocks without tools are refused. Changes of a turn that failed or was
    stopped (not sent as the history) are told to the next message the same way.
 
+   Since 1.18 Chat is an agent in Wefty: up to MOST_ROUNDS rounds and 25 changes a message (folders, organising,
+   reminders, sending, copying, exporting), all shown in one list under the answer with Undo all. Deleting is only
+   ever asked (Delete / Cancel in that list): the next message settles it (settleAsks: a yes carries out the last
+   answer's asks before the model is asked, anything else leaves them undeleted), and what was undone, deleted or
+   cancelled since the last answer goes with the next message as `turn.news`, kept with it so it's sent the same
+   way every time.
+
+   An answer keeps going while the owner is elsewhere (1.18; the owner: "if a message is sent, AI mode keeps thinking
+   and generating even if I swap tabs or tabs on the app too"). Inside Wefty nothing stops it: the answer lives here,
+   not in the Chat screen, so Today, Notes, Share, a note or Settings can be opened meanwhile and the words keep going
+   into the chat (the Chat tab shows a small dot while it's written, and its badge once it's done unseen). Out of
+   sight (the phone's home screen, another browser tab), the browser may stop the page and cut the answer off: one cut
+   off at this end (geminiTry's `here`; Claude's stream failing by itself, or with the page out of sight meanwhile) is
+   finished when Wefty is back: asked again by itself when nothing was paid for (Gemini is free; Claude that hadn't
+   started), from where it got to (rounds of tools kept, never run again), its words so far showing meanwhile
+   (`partial`) with "Finishing the answer..."; a Claude answer that had started (paid for: asking again costs about as
+   much again) says so with one tap, "Finish it". A page closed or put to sleep for good in the middle of one leaves
+   the turn 'answering' on this device, marked as this device's (`answeringBy`) and saved here as it starts (kept
+   on this device only, unless other devices can see it already): the next start finishes it the same way (adopt),
+   unless another tab here still holds its lock (navigator.locks) or another device has it in hand.
+
    Each chat is kept in the owner's private file storage, <owner>/chats/<id>.json (read when the tab opens, saved
    after each answer), with this device's copy in V.db so the list shows at once and offline. Files attached to a
    message go to <owner>/chats/<id>/files/, and the chat keeps only where they are: they're fetched again when a later
@@ -117,7 +138,7 @@ V.chat = (() => {
   const MAX_TOKENS = 16000;            // room for the thinking and the answer...
   const MAX_TOKENS_THINKING = 32000;   // ...and more with "Think harder"
   const MOST_REPLIES = 4;              // a turn paused by web search is carried on 3 times at most
-  const MOST_ROUNDS = 6;               // rounds of Wefty tools one answer may take (then it's told to say what's done)
+  const MOST_ROUNDS = 8;               // rounds of Wefty tools one answer may take (then it's told to say what's done)
   // (a Gemini call sent back without the signature Google gave it, because another model made it: Google's own word
   // for "don't check this one")
   const NO_SIGNATURE = 'skip_thought_signature_validator';
@@ -129,8 +150,18 @@ V.chat = (() => {
   const CLAIM_MS = 120000;   // a turn another device marked 'answering' is left to it this long, then taken as abandoned
   // While a turn other devices can see is being answered, its 'answering' mark is renewed this often (a long answer,
   // or many rounds of tools, takes longer than CLAIM_MS, and must never be taken over while it's going). (Tests shorten it.)
-  const claimWaits = { beat: 30000 };
+  // `stale`: an answer whose mark hasn't been renewed this long (the page was asleep) looks at the cloud when Wefty is
+  // back, in case another device took it over meanwhile (yieldIfTaken).
+  const claimWaits = { beat: 30000, stale: 60000 };
   const PUMP_EVERY = 60000;  // while a message is waiting to send, try it again at least this often
+  // An answer cut off at this end with nothing paid for is finished by itself; one cut off with the page in sight (the
+  // connection dropping part-way, again and again) only this many times in a row, then it waits for Try again.
+  const MOST_RESUMES = 2;
+  const CUT_KINDS = new Set(['dropped', 'offline', 'away', 'busy']);  // what a cut-off connection looks like
+  const GOING = 'wefty-chat-going';  // localStorage: an answer was being written here (the next start finishes it)
+  const PAGE = 'page-' + Math.random().toString(36).slice(2, 10);  // (this page, when the device has no id of its own)
+  const LOCKS = typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function'
+    ? navigator.locks : null;
   // A Gemini message held because Gemini was busy, slow or over its free per-minute limit (Google answered: the
   // network works) goes again sooner than the minute: after `busy` ms (`quota` for the limit, `big` for a chat whose
   // earlier pictures were slow to go up: it sends them all again), doubling each time it still can't, up to `most`.
@@ -176,6 +207,9 @@ V.chat = (() => {
   const listeners = new Map(); // the PC's answers: request id -> its events
   const sentNotes = new WeakMap(); // a message being sent -> its notes with their words (back in the box if it can't go)
   let shown = '';              // the chat drawn last, and how far it had got (a new answer scrolls to the end)
+  const live = new Set();      // turns this page is answering now (answer() going, start to end)
+  const unread = new Set();    // chats whose answer ended while they weren't on screen (the Chat tab's badge counts them)
+  const resumed = new Map();   // turn id -> times in a row it was finished by itself after a cut in sight
 
   const owner = () => (V.data.user && V.data.user.id) || '';
   const dir = () => `${owner()}/chats`;
@@ -214,6 +248,11 @@ V.chat = (() => {
     busy: 'Claude is busy right now. Your message is kept: try again in a minute.',
     dropped: 'The connection dropped before the answer finished.',
     cutOff: 'The answer stopped coming part-way. Tap Try again to ask again.',
+    // A Claude answer cut off at this end after it had started (what it wrote is paid for): Finish it asks again.
+    cutAway: 'Cut off when Wefty went into the background. Finish it asks Claude again (that costs about as much as a new answer).',
+    cutPaid: 'The connection dropped before the answer finished. Finish it asks Claude again (that costs about as much as a new answer).',
+    cutClosed: 'Cut off when Wefty was closed. Finish it asks Claude again (that costs about as much as a new answer).',
+    finishing: 'Finishing the answer...',
     steps: 'It took too many steps in Wefty, so it stopped. What it did is below.',
     old: 'Update Jarvis to chat on this PC (open Jarvis and click Update). Your chats are on your phone and Chromebook too.',
   };
@@ -289,6 +328,65 @@ V.chat = (() => {
     try { await upload(chat); } catch (error) { /* it waits here and goes up next time */ }
   }
 
+  /* ---- an answer being written here (1.18): kept on this device as it starts, and marked as this device's */
+
+  /* This device, as its own answers are marked (`answeringBy`): its install id (js/access.js), or this page's. */
+  const me = () => (V.deviceLog && V.deviceLog.installId && V.deviceLog.installId()) || PAGE;
+
+  /* A chat saved on this device only, as an answer starts (and once Claude has started writing: `paying`): a page
+     closed in the middle of it leaves the turn here to be finished at the next start (adopt). */
+  async function keepHere(chat) {
+    if (!chats || chats.get(chat.id) !== chat) return;
+    try {
+      await V.db.meta('chat:' + chat.id, chat);
+      await keepIndex();
+    } catch (error) { /* (only this device's copy: the answer goes on) */ }
+  }
+
+  /* While a page is writing an answer it holds a lock named after the turn (navigator.locks: every tab of Wefty on this
+     device sees it, and it goes when the page does), so another tab here never takes a turn this one is still on. */
+  const lockName = (chatId, turnId) => `wefty-chat-answer:${chatId}:${turnId}`;
+  function holdLock(job) {
+    if (!LOCKS) return;
+    try {
+      LOCKS.request(lockName(job.chatId, job.turn.id), () => new Promise((release) => {
+        job.unlock = release;
+        if (job.over) release();
+      })).catch(() => {});
+    } catch (error) { /* (no lock: other tabs go by the mark's age) */ }
+  }
+  function letLockGo(job) {
+    job.over = true;
+    if (job.unlock) job.unlock();
+  }
+  /* Whether a page on this device holds a turn's lock now: true, false, or null when it can't be told. */
+  async function heldHere(chatId, turnId) {
+    if (!LOCKS || typeof LOCKS.query !== 'function') return null;
+    try {
+      const { held = [], pending = [] } = await LOCKS.query();
+      const name = lockName(chatId, turnId);
+      return [...held, ...pending].some((lock) => lock.name === name);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /* "An answer is being written here" for the next start (localStorage, so it's looked at before Chat is opened). */
+  function markGoing(on) {
+    try {
+      if (on) localStorage.setItem(GOING, '1');
+      else if (!live.size && !ownLeft()) localStorage.removeItem(GOING);
+    } catch (error) { /* (a private window: the Chat tab finishes it when it's opened) */ }
+  }
+  /* Answers still to be finished here: marked as this device's with no page here writing them, or cut off. */
+  const ownLeft = () => [...(chats || new Map()).values()].some((c) => (c.turns || [])
+    .some((t) => (t.state === 'answering' && t.answeringBy === me() && !live.has(t.id)) || isCut(t)));
+
+  /* An answer's words (its text blocks), from a turn's replies. */
+  const wordsOf = (replies) => (replies || []).flatMap((r) => (r && r.content) || [])
+    .filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
+  const hasWords = (replies) => !!wordsOf(replies).trim();
+
   /* The cloud's chats brought in: new and changed ones fetched, ones deleted elsewhere let go, and this device's
      waiting ones sent up. */
   async function refresh() {
@@ -339,6 +437,9 @@ V.chat = (() => {
           await upload(chat).catch(() => {});
         }
         await keepIndex();
+        // (an answer this device was writing when Wefty was closed: finished like one cut off, now that the cloud has
+        // said whether another device has it)
+        if (await adopt()) changed = true;
         if (changed) draw();
         reflect();  // a waiting turn may have arrived from (or gone on) another device
       })().finally(() => { refreshing = null; });
@@ -635,7 +736,8 @@ V.chat = (() => {
   const saysWords = (turn) => repliesOf(turn).some((b) => b && b.type !== 'thinking' && b.type !== 'redacted_thinking');
 
   /* The changes a turn made in Wefty, in words (for a request that doesn't send its rounds as they were). */
-  const actionWords = (turn) => (turn.actions || []).map((a) => a.label).filter(Boolean).join('; ');
+  // (an ask to delete by the words it was asked with, `asked`, which never change: what's sent stays the same)
+  const actionWords = (turn) => (turn.actions || []).map((a) => a.asked || a.label).filter(Boolean).join('; ');
 
   /* Words added to a message as it's sent (never stored) for changes made in Wefty that the request doesn't otherwise
      show, so the model never makes them again: those of the messages just before it that never got a full answer
@@ -650,8 +752,62 @@ V.chat = (() => {
       if (actionWords(t)) skipped.unshift(actionWords(t));
     }
     if (skipped.length) lines.push(`(Already done in Wefty for an earlier message that didn't get a full answer: ${skipped.join('; ')}.)`);
+    // (what they did with the earlier answers' changes since: an Undo, a Delete or Cancel, a yes: kept with the
+    // message when it was sent, so it's the same every time it goes)
+    if ((turn.news || []).length) lines.push(`(In Wefty since your last answer: ${turn.news.join(' ')})`);
     if (!wefty && actionWords(turn)) lines.push(`(Already done in Wefty for this message: ${actionWords(turn)}.)`);
     return lines;
+  }
+
+  /* As a message is sent: what happened to the earlier answers' changes since they were told (an Undo, Delete or
+     Cancel tapped), and their asks to delete settled: a yes (this message's own words, `yes`) carries out the last
+     answer's, anything else leaves every one of them undeleted. Each is said once, in `turn.news`. */
+  const toldBefore = new WeakMap();  // a message -> [[action, what it had been told as]], until it's surely sent
+  async function settleAsks(chat, turn, yes) {
+    if (!V.chatTools) return;
+    const news = [];
+    const before = chat.turns.filter((t) => t !== turn);
+    const last = before[before.length - 1];
+    const marks = [];
+    for (const t of before) {
+      for (const a of t.actions || []) {
+        marks.push([a, a.told]);
+        if (V.chatTools.isOpenAsk(a)) {
+          if (yes && t === last) {
+            try {
+              await V.chatTools.confirm(a);
+              news.push(`They said yes, so Wefty did it: ${a.label}.`);
+            } catch (error) {
+              news.push(`They said yes, but it didn't work (${error.message || 'a problem in Wefty'}), so nothing was deleted (${a.label}).`);
+              V.chatTools.decline(a, 'expired');
+            }
+          } else {
+            V.chatTools.decline(a, 'expired');
+            news.push(`They didn't say yes, so nothing was deleted (${a.label}).`);
+          }
+          a.told = V.chatTools.stateOf(a);
+          continue;
+        }
+        const state = V.chatTools.stateOf(a);
+        // (as the answer said: a change done, an ask asked)
+        if ((a.told || (V.chatTools.isAsk(a) ? 'asked' : 'done')) === state) continue;
+        a.told = state;
+        if (state === 'undone') news.push(`They pressed Undo on: ${a.label}.`);
+        else if (state === 'done' && V.chatTools.isAsk(a)) news.push(`They tapped Delete, so Wefty did it: ${a.label}.`);
+        else if (state === 'cancelled') news.push(`They tapped Cancel, so nothing was deleted (${a.label}).`);
+      }
+    }
+    if (news.length) turn.news = news;
+    toldBefore.set(turn, marks.filter(([a, was]) => a.told !== was));
+  }
+
+  /* A message taken back to the box before it went: what it would have told is told with the next one instead. (A
+     delete its yes carried out stays done, with its Undo.) */
+  function untell(turn) {
+    for (const [a, was] of toldBefore.get(turn) || []) {
+      if (was === undefined) delete a.told; else a.told = was;
+    }
+    toldBefore.delete(turn);
   }
 
   /* A turn's rounds as Claude's messages: what the model said and asked for (as it came, when Claude asked; else its
@@ -836,7 +992,9 @@ V.chat = (() => {
         piece = await reader.read();
       } catch (error) {
         if (run.stopped) return { stopped: true };
-        throw new ChatError('dropped', WORDS.dropped);
+        // The read failed by itself: this end's connection went (the phone lost signal, or the browser cut a page out
+        // of sight off). Claude's own trouble comes as an error event, never this way.
+        throw Object.assign(new ChatError('dropped', WORDS.dropped), { here: true });
       }
       if (piece.done) break;
       buffer += decoder.decode(piece.value, { stream: true });
@@ -915,7 +1073,11 @@ V.chat = (() => {
      said to have maybe happened. `refuse`: the round is answered without running anything (too many rounds). */
   async function runRound(chat, turn, step, job, refuse = '') {
     // (`signal`: Stop ends a tool that waits on the AI itself too: js/aicards.js, make_flash_cards)
-    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length, signal: job.controller.signal };
+    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length, signal: job.controller.signal,
+      // (send_to_device: the chat's pictures, this message's first, then each earlier one's, newest first)
+      pictures: () => chat.turns.slice(0, chat.turns.indexOf(turn) + 1).reverse()
+        .map((t) => (t.files || []).filter((f) => f.kind === 'image')),
+      blobOf };
     job.shown = true;  // (other devices can see this turn from now on: its mark is kept fresh, `answer`'s heartbeat)
     turn.answeringAt = now();
     chat.updated = now();
@@ -967,15 +1129,29 @@ V.chat = (() => {
   }
 
   /* One turn answered (a new message, Retry of the last, or a waiting turn going out once Claude can be reached).
-     `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us. */
+     `claim`: push the 'answering' mark to the cloud before the request, so another device leaves this turn to us.
+     It goes on whatever screen is open (it lives here, not in the Chat screen): the words go into the chat as they
+     come, and the Chat screen shows them when it's opened again. */
   async function answer(chat, turn, { first = false, claim = false } = {}) {
     let model = useNow(turn.model);  // (Claude switched off: it goes with Gemini)
     // A Gemini message goes with the chat's Gemini choice as it is now (a Retry after picking Gemini Smart, or a
     // message waiting since before, asks Smart); one waiting for Gemini while the chat moved to Claude stays Gemini's.
     const chosen = modelFor(chat);
     if (isGemini(model) && isGemini(chosen)) model = chosen;
-    const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false, shown: claim };
+    // (`asked`: when the request going now started, to tell whether the page went out of sight meanwhile; `beatAt`:
+    // when other devices last heard this turn is in hand, yieldIfTaken)
+    const job = { chatId: chat.id, turn, controller: new AbortController(), pcId: null, stopped: false, shown: claim,
+      asked: performance.now(), beatAt: performance.now(), yielded: false, theirs: null, unlock: null, over: false };
     busy = job;
+    live.add(turn.id);
+    holdLock(job);
+    markGoing(true);
+    // An answer cut off at this end being finished: what it had said is kept aside (`partial`), shown until the new
+    // words pass it, and put back if this one is stopped or fails too.
+    if (turn.waitWhy === 'cut' || turn.cutHere) {
+      if (wordsOf(turn.replies).length > wordsOf(turn.partial).length) turn.partial = turn.replies;
+    }
+    delete turn.cutHere;
     // The heartbeat: while other devices can see this turn as 'answering' (claimed, or a round of tools saved), its
     // mark is renewed, so a long answer or many rounds never look abandoned. What's sent is the chat as saved, with
     // this turn's words still coming left out (as a device taking it over would start them again).
@@ -983,18 +1159,28 @@ V.chat = (() => {
     const beat = setInterval(() => {
       if (!job.shown || busy !== job) return;
       turn.answeringAt = now();
+      turn.answeringBy = me();
       const copy = { ...chat, turns: chat.turns.map((t) => (t === turn ? { ...t, replies: [] } : t)) };
-      beating = upload(chat, copy).catch(() => {});
+      beating = upload(chat, copy).then(() => { job.beatAt = performance.now(); }).catch(() => {});
     }, claimWaits.beat);
     trouble = null;
     turn.state = 'answering';
     turn.answeringAt = now();
+    turn.answeringBy = me();
     turn.replies = [];
     turn.problem = '';
+    delete turn.paying;
     if (!Array.isArray(turn.work)) turn.work = [];
     const wefty = weftyFor(model);
     draw();
-    if (claim) { chat.updated = now(); await persist(chat).catch(() => {}); }  // tell other devices before we ask
+    V.emit('badge');  // (the Chat tab's dot, while another screen shows)
+    if (claim) {  // tell other devices before we ask
+      chat.updated = now();
+      await persist(chat).catch(() => {});
+      job.beatAt = performance.now();
+    } else {
+      await keepHere(chat);  // (on this device only: a page closed meanwhile finishes it at the next start)
+    }
     let failed = null;
     try {
       await finishRounds(chat, turn, job);
@@ -1008,8 +1194,10 @@ V.chat = (() => {
         rounds += 1;
         await runRound(chat, turn, step, job, rounds > MOST_ROUNDS
           ? 'That\'s too many steps for one answer: nothing more was done. Say what\'s done so far.' : '');
+        job.beatAt = performance.now();  // (the round was saved, its mark with it)
       };
       for (let n = 0; n < MOST_REPLIES + MOST_ROUNDS + 2; n++) {
+        job.asked = performance.now();
         if (isGemini(model)) {  // Gemini: one call, streamed (no server tools or fallback: ai.js picks the model)
           const reply = fresh(model);
           turn.replies.push(reply);
@@ -1035,6 +1223,8 @@ V.chat = (() => {
           }
           if (!out.text && out.stopReason !== 'refusal') throw new ChatError('dropped', WORDS.dropped);
           if (out.stopReason === 'cut_off') {  // the words stopped coming part-way: what came stays, with Retry
+            // (cut off at this end, the page out of sight or the connection gone: finished by itself, below)
+            if (out.cutHere || V.ai.hiddenSince(job.asked)) throw Object.assign(new ChatError('dropped', WORDS.cutOff), { here: true });
             turn.state = 'failed';
             turn.problem = WORDS.cutOff;
             showLive();
@@ -1047,9 +1237,16 @@ V.chat = (() => {
         const { body, betas } = await requestFor(chat, turn, wefty);
         const reply = fresh(body.model);
         turn.replies.push(reply);
+        job.asked = performance.now();
         let finished = { stopped: false };
         try {
-          finished = await (V.desktop ? viaPc : direct)(body, betas, job, (event) => { take(reply, event); showLive(); });
+          finished = await (V.desktop ? viaPc : direct)(body, betas, job, (event) => {
+            take(reply, event);
+            // Claude has started: what it reads and writes from now is paid for, so an answer cut off from here on
+            // is finished only with a tap (kept on this device too, for a page closed in the middle of it).
+            if (event && event.type === 'message_start' && !turn.paying) { turn.paying = true; keepHere(chat); }
+            showLive();
+          });
         } finally {
           reply.content = tidy(reply.content);
           reply.cost = (reply.usage.input_tokens || reply.content.length) ? costOf(reply, body.model, finished.stopped || !reply.stop_reason) : 0;
@@ -1058,7 +1255,9 @@ V.chat = (() => {
         if (reply.error) throw new ChatError('dropped', reply.error.type === 'overloaded_error' ? WORDS.busy
           : `Claude stopped with a problem (${reply.error.message || reply.error.type}).`);
         if (finished.stopped || job.stopped) { turn.state = 'stopped'; break; }
-        if (!reply.stop_reason) throw new ChatError('dropped', WORDS.dropped);
+        // (a stream that ended without saying how: this end's doing when the page went out of sight meanwhile)
+        if (!reply.stop_reason) throw Object.assign(new ChatError('dropped', WORDS.dropped), { here: V.ai.hiddenSince(job.asked) });
+        delete turn.paying;  // (this request came to its end: the next one, if any, isn't paid for until it starts)
         if (reply.stop_reason === 'pause_turn') {
           if (++pauses >= MOST_REPLIES) break;
           continue;
@@ -1085,53 +1284,188 @@ V.chat = (() => {
       clearInterval(beat);
       busy = null;
     }
-    await beating;  // (uploads go in order anyway; this one is never left to land after the answer)
-    delete turn.answeringAt;
-    if (failed) {
-      const heard = turn.replies.some((r) => r.content.length);
-      // (a turn whose tools have run is never taken back to the box: what they did is kept with it, and it goes on
-      // from there, once it can be sent, or with Try again)
-      const worked = workOf(turn).length > 0;
-      if (!heard && (WAIT_KINDS.has(failed.kind) || (claim && failed.kind === 'nokey' && isGemini(model)))) {
-        // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
-        // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send". So does a message
-        // that was already waiting when Gemini, which would answer it now, turns out not to be set up: it goes once
-        // the free key is (the box offers it), never lost for the lack of it.
-        turn.state = 'waiting';
-        turn.waitWhy = failed.kind === 'nokey' ? 'setup' : failed.why;  // (the waiting line says why, naming the model)
-        turn.problem = '';
-        turn.replies = [];
-      } else if (first && !heard && !worked && failed.kind !== 'dropped') {
-        // The owner's to fix (no key, a bad key, no credit, an old PC app): the message goes back in the box.
-        chat.turns = chat.turns.filter((t) => t !== turn);
-        const draft = draftOf(chat.id);
-        draft.text = turn.text;
-        draft.notes = sentNotes.get(turn) || [];
-        draft.files = (turn.files || []).map((f) => ({ ...f, state: 'ready', url: pictures.get(f.path) }));
-        trouble = { chatId: chat.id, kind: failed.kind, message: failed.message };
-        if (!chat.turns.length) {
-          chats.delete(chat.id);
-          unsent.set(chat.id, chat);
-          await keepIndex();
-          reflect();
-          draw();
-          return;
+    try {
+      await beating;  // (uploads go in order anyway; this one is never left to land after the answer)
+      if (job.yielded) { await yieldTo(chat, job); return; }
+      delete turn.answeringAt;
+      delete turn.answeringBy;
+      if (failed) {
+        const heard = turn.replies.some((r) => r.content.length);
+        // (a turn whose tools have run is never taken back to the box: what they did is kept with it, and it goes on
+        // from there, once it can be sent, or with Try again)
+        const worked = workOf(turn).length > 0;
+        // Cut off at this end: the page went out of sight while it came (a phone puts Wefty to sleep in the background,
+        // and a browser may cut a hidden page's connection), or the connection went part-way. `paid`: Claude had started.
+        const hidden = V.ai.hiddenSince(job.asked);
+        const cutHere = CUT_KINDS.has(failed.kind) && failed.why !== 'quota' && (failed.here || hidden);
+        const paid = turn.replies.some((r) => (r.cost || 0) > 0);
+        if (cutHere && !paid && (hidden || (resumed.get(turn.id) || 0) < MOST_RESUMES)) {
+          // Nothing paid for (Gemini is free; Claude hadn't started): asked again by itself as soon as Wefty is in
+          // sight (pump; `held` while it isn't), carrying on from its rounds of tools (never run again), with what
+          // came so far showing meanwhile.
+          if (wordsOf(turn.replies).length > wordsOf(turn.partial).length) turn.partial = turn.replies;
+          turn.state = 'waiting';
+          turn.waitWhy = 'cut';
+          turn.problem = '';
+          turn.replies = [];
+          if (!hidden) resumed.set(turn.id, (resumed.get(turn.id) || 0) + 1);  // (a flaky connection: not forever)
+        } else if (cutHere && paid) {
+          // Claude had started writing: what it read and wrote is paid for, and asking again costs about as much
+          // again, so that's one tap (Finish it), never by itself. What it wrote stays.
+          turn.state = 'failed';
+          turn.cutHere = true;
+          turn.problem = hidden ? WORDS.cutAway : WORDS.cutPaid;
+        } else if (!heard && (WAIT_KINDS.has(failed.kind) || (claim && failed.kind === 'nokey' && isGemini(model)))) {
+          // A blocked or flaky network: the turn stays in the chat and goes out when Claude can be reached. Nothing is
+          // charged, nothing is kept, and there's no scary banner — just a quiet "Waiting to send". So does a message
+          // that was already waiting when Gemini, which would answer it now, turns out not to be set up: it goes once
+          // the free key is (the box offers it), never lost for the lack of it.
+          turn.state = 'waiting';
+          turn.waitWhy = failed.kind === 'nokey' ? 'setup' : failed.why;  // (the waiting line says why, naming the model)
+          turn.problem = '';
+          turn.replies = [];
+        } else if (first && !heard && !worked && failed.kind !== 'dropped') {
+          // The owner's to fix (no key, a bad key, no credit, an old PC app): the message goes back in the box.
+          chat.turns = chat.turns.filter((t) => t !== turn);
+          untell(turn);
+          const draft = draftOf(chat.id);
+          draft.text = turn.text;
+          draft.notes = sentNotes.get(turn) || [];
+          draft.files = (turn.files || []).map((f) => ({ ...f, state: 'ready', url: pictures.get(f.path) }));
+          trouble = { chatId: chat.id, kind: failed.kind, message: failed.message };
+          if (!chat.turns.length) {
+            chats.delete(chat.id);
+            unsent.set(chat.id, chat);
+            await V.db.meta('chat:' + chat.id, null).catch(() => {});  // (kept here as it started: never sent)
+            await keepIndex();
+            reflect();
+            draw();
+            return;
+          }
+        } else {
+          turn.state = 'failed';
+          turn.problem = failed.message;
         }
-      } else {
-        turn.state = 'failed';
-        turn.problem = failed.message;
       }
+      // The words from before a cut, when nothing better came since (stopped, or failed, before passing them).
+      if (turn.state !== 'waiting' && turn.partial) {
+        if (!SENT.has(turn.state) && wordsOf(turn.partial).length > wordsOf(turn.replies).length) turn.replies = turn.partial;
+        delete turn.partial;
+      }
+      if (turn.state !== 'waiting' && turn.state !== 'failed') resumed.delete(turn.id);
+      delete turn.paying;
+      if (turn.state === 'waiting') {
+        if (isGemini(model) && GEMINI_SOON.has(turn.waitWhy)) retrySoon(chat, turn);
+      } else {
+        forgetSoon(turn.id);
+        delete turn.waitWhy;
+      }
+      chat.updated = now();
+      await persist(chat);
+      // Ended while it wasn't on screen (another tab, another chat, Wefty out of sight): the Chat tab's badge says so.
+      if (turn.state !== 'waiting' && !job.stopped && !onScreen(chat.id)) unread.add(chat.id);
+      reflect();
+      draw();
+      // (cut off with Wefty in sight, or the cut only seen now that it's back: finished now)
+      if (turn.state === 'waiting' && turn.waitWhy === 'cut' && !document.hidden) setTimeout(() => pump().catch(() => {}), 0);
+    } finally {
+      live.delete(turn.id);
+      letLockGo(job);
+      markGoing(false);
     }
-    if (turn.state === 'waiting') {
-      if (isGemini(model) && GEMINI_SOON.has(turn.waitWhy)) retrySoon(chat, turn);
-    } else {
-      forgetSoon(turn.id);
-      delete turn.waitWhy;
+  }
+
+  /* Another device took this turn over while this page was asleep (its mark went stale: yieldIfTaken), and this one
+     stopped: the other device's copy is kept, and nothing of this one's answer is saved over it. */
+  async function yieldTo(chat, job) {
+    const theirs = job.theirs;
+    if (valid(theirs) && chats && chats.get(chat.id) === chat) {
+      chats.set(chat.id, theirs);
+      await V.db.meta('chat:' + chat.id, theirs).catch(() => {});
+      index.waiting.delete(chat.id);
+      delete index.prints[chat.id];  // (read from the cloud again at the next look)
+      await keepIndex().catch(() => {});
     }
-    chat.updated = now();
-    await persist(chat);
     reflect();
     draw();
+  }
+
+  /* Wefty back in sight while an answer that other devices can see is still going here: if its mark wasn't renewed for
+     a while (the phone put the page to sleep), another device may have taken the turn over as abandoned, or answered
+     it. The cloud says: if so, this one stops and keeps theirs (yieldTo). */
+  async function yieldIfTaken() {
+    const job = busy;
+    if (!job || !job.shown || job.yielded || job.checking || !V.cloud.sb || !owner()) return;
+    if (performance.now() - job.beatAt < claimWaits.stale) return;
+    job.checking = true;
+    try {
+      const theirs = await download(job.chatId).catch(() => null);
+      if (busy !== job || !theirs) return;
+      const there = (theirs.turns || []).find((t) => t.id === job.turn.id);
+      if (!there) return;
+      const answered = there.state !== 'answering' && there.state !== 'waiting' && repliesOf(there).length > 0;
+      const takenOver = there.state === 'answering' && there.answeringBy !== me() && !isStale(there);
+      if (!answered && !takenOver) { job.beatAt = performance.now(); return; }
+      job.yielded = true;
+      job.theirs = theirs;
+      stop();
+    } finally {
+      job.checking = false;
+    }
+  }
+
+  /* Answers this device was writing when Wefty was closed or put to sleep for good (the page gone): still marked
+     'answering' by this device, with no page here holding its lock (another tab of Wefty still writing one keeps it,
+     and is left to it; without locks, once the mark is old). Each is finished like one cut off: asked again by itself
+     (pump) unless Claude had started it (paid for: what it read is counted, and Finish it asks again). Run after a
+     look at the cloud (refresh), so one another device has taken over or answered since is theirs. True when one was. */
+  let adopting = null;
+  function adopt() {
+    if (!adopting) {
+      adopting = (async () => {
+        if (!chats) return false;
+        const mine = me();
+        let changed = false;
+        for (const chat of [...chats.values()]) {
+          for (const turn of chat.turns || []) {
+            if (turn.state !== 'answering' || turn.answeringBy !== mine || live.has(turn.id)) continue;
+            const here = await heldHere(chat.id, turn.id);
+            if (here || (here === null && !isStale(turn))) continue;
+            if (turn.state !== 'answering' || live.has(turn.id) || chats.get(chat.id) !== chat) continue;  // (moved on meanwhile)
+            delete turn.answeringAt;
+            delete turn.answeringBy;
+            if (turn.paying) {
+              for (const r of turn.replies || []) {  // (what Claude had read is paid for: counted, as far as it's known)
+                if (r && !r.cost && r.usage && r.usage.input_tokens) {
+                  r.content = Array.isArray(r.content) ? tidy(r.content) : [];
+                  r.cost = costOf(r, r.model, true);
+                  if (r.cost) await V.ai.count(r.cost);
+                }
+              }
+              turn.state = 'failed';
+              turn.cutHere = true;
+              turn.problem = WORDS.cutClosed;
+              if (wordsOf(turn.partial).length > wordsOf(turn.replies).length) turn.replies = turn.partial;
+              delete turn.partial;
+              if (!onScreen(chat.id)) unread.add(chat.id);  // (it needs a tap: the Chat tab's badge says so)
+            } else {
+              if (wordsOf(turn.replies).length > wordsOf(turn.partial).length) turn.partial = turn.replies;
+              turn.state = 'waiting';
+              turn.waitWhy = 'cut';
+              turn.problem = '';
+              turn.replies = [];
+            }
+            delete turn.paying;
+            chat.updated = now();
+            await persist(chat).catch(() => {});
+            changed = true;
+          }
+        }
+        markGoing(false);
+        return changed;
+      })().finally(() => { adopting = null; });
+    }
+    return adopting;
   }
 
   /* ---------------------------------------------------------------- a message held until it can be sent
@@ -1146,8 +1480,23 @@ V.chat = (() => {
   const needsSend = (t) => t.state === 'waiting' || isStale(t);  // waiting here, or claimed by a device that went away
   const anyPending = () => [...(chats || new Map()).values()]
     .some((c) => (c.turns || []).some((t) => t.state === 'waiting' || t.state === 'answering'));
+  /* An answer cut off at this end, waiting to be finished (1.18): it's being written, as far as the owner can tell. */
+  const isCut = (t) => t.state === 'waiting' && t.waitWhy === 'cut';
   const waitingCount = () => [...(chats || new Map()).values()]
-    .reduce((n, c) => n + (c.turns || []).filter((t) => t.state === 'waiting').length, 0);
+    .reduce((n, c) => n + (c.turns || []).filter((t) => t.state === 'waiting' && !isCut(t)).length, 0);
+  /* The Chat tab's badge: messages waiting to send, and chats whose answer ended unseen. */
+  const badgeCount = () => waitingCount() + [...unread].filter((id) => chatOf(id)).length;
+  /* The Chat tab's dot: an answer being written here now (or one cut off, about to be finished: not one held for the
+     free Gemini's key, or until this device knows whether Claude is on). */
+  const writing = () => !!busy || [...(chats || new Map()).values()]
+    .some((c) => (c.turns || []).some((t) => isCut(t) && !needsGemini(t) && !unsure(t)));
+  /* Whether a chat is on screen: the Chat tab showing it (a phone: the chat itself, not the list), Wefty in sight. */
+  const onScreen = (id) => !V.away() && !!root && root.isConnected && root.dataset.tab === 'claude' && openId === id
+    && (V.wide() || showingChat) && !(V.editor && V.editor.covering && V.editor.covering());
+  /* A chat seen: its badge goes. */
+  function seen(id) {
+    if (unread.delete(id)) V.emit('badge');
+  }
 
   /* The Chat-tab badge and the retry timer kept in step with what's waiting. */
   function reflect() {
@@ -1160,7 +1509,8 @@ V.chat = (() => {
 
   /* A waiting message that can't go by itself yet: Gemini would answer it and isn't set up, or this device hasn't yet
      read whether Claude is on (unsure). It stays waiting, and the others behind it still go. */
-  const held = (turn) => needsGemini(turn) || unsure(turn);
+  const held = (turn) => needsGemini(turn) || unsure(turn)
+    || (isCut(turn) && !!document.hidden);  // (one cut off is finished once Wefty is in sight: hidden, it'd only be cut again)
 
   const anyHeldForGemini = () => [...(chats || new Map()).values()]
     .some((c) => (c.turns || []).some((t) => needsSend(t) && needsGemini(t)));
@@ -1214,6 +1564,7 @@ V.chat = (() => {
         return;
       }
       if (!manual && unsure(now2)) return;  // (sent by itself only once this device knows whether Claude is on)
+      if (!manual && isCut(now2) && document.hidden) return;  // (an answer cut off is finished once Wefty is in sight)
       // (waiting for Claude, which is switched off now: it goes with Gemini; the free Gemini isn't held back by Claude's limit)
       const over = isGemini(useNow(now2.model)) ? null : await V.ai.overLimit();
       if (over) {
@@ -1296,9 +1647,14 @@ V.chat = (() => {
       return;
     }
     forgetSoon(turn.id);
-    if (workOf(turn).length) {  // its tools have done things: it stays (with its Undo), stopped, never sent again
+    // Its tools have done things, or it was cut off part-way through its answer: it stays (with its Undo, and the
+    // words that came), stopped, never sent again.
+    if (workOf(turn).length || hasWords(turn.partial)) {
       turn.state = 'stopped';
+      if (hasWords(turn.partial)) turn.replies = turn.partial;
+      delete turn.partial;
       delete turn.waitWhy;
+      resumed.delete(turn.id);
       chat.updated = now();
       await persist(chat);
       reflect();
@@ -1306,6 +1662,7 @@ V.chat = (() => {
       return;
     }
     chat.turns = chat.turns.filter((t) => t !== turn);
+    untell(turn);
     const draft = draftOf(chat.id);
     draft.text = turn.text || '';
     draft.notes = sentNotes.get(turn) || (turn.notes || []).map((n) => {
@@ -1373,6 +1730,9 @@ V.chat = (() => {
       sentNotes.set(turn, taken.notes);
       if (!current.title) current.title = titleFrom(turn);
       current.turns.push(turn);
+      // (a "yes" to the last answer's "Delete these notes?" deletes them now, before the model is asked; anything
+      // else leaves them: js/chattools.js)
+      await settleAsks(current, turn, !!turn.text && V.chatTools && V.chatTools.saysYes(turn.text));
       chats.set(current.id, current);
       unsent.delete(current.id);
       trouble = null;
@@ -1469,7 +1829,8 @@ V.chat = (() => {
     const searching = [...blocks].reverse().find((b) => b.type === 'server_tool_use');
     const lastIsSearch = blocks.length && blocks[blocks.length - 1] === searching;
     const words = working(turn) ? 'Working in Wefty...'
-      : lastIsSearch && searching.input && searching.input.query ? `Searching the web for "${searching.input.query}"...` : 'Thinking...';
+      : lastIsSearch && searching.input && searching.input.query ? `Searching the web for "${searching.input.query}"...`
+      : turn.partial || turn.waitWhy === 'cut' ? WORDS.finishing : 'Thinking...';  // (one cut off, being finished)
     return V.h('div.chat-thinking', {}, V.h('div.spinner'), V.h('span', { text: words }));
   }
 
@@ -1506,24 +1867,35 @@ V.chat = (() => {
         (turn.files || []).filter((f) => f.kind !== 'image').map((f) => fileChip(f)),
         (turn.notes || []).map((n) => noteChip(n))) : null,
       turn.text ? V.h('div.chat-you-text', { text: turn.text }) : null);
+    // What an answer cut off at this end had said (1.18): shown while it's finished, until the new words pass it.
+    const before = turn.partial && (turn.state === 'waiting' || turn.state === 'answering')
+      ? textOf({ ...turn, replies: turn.partial }) : '';
     if (turn.state === 'waiting') {
-      return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
-        V.h('div.chat-claude', {}, V.h('div.chat-waiting', {},
-          V.h('span.chat-waiting-text', {}, V.icon('clock'),
-            V.h('span', { text: waitingWords(turn) })),
-          V.h('div.chat-waiting-actions', {},
-            V.button('Send now', { kind: 'quiet', icon: 'send', onClick: () => sendWaiting(chat, turn, { manual: true }) }),
-            V.button('Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) }))),
+      // (the words it stopped at, and "Finishing the answer..." while it waits for Wefty to be in sight, or its turn)
+      const finishing = isCut(turn) && !needsGemini(turn);
+      const kept = hasWords(turn.partial) || workOf(turn).length > 0;  // (Stop keeps them; else Cancel, back in the box)
+      return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state, ...(finishing ? { cut: 'true' } : {}) } }, you,
+        V.h('div.chat-claude', {},
+          before ? V.h('div.chat-reply-body.chat-partial', {}, rendered(before)) : null,
+          finishing ? V.h('div.chat-thinking.chat-finishing', {}, V.h('div.spinner'), V.h('span', { text: WORDS.finishing }),
+            V.button(kept ? 'Stop' : 'Cancel', { kind: 'quiet', icon: kept ? 'stop' : 'x', onClick: () => cancelWaiting(chat, turn) }))
+            : V.h('div.chat-waiting', {},
+              V.h('span.chat-waiting-text', {}, V.icon('clock'),
+                V.h('span', { text: waitingWords(turn) })),
+              V.h('div.chat-waiting-actions', {},
+                V.button('Send now', { kind: 'quiet', icon: 'send', onClick: () => sendWaiting(chat, turn, { manual: true }) }),
+                V.button(kept ? 'Stop' : 'Cancel', { kind: 'quiet', icon: 'x', onClick: () => cancelWaiting(chat, turn) }))),
           actionsEl(chat, turn)));
     }
     const answering = turn.state === 'answering';  // ours now, or another device's (a claimed turn shows "Thinking...")
     const text = textOf(turn);
-    const body = V.h('div.chat-reply-body');
+    const earlier = !!before && before.length > text.length;
+    const body = V.h('div.chat-reply-body' + (earlier ? '.chat-partial' : ''));
     if (turn.state === 'refused') {
       body.append(V.h('p.chat-note', { text: `${isGemini(turn.model) ? 'Gemini' : 'Claude'} declined to answer this one. Try asking it another way.` }));
     } else {
-      if (text) body.append(rendered(text));
-      if (answering && (!text || working(turn) || !(turn.replies || []).some((r) => (r.content || []).some((b) => b && b.type === 'text' && b.text))
+      if (earlier || text) body.append(rendered(earlier ? before : text));
+      if (answering && (earlier || !text || working(turn) || !(turn.replies || []).some((r) => (r.content || []).some((b) => b && b.type === 'text' && b.text))
         || turn.replies.some((r) => (r.content || []).filter(Boolean).slice(-1).some((b) => b.type === 'server_tool_use')))) {
         body.append(status(turn));
       }
@@ -1543,8 +1915,10 @@ V.chat = (() => {
       text && turn.state !== 'refused' ? V.button('Save as note', { kind: 'quiet', icon: 'notes', onClick: (event) => saveMenu(event.currentTarget, chat, turn) }) : null,
       text && turn.state !== 'refused' && V.send && V.send.targets().length
         ? V.button('Send to…', { kind: 'quiet', icon: 'send', onClick: (event) => sendMenu(event.currentTarget, chat, turn) }) : null,
-      last && !busy ? V.button(turn.state === 'done' || turn.state === 'cut' ? 'Retry' : 'Try again', { kind: 'quiet', icon: 'restore',
-        onClick: () => retry(chat, turn) }) : null,
+      // (a Claude answer cut off at this end after it had started: Finish it asks again, which costs again)
+      last && !busy ? V.button(turn.state === 'done' || turn.state === 'cut' ? 'Retry' : turn.cutHere ? 'Finish it' : 'Try again', {
+        kind: 'quiet', icon: 'restore', onClick: () => retry(chat, turn),
+        title: turn.cutHere ? 'Asks Claude again: that costs about as much as a new answer' : undefined }) : null,
       V.h('span.chat-meta', { text: meta }));
     return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
       V.h('div.chat-claude', {}, body,
@@ -1556,25 +1930,44 @@ V.chat = (() => {
         actions));
   }
 
-  /* The changes Chat made in Wefty for this message: a chip each, with Open and Undo (js/chattools.js). An Undo is kept
-     in the chat (every device then shows it undone). */
+  /* The changes Chat made in Wefty for this message: one list, a row each with Open and Undo, Undo all when there are
+     several, and Delete / Cancel for what it asked to delete (js/chattools.js). What's done there (an Undo, a Delete)
+     is kept in the chat, so every device shows it. */
   function actionsEl(chat, turn) {
     const actions = (turn.actions || []).filter((a) => a && a.id && a.label);
     if (!actions.length || !V.chatTools) return null;
-    return V.h('div.chat-actions-done', { role: 'list', 'aria-label': 'Done in Wefty' },
-      actions.map((a) => V.h('div', { role: 'listitem' }, V.chatTools.chip(a, { onUndone: (done) => keepUndone(chat.id, turn.id, done) }))));
+    return V.chatTools.list(actions, { key: `${chat.id}:${turn.id}`, onChange: (changed) => keepActions(chat.id, turn.id, changed),
+      fresh: (action) => freshAction(chat.id, turn.id, action) });
   }
 
-  async function keepUndone(chatId, turnId, action) {
+  /* An action as the chat holds it after a look at the cloud (another device may have settled an ask meanwhile). */
+  async function freshAction(chatId, turnId, action) {
+    if (chats.has(chatId)) await quickRefresh();
     const chat = chatOf(chatId);
     const turn = chat && (chat.turns || []).find((t) => t.id === turnId);
-    const kept = turn && (turn.actions || []).find((a) => a.id === action.id);
-    if (kept && kept !== action) kept.undone = action.undone;
+    return (turn && (turn.actions || []).find((a) => a.id === action.id)) || action;
+  }
+
+  /* When an ask was settled (Delete, Cancel or the next message), or ''. */
+  const settledAt = (a) => (a && (a.confirmed || a.cancelled || a.expired)) || '';
+
+  /* Actions changed under an answer (undone, an ask carried out or turned down), kept in the chat as it is now (a
+     refresh may have brought a newer copy of it meanwhile) and saved. An ask that copy has settled already, another
+     way or at another time (Delete tapped on another device), stays as it is there: an older copy settling it again
+     never writes over what was done, or its Undo. */
+  async function keepActions(chatId, turnId, changed) {
+    const chat = chatOf(chatId);
+    const turn = chat && (chat.turns || []).find((t) => t.id === turnId);
+    for (const action of changed || []) {
+      const kept = turn && (turn.actions || []).find((a) => a.id === action.id);
+      if (kept && kept !== action && V.chatTools.isAsk(kept) && settledAt(kept) && settledAt(kept) !== settledAt(action)) continue;
+      if (kept && kept !== action) Object.assign(kept, action);
+    }
     if (chat && chats.has(chat.id)) {
       chat.updated = now();
       await persist(chat).catch(() => {});
     }
-    draw();
+    if (!busy) draw();
   }
 
   /* While an answer comes in, only it is drawn again (once a frame at most), the list staying where it's scrolled
@@ -1584,7 +1977,8 @@ V.chat = (() => {
     if (liveFrame) return;
     liveFrame = requestAnimationFrame(() => {
       liveFrame = 0;
-      if (!busy || !parts || !parts.thread || openId !== busy.chatId) return;
+      // (another screen showing: the words go into the chat only, and show when Chat is opened again)
+      if (!busy || !parts || !parts.thread || openId !== busy.chatId || !root || !root.isConnected || root.dataset.tab !== 'claude') return;
       const old = parts.thread.querySelector(`.chat-turn[data-turn="${busy.turn.id}"]`);
       if (!old) return;
       const scroller = parts.scroll;
@@ -1603,11 +1997,18 @@ V.chat = (() => {
 
   function chatRow(chat) {
     const last = chat.turns[chat.turns.length - 1];
-    const waiting = (chat.turns || []).some((t) => t.state === 'waiting');
-    return V.h('div.chat-row' + (chat.id === openId ? '.on' : ''), { dataset: { id: chat.id } },
+    const finishing = (chat.turns || []).some(isCut);
+    const waiting = !finishing && (chat.turns || []).some((t) => t.state === 'waiting');
+    // (1.18: the answer being written here now, or one cut off being finished; one that ended unseen is new)
+    const writingNow = (busy && busy.chatId === chat.id) || finishing;
+    const fresh = !writingNow && unread.has(chat.id);
+    return V.h('div.chat-row' + (chat.id === openId ? '.on' : '') + (fresh ? '.unread' : ''), { dataset: { id: chat.id } },
       V.h('button.chat-row-main', { type: 'button', onclick: () => open(chat.id) },
         V.h('span.chat-row-title', { text: shownTitle(chat.title) || 'New chat' }),
-        waiting ? V.h('span.chat-row-waiting', {}, V.icon('clock'), V.h('span', { text: 'Waiting to send' }))
+        writingNow ? V.h('span.chat-row-waiting.chat-row-writing', {}, V.h('span.chat-row-dot'),
+          V.h('span', { text: finishing && !(busy && busy.chatId === chat.id) ? WORDS.finishing : 'Answering...' }))
+          : waiting ? V.h('span.chat-row-waiting', {}, V.icon('clock'), V.h('span', { text: 'Waiting to send' }))
+          : fresh ? V.h('span.chat-row-waiting.chat-row-new', {}, V.h('span.chat-row-dot'), V.h('span', { text: 'New answer' }))
           : V.h('span.chat-row-meta', { text: [V.ago(chat.updated), nameOf(last ? last.model : chat.model)].join(' · ') })),
       V.iconButton('more', 'More', (event) => rowMenu(event.currentTarget, chat), 'tiny'));
   }
@@ -1629,6 +2030,7 @@ V.chat = (() => {
       V.iconButton('more', 'More', (event) => chatMenu(event.currentTarget, chat)));
     const last = chat.turns[chat.turns.length - 1];
     const where = `${chat.id}:${chat.turns.length}:${last ? last.state : ''}`;
+    parts.scroll.dataset.place = `chat:${chat.id}`;  // (js/start.js puts a chat's scroll back only on that chat)
     const top = parts.scroll.scrollTop;
     V.clear(parts.thread, chat.turns.length ? chat.turns.map((t, i) => turnEl(chat, t, i === chat.turns.length - 1)) : emptyChat());
     if (where !== shown) requestAnimationFrame(() => { if (parts) parts.scroll.scrollTop = parts.scroll.scrollHeight; });
@@ -1737,10 +2139,13 @@ V.chat = (() => {
   function draw() {
     if (!root || !root.isConnected || root.dataset.tab !== 'claude' || !parts) return;
     parts.app.classList.toggle('showing-chat', showingChat);
+    if (onScreen(openId)) seen(openId);  // (an answer that ended while this chat wasn't shown: seen now)
     drawList();
     drawChat();
   }
 
+  /* Drawn each time the Chat tab opens: the chat that was open stays open (a phone: the list or that chat, as left),
+     with what was typed in its box; js/start.js puts the scroll back. */
   function render(container) {
     root = container;
     const scroll = V.h('div.chat-scroll');
@@ -1764,6 +2169,21 @@ V.chat = (() => {
       return refresh();
     }).then(() => { choose(); draw(); reflect(); pump().catch(() => {}); }).catch(() => {});
     V.ai.check().then(retarget).catch(() => {});  // (on the PC too: Python says about Claude, the cloud about Gemini)
+  }
+
+  /* Chat's tab tapped while Chat shows (js/start.js): a phone goes back to the list of chats (when there are any), at
+     its top; wide, the list goes to its top and the chat open to its newest message. */
+  function again() {
+    if (!parts || !root || !root.isConnected || root.dataset.tab !== 'claude') return false;
+    const behavior = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    if (!V.wide() && showingChat && listOf().length) {
+      showingChat = false;
+      draw();
+    }
+    const side = root.querySelector('.chat-side');
+    if (side && side.scrollTop > 0) side.scrollTo({ top: 0, behavior });
+    if (V.wide() && parts.scroll) parts.scroll.scrollTo({ top: parts.scroll.scrollHeight, behavior });
+    return true;
   }
 
   /* A chat that has never been sent, started here on the default model, which nobody picked. Never one that has been in
@@ -2060,6 +2480,8 @@ V.chat = (() => {
 
   V.on('signed-out', () => {
     chats = null; index = null; unsent.clear(); drafts.clear(); picked.clear(); defaulted.clear(); openId = null; stopPump();
+    unread.clear(); resumed.clear();
+    try { localStorage.removeItem(GOING); } catch (error) { /* (nothing kept) */ }
     [...soon.keys()].forEach(forgetSoon);
   });
   // The key check answered (wherever it was asked for), or "Use Claude too" changed: the box says which model now.
@@ -2072,8 +2494,11 @@ V.chat = (() => {
   // A waiting message is tried again whenever the network might be back: online, the page shown or focused, the app
   // coming to the front, and the gentle timer. The cloud is pulled first, so a turn another device answered or
   // claimed is seen before this one acts on it.
+  // Wefty back in sight also finishes an answer cut off while it was away (1.18), once the cloud has said whether
+  // another device has it in hand: an answer still going here whose mark went stale first asks (yieldIfTaken).
   async function wake() {
     if (!chats) return;
+    await yieldIfTaken().catch(() => {});
     await refresh().catch(() => {});
     if (V.ai.lacksGemini()) await V.ai.recheck();  // (the free key set up on another device meanwhile?)
     await pump().catch(() => {});
@@ -2081,10 +2506,24 @@ V.chat = (() => {
   window.addEventListener('online', () => wake());
   window.addEventListener('focus', () => wake());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
-  V.on('back', () => wake());
+  V.on('back', () => {
+    if (onScreen(openId)) seen(openId);  // (it ended while Wefty was out of sight, on this very chat)
+    wake();
+  });
+  // An answer this device was writing when Wefty was last closed (the page gone in the middle of it: GOING): looked at
+  // as soon as Wefty is up, before Chat is opened, so it's finished (or says Finish it) wherever the owner is.
+  let lookedBack = false;
+  V.on('tab', () => {
+    if (lookedBack) return;
+    lookedBack = true;
+    let was = false;
+    try { was = !!localStorage.getItem(GOING); } catch (error) { /* (a private window: Chat looks when it's opened) */ }
+    if (was) load().then(() => wake()).then(() => V.emit('badge')).catch(() => {});
+  });
 
   return {
     render,
+    again,
     refresh: () => refresh().catch(() => {}),
     load,
     forBackup,
@@ -2101,6 +2540,8 @@ V.chat = (() => {
     dropText: () => (V.tab() === 'claude' ? 'Drop to attach to your message' : ''),
     busy: () => !!busy || !!sendingId || sendingTurns.size > 0,  // (an answer coming, or a message getting ready to go)
     waiting: waitingCount,
+    badge: badgeCount,  // (the Chat tab's badge: messages waiting to send, and answers that ended unseen)
+    writing,            // (the Chat tab's dot: an answer being written here, wherever the owner is in Wefty)
     retryWaits,  // (tests shorten them)
     claimWaits,  // (tests shorten the heartbeat)
   };

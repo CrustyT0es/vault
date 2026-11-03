@@ -735,10 +735,15 @@ V.ai = (() => {
      device last did any of that (performance.now()); `unsettledSince(began)`: whether it may have, since `began`. */
   let unsettledAt = -Infinity;
   const unsettle = () => { unsettledAt = performance.now(); };
+  // When the page last went out of sight (the app in the background, another browser tab, a page put to sleep): an
+  // answer the Chat tab was getting meanwhile and that stopped coming was most likely cut off by the browser, and is
+  // finished when Wefty is back (js/chat.js, 1.18). Only the page itself counts here, not the network.
+  let hiddenAt = -Infinity;
+  const putAway = () => { unsettle(); hiddenAt = performance.now(); };
   try {
-    document.addEventListener('visibilitychange', () => { if (document.hidden) unsettle(); });
-    document.addEventListener('freeze', unsettle);  // (Chrome's page lifecycle: a page put to sleep)
-    window.addEventListener('pagehide', unsettle);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) putAway(); });
+    document.addEventListener('freeze', putAway);  // (Chrome's page lifecycle: a page put to sleep)
+    window.addEventListener('pagehide', putAway);
     window.addEventListener('offline', unsettle);
     window.addEventListener('online', unsettle);
     // Chrome's Network Information: a change of network. Its 'change' also fires when Chrome's speed estimates move,
@@ -754,6 +759,8 @@ V.ai = (() => {
     }
   } catch (error) { /* only the state at the time is looked at, then */ }
   const unsettledSince = (began) => !!document.hidden || !navigator.onLine || unsettledAt >= began;
+  /* Whether the page has been out of sight since `began` (performance.now()), or is now. */
+  const hiddenSince = (began) => !!document.hidden || hiddenAt >= began;
 
   /* -- which Gemini model first: how quickly each starts answering on this device (1.9.1)
 
@@ -1583,7 +1590,7 @@ V.ai = (() => {
       if (error.kind === 'quota') throw Object.assign(new AiError('busy', error.message), { why: 'quota' });
       throw error;
     }
-    const { text, finish, usage, model, version, cut, blocked } = answer;
+    const { text, finish, usage, model, version, cut, blocked, here } = answer;
     const calls = answer.calls || [];
     // An answer that stopped part-way: the chat shows what came (`onText`); the note-taker waits and asks again later.
     if (cut && !onText && finish !== 'STOPPED') throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });
@@ -1591,8 +1598,11 @@ V.ai = (() => {
       : finish === 'MAX_TOKENS' ? 'max_tokens'
       : ['SAFETY', 'IMAGE_SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION', 'SPII'].includes(finish) ? 'refusal'
       : calls.length ? 'tool_use' : 'end_turn';
-    return { text, stopReason, calls, parts: answer.parts || [], usage: { gemini: true, model, ...(version ? { version } : {}),
-      input_tokens: usage.promptTokenCount || 0, output_tokens: usage.candidatesTokenCount || 0 } };
+    // (`cutHere`: an answer that stopped coming part-way because of this end, geminiTry's `here`: the connection went,
+    // or the page was out of sight; the Chat tab asks again for it by itself, js/chat.js)
+    return { text, stopReason, calls, parts: answer.parts || [], cutHere: stopReason === 'cut_off' && !!here,
+      usage: { gemini: true, model, ...(version ? { version } : {}),
+        input_tokens: usage.promptTokenCount || 0, output_tokens: usage.candidatesTokenCount || 0 } };
   }
 
   /* `promise`, or 'stopped' as soon as `signal` says so (what it was waiting for isn't waited for any more). */
@@ -2286,6 +2296,6 @@ V.ai = (() => {
       record: () => JSON.parse(JSON.stringify(record())), forgetList },
     state: () => known, ready: () => has(brain()),  // (the brain the note-taker would use is set up here)
     has, brain, claudeOn, notesClaude, notesTier, modeKnown, modeReady, setClaude, setNotesClaude, setNotesGemini, setUp,
-    recheck, lacksGemini, geminiKnown, keysSettled,
+    recheck, lacksGemini, geminiKnown, keysSettled, hiddenSince,
     MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS, waits };  // (waits: tests shorten them)
 })();

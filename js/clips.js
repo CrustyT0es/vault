@@ -868,14 +868,16 @@ V.clips = (() => {
   /* Share > Clipboard, top to bottom: the latest from elsewhere, the box to send something to all of them, "Share my
      clipboard" (only while in step is off, or can't work: an iPhone's one-tap button), Earlier, then the in-step
      switch at the foot. What each does is as before 1.16; only where it sits moved. */
+  let pasted = '';  // what's in the box, kept while another tab is open (1.18)
   function render(container) {
     root = container;
-    const paste = V.h('textarea.field', { rows: 1, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Wefty' : 'Or paste here', 'aria-label': 'Text to share' });
+    const paste = V.h('textarea.field', { rows: 1, placeholder: V.desktop ? 'Paste here to send it to your phone\'s Wefty' : 'Or paste here', 'aria-label': 'Text to share', value: pasted });
+    paste.addEventListener('input', () => { pasted = paste.value; });
     parts = { latest: V.h('div.clip-latest'), history: V.h('div.clips'), paste, earlier: V.h('h2.section', { text: 'Earlier' }) };
     V.clear(container, V.h('div.page.clip-page', {},
       V.share ? V.share.head('clips') : V.appHead({ title: 'Share' }),  // (js/share.js: Share's top and switch)
       parts.latest,
-      V.h('div.send-row', {}, paste, V.button('Send to all', { kind: 'primary', icon: 'send', onClick: () => { share(paste.value); paste.value = ''; } })),
+      V.h('div.send-row', {}, paste, V.button('Send to all', { kind: 'primary', icon: 'send', onClick: () => { share(paste.value); paste.value = ''; pasted = ''; } })),
       V.desktop || stepping() ? null : V.button('Share my clipboard', { kind: 'wide-btn', icon: 'upload', onClick: shareMine }),
       parts.earlier,
       parts.history,
@@ -940,7 +942,7 @@ V.clips = (() => {
   }
 
   return {
-    render, share, mayShare, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
+    render, share, mayShare, whyNot, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
     stepping: () => stepping(), setStepping, canStep: () => canStep(),
     quiet: hush,  // (js/editor.js, while a locked note's words show)
     // What's been put on this clipboard (and the look at it on coming back) finished first.

@@ -731,7 +731,7 @@ V.notes = (() => {
     if (filter === 'all') return 'Notes';
     if (filter === 'pinned') return 'Pinned';
     if (filter === 'due') return 'Upcoming';
-    if (filter === 'review') return 'Review';
+    if (filter === 'review') return 'Flash cards';
     if (filter === 'archive') return 'Archive';
     if (filter === 'trash') return 'Trash';
     if (isTag(filter)) return tagLabel(tagKey(filter));
@@ -782,7 +782,7 @@ V.notes = (() => {
       navItem('all', 'stack', 'All notes', c.all),
       navItem('pinned', 'pin', 'Pinned', c.pinned),
       navItem('due', 'clock', 'Upcoming', c.due),
-      navItem('review', 'cards', 'Review', c.review),
+      navItem('review', 'cards', 'Flash cards', c.review),
       V.h('div.nav-heading.folders-head', {}, V.h('span', { text: 'Folders' }), V.iconButton('plus', 'New folder', newFolder, 'tiny')),
       tree.filter((r) => !O.ancestors(r.folder).some((up) => shutSet().has(up.id))).map(({ folder: f, depth, kids }) => {
         const unfolded = !shutSet().has(f.id);
@@ -818,7 +818,7 @@ V.notes = (() => {
       chip('all', 'All', null, c.all),
       chip('pinned', 'Pinned', V.icon('pin')),
       chip('due', 'Upcoming', V.icon('clock'), c.due),
-      chip('review', 'Review', V.icon('cards'), c.review),
+      chip('review', 'Flash cards', V.icon('cards'), c.review),
       tree.filter((r) => !r.depth).map(({ folder: f }) => chip(f.id, f.name, folderBadge(f))),
       V.h('button.chip.add', { type: 'button', onclick: newFolder, title: 'New folder' }, V.icon('plus'), 'New folder'),
       tags.map((t) => chip('tag:' + t.key, '#' + t.name, null)),
@@ -980,8 +980,13 @@ V.notes = (() => {
       V.h('span.crumb-gap', { text: '›', 'aria-hidden': 'true' })]));
     parts.crumbs.hidden = !above.length;
     parts.listColumn.classList.toggle('searching', searchOpen || !!query);
+    // Which list this is (its folder or filter, and the search): another one starts at its top, and js/start.js only
+    // puts a scroll back on the same list it was left on.
+    const which = `${filter}|${query}`;
+    if (parts.listColumn.dataset.place !== undefined && parts.listColumn.dataset.place !== which) parts.listColumn.scrollTop = 0;
+    parts.listColumn.dataset.place = which;
     parts.found.textContent = query ? (list.length === 1 ? '1 note' : `${list.length} notes`) : '';
-    // Review: the flash cards due today, by folder and tag (js/review.js), in place of a list of notes.
+    // Flash cards: how many to study today, and the decks (js/review.js), in place of a list of notes.
     const review = filter === 'review' && q.empty && !!V.review;
     parts.list.classList.toggle('review', review);
     if (review) {
@@ -1127,7 +1132,7 @@ V.notes = (() => {
       folder && !query ? { label: 'Folder options…', icon: 'folder', onClick: () => folderMenu(folder, anchorEl) } : null,
       // (the chips show only the top folders: here they're all, to drag into order and into each other)
       arrange ? { label: 'Arrange folders', icon: 'arrange', onClick: () => O.arrangeFolders() } : null,
-      // Flash cards: Review (its chip is far along the row on a phone), with how many are due today.
+      // Flash cards (its chip is far along the row on a phone), with how many are due today.
       cards ? { sep: true } : null,
       cards ? { node: (done) => V.h('button.menu-item.menu-more.menu-cards', {
         type: 'button', role: 'menuitem', onclick: () => { done(); setFilter('review'); },
@@ -1143,6 +1148,7 @@ V.notes = (() => {
     if (!searchOpen && !V.wide()) stopPicking();  // (the row takes the title's place, and the pick bar's words)
     searchOpen = true;
     parts.listColumn.classList.add('searching');
+    parts.listColumn.scrollTop = 0;  // (the box is at the list's top: in sight, wherever the list had been left)
     parts.search.focus({ preventScroll: true });
     showHelp();
   }
@@ -1239,7 +1245,7 @@ V.notes = (() => {
   /* Searching your notes, from anywhere (Ctrl+F; Today's magnifier): Notes' search box (a phone's search row opened),
      focused in the same tap (an iPhone only opens its keyboard for that), with `text` in it if given. */
   function search(text) {
-    if (!showing() && V.go) V.go('notes');
+    if (!showing() && V.go) V.go('notes', { top: true });
     if (!parts) return;
     if (typeof text === 'string') {
       parts.search.value = text;
@@ -1315,6 +1321,21 @@ V.notes = (() => {
     if (opened && V.wide()) V.editor.open(opened, { pane: parts.pane });
   }
 
+  /* Notes' tab tapped while Notes shows (js/start.js): picking ends, the list goes to its top, and a list already at
+     its top goes back to all your notes (out of a folder, a filter or a search). */
+  function again() {
+    if (!showing() || V.editor.covering()) return false;
+    if (picking) stopPicking();
+    const column = parts.listColumn;
+    if (column.scrollTop > 1) {
+      const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      column.scrollTo({ top: 0, behavior: still ? 'auto' : 'smooth' });
+      return true;
+    }
+    if (filter !== 'all' || query || searchOpen) setFilter('all');
+    return true;
+  }
+
   /* The window crossed the wide/narrow line (a PC window snapped to half the screen, a Chromebook's resized): an open
      note goes between the side pane and the full-screen layer as it is (words, caret and all), and the list is drawn
      again for the other layout. */
@@ -1366,6 +1387,6 @@ V.notes = (() => {
     }
   });
 
-  return { render, create, chooseTemplate, ensureStarterFolders, blankNote, open, search, folders, inbox, setFilter, plain,
+  return { render, again, create, chooseTemplate, ensureStarterFolders, blankNote, open, search, folders, inbox, setFilter, plain,
     folderBadge, picking: () => picking, showing: () => showing() };
 })();
