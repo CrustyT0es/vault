@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.18.0';
+V.VERSION = '1.19.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -252,6 +252,8 @@ const ICONS = {
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>',
   chevron: '<path d="M9.5 6l6 6-6 6"/>',
   key: '<circle cx="7.5" cy="15.5" r="4"/><path d="M10.5 12.5 20 3M16.5 6.5l2.5 2.5M14 9l2 2"/>',
+  // Notifications (1.19): js/reminders.js's bell
+  bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4.4 1.5 6.1 2.5 7h-17c1-.9 2.5-2.6 2.5-7z"/><path d="M10 20.2a2.3 2.3 0 0 0 4 0"/>',
 };
 
 V.icon = function icon(name, cls) {
@@ -328,12 +330,14 @@ V.wordmark = () => {
   return copy;
 };
 
+// (`key`: data-key, by which a page drawn again gives the keyboard back to the same button: js/today.js)
 V.button = (label, opts = {}) => V.h('button.btn' + (opts.kind ? '.' + opts.kind : ''), {
   type: 'button', onclick: opts.onClick, title: opts.title, disabled: opts.disabled, 'aria-label': opts.aria || (label ? null : opts.title),
+  dataset: opts.key ? { key: opts.key } : null,
 }, opts.icon ? V.icon(opts.icon) : null, label ? V.h('span', { text: label }) : null);
 
-V.iconButton = (icon, title, onClick, cls) => V.h('button.icon-btn' + (cls ? '.' + cls : ''), {
-  type: 'button', title, 'aria-label': title, onclick: onClick,
+V.iconButton = (icon, title, onClick, cls, key) => V.h('button.icon-btn' + (cls ? '.' + cls : ''), {
+  type: 'button', title, 'aria-label': title, onclick: onClick, dataset: key ? { key } : null,
 }, V.icon(icon));
 
 /* ---------------------------------------------------------------- the frame's pieces (1.16)

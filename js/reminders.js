@@ -1084,7 +1084,7 @@ V.reminders = (() => {
     }, icon('bell'), V.h('span', { text: `${dayLabel(dayText(at))} ${clock(at)}` }));
   });
 
-  V.editor.addTool({ name: 'remind', label: 'Reminder', icon: () => icon('bell'), keepCaret: false,
+  V.editor.addTool({ name: 'remind', label: 'Reminder', icon: () => icon('bell'), keepCaret: false, strip: true,
     onClick: () => { const id = V.editor.openId(); if (id) edit(id, { remind: true }); } });
 
   function cardChip(note) {

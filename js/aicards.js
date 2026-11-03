@@ -503,6 +503,7 @@ V.aiCards = (() => {
         text = all.join('\n');
       }
       await save(row.id, text, extra, lines);
+      if (V.streak) V.streak.made(fresh.length);  // (a day studied: js/streak.js)
       return { added: fresh.length, title: target.title, target: row.id, type: 'cards_add', lines, heading: put.heading };
     }
     const keys = new Set();
@@ -513,6 +514,7 @@ V.aiCards = (() => {
       extra: { ai_cards: { folder: target.folderId, from: sources.slice(-FROM_MOST), at: new Date().toISOString(),
         ...(target.test ? { test: target.test } : {}) } } }));
     target.id = note.id;
+    if (V.streak) V.streak.made(fresh.length);
     return { added: fresh.length, title: target.title, target: note.id, type: 'note_create', body };
   }
 
@@ -687,6 +689,7 @@ V.aiCards = (() => {
       }
       sheet.close();
       const added = done.reduce((n, d) => n + d.added, 0);
+      if (added) V.emit('study-loop', 'cards');  // (the study loop done once: Today's "Start here" goes, js/starthere.js)
       const first = done.find((d) => d.added);
       const into = done.filter((d) => d.added).length === 1 ? ` to "${first.title}"` : ` to ${plural(done.filter((d) => d.added).length, 'note')}`;
       // What's next is studying them (1.18): the test's cards, or the note they went into (new cards are all due).
@@ -761,6 +764,7 @@ V.aiCards = (() => {
       }
     }
     const added = writes.reduce((n, w) => n + w.added, 0);
+    if (added) V.emit('study-loop', 'cards');
     return { plan, got, writes: writes.filter((w) => w.added), added, cost: job.cost, who: job.who, trouble: trouble_,
       skipped: skippedLine(plan.skipped), cards: got.lists.flatMap((l) => l.cards).slice(0, 12).map(lineOf) };
   }
@@ -778,7 +782,8 @@ V.aiCards = (() => {
   }
 
   // A note's own tool: shown in a note with words that isn't locked (nor a template).
-  V.editor.addTool({ name: 'aicards', label: 'Make cards with AI', icon: () => V.icon('spark'), keepCaret: false,
+  // (In the strip, not under + More: the study loop's next step, 1.19.)
+  V.editor.addTool({ name: 'aicards', label: 'Make cards with AI', icon: () => V.icon('spark'), keepCaret: false, strip: true,
     onClick: () => { const id = V.editor.openId(); if (id) forNote(id); },
     shown: (note, text) => !note.locked && !O().isTemplate(note) && !!String(text || '').trim() });
 

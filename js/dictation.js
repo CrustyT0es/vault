@@ -349,11 +349,8 @@ V.dictation = (() => {
   function paint() {
     const root = V.editor.root();
     const on = !!session && session.state !== 'stopping' && session.id === V.editor.openId();
-    const button = root && root.querySelector('.tool-btn[data-tool="dictate"]');
-    if (button) {
-      button.classList.toggle('on', on);
-      button.setAttribute('aria-pressed', String(on));
-    }
+    // (Dictate is under the note's + More since 1.19: the editor shows it's on there, or on its button)
+    if (V.editor.toolPressed) V.editor.toolPressed('dictate', on);
     if (!on || !root) {
       if (pill) { pill.remove(); pill = null; }
       return;
@@ -388,7 +385,7 @@ V.dictation = (() => {
   V.on('notetaker-listening', () => { if (session) stop({ done: true }); });
   // A voice memo needs the microphone too.
   document.addEventListener('click', (event) => {
-    if (session && event.target.closest && event.target.closest('.tool-btn[data-tool="voice"]')) stop({ done: false });
+    if (session && event.target.closest && event.target.closest('.tool-btn[data-tool="voice"], .more-tool[data-tool="voice"]')) stop({ done: false });
   }, true);
   window.addEventListener('pagehide', () => { if (session) stop({ done: true }); });
 

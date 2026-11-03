@@ -2799,11 +2799,13 @@ V.editor = (() => {
       tool('checklist', 'Checklist', V.icon('checklist'), addChecklist),
       parts.undo, parts.redo, V.h('span.tool-sep'),
       tool('picture', 'Picture', V.icon('camera'), () => parts.file.click(), false),
-      tool('link', 'Link', V.icon('link'), addLink),
-      tool('file', 'File', F.icon('clip'), () => parts.anyFile.click(), false),
-      tool('voice', 'Voice memo', F.icon('mic'), startMemo, false),
-      extraTools.map((t) => tool(t.name, t.label, typeof t.icon === 'function' ? t.icon() : V.icon(t.icon), () => t.onClick(),
-        t.keepCaret !== false)));
+      // (only the tools added `strip: true` sit here: Reminder, and the study loop's Make cards with AI and Study)
+      extraTools.filter((t) => t.strip).map((t) => tool(t.name, t.label, typeof t.icon === 'function' ? t.icon() : V.icon(t.icon),
+        () => t.onClick(), t.keepCaret !== false)));
+    // + More (1.19): every other tool, in one menu. Outside the strip, so it never scrolls out of sight on a phone.
+    parts.more = V.h('button.tool-btn.tool-more.keep-caret', { type: 'button', title: 'More tools', 'aria-label': 'More tools',
+      'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => toolsMenu() },
+    V.icon('plus'), V.h('span.tool-more-label', { text: 'More', 'aria-hidden': 'true' }));
     parts.countWords = V.h('span.count-words.num');
     parts.countTime = V.h('span.count-time');
     parts.count = V.h('button.word-count', { type: 'button', title: 'Word count and goal', onclick: countSheet },
@@ -2818,10 +2820,96 @@ V.editor = (() => {
       V.h('div.bar-spacer'),
       V.button('Cancel', { kind: 'quiet', onClick: () => stopMemo(false) }),
       V.button('Save memo', { kind: 'primary', icon: 'check', onClick: () => stopMemo(true) }));
-    return V.h('div.editor-tools', {}, parts.goal, parts.strip,
+    return V.h('div.editor-tools', {}, parts.goal, parts.strip, parts.more,
       V.h('span.read-hint', { text: 'Reading. Tap the words to write.' }), parts.recorder,
       V.h('div.tools-end', {}, V.h('div.tools-info', {}, parts.count, parts.status), parts.readBtn),
       parts.file, parts.anyFile);
+  }
+
+  /* -- + More (1.19; the owner: "toggle off but have available, to keep things clean")
+
+     The strip keeps what's used most: the marks, Heading, List and Checklist, Undo and Redo, Picture (snapping a page
+     starts the study loop), Reminder, and the study loop's next steps where they fit the note (Make cards with AI in a
+     note with words, Study in one with cards). Everything else is under + More, in a grid of named tiles: what listens
+     (Note-taker, Dictate, Voice memo), what adds (Draw, File, Link), studying (Test, Focus timer, Repeat), Ask in Chat
+     and Word goal. A tool shows only where it would (its own `shown`). The menu is a role=menu of tiles: the arrow
+     keys, Home and End move, Enter or Space picks, Esc closes back onto + More. A tool that writes at the caret
+     (Dictate, Link) gets the caret back first, where it was. While one of its tools is on (Dictate listening:
+     toolPressed), + More shows it, and its tile says On. */
+  const MORE_ORDER = ['notetaker', 'dictate', 'voice', 'draw', 'file', 'link', 'test', 'focus', 'repeat', 'claude', 'goal'];
+  const pressedTools = new Set();  // tools on now (js/dictation.js: Dictate while it listens)
+  let toolsOpen = null;
+
+  // The editor's own tools under + More (the others are added: addTool).
+  const ownMore = () => [
+    { name: 'voice', label: 'Voice memo', icon: () => V.format.icon('mic'), onClick: startMemo, keepCaret: false },
+    { name: 'file', label: 'File', icon: () => V.format.icon('clip'), onClick: () => parts.anyFile.click(), keepCaret: false },
+    { name: 'link', label: 'Link', icon: 'link', onClick: addLink },
+    { name: 'goal', label: 'Word goal', icon: 'text', onClick: countSheet, keepCaret: false },
+  ];
+
+  function toolItems() {
+    const text = words();
+    const all = [...ownMore(), ...extraTools.filter((t) => !t.strip)].filter((t) => {
+      if (typeof t.shown !== 'function') return true;
+      try { return !!t.shown(note, text); } catch (error) { console.warn('Vault:', error); return false; }
+    });
+    const at = (t) => { const i = MORE_ORDER.indexOf(t.name); return i < 0 ? MORE_ORDER.length : i; };
+    return all.sort((a, b) => at(a) - at(b));  // (one this list doesn't name: at the end, in the order it was added)
+  }
+
+  function toolsMenu() {
+    if (toolsOpen) { toolsOpen.close(); return; }
+    if (!note || !parts.more) return;
+    const button = parts.more;
+    const spot = here();  // (the caret, for Dictate and Link)
+    const caret = spot ? { field: spot.field, start: spot.field.selectionStart, end: spot.field.selectionEnd } : null;
+    const items = toolItems();
+    const grid = (done) => {
+      const tiles = items.map((t) => V.h('button.more-tool', { type: 'button', role: 'menuitem', dataset: { tool: t.name },
+        'aria-label': pressedTools.has(t.name) ? `${t.label}, on` : null,
+        onclick: () => {
+          done();
+          if (t.keepCaret !== false && caret && caret.field.isConnected) {
+            caret.field.focus({ preventScroll: true });
+            try { caret.field.setSelectionRange(caret.start, caret.end); } catch (error) { /* (a box that has none) */ }
+          }
+          try { t.onClick(); } catch (error) { V.problem(error); }
+        } },
+      typeof t.icon === 'function' ? t.icon() : V.icon(t.icon), V.h('span.more-tool-label', { text: t.label }),
+      pressedTools.has(t.name) ? V.h('span.more-tool-on', { text: 'On', 'aria-hidden': 'true' }) : null));
+      const box = V.h('div.more-tools', { role: 'none' }, tiles);
+      box.addEventListener('keydown', (event) => {
+        const at = tiles.indexOf(document.activeElement);
+        if (at < 0) return;
+        const across = Math.max(1, tiles.filter((t) => t.offsetTop === tiles[0].offsetTop).length);
+        const to = { ArrowRight: at + 1, ArrowLeft: at - 1, ArrowDown: at + across, ArrowUp: at - across, Home: 0,
+          End: tiles.length - 1 }[event.key];
+        if (to === undefined) return;
+        event.preventDefault();
+        tiles[Math.max(0, Math.min(tiles.length - 1, to))].focus();
+      });
+      return box;
+    };
+    button.setAttribute('aria-expanded', 'true');
+    toolsOpen = V.menu(button, [{ node: grid }], { cls: 'tools-more-menu', label: 'More tools', returnFocus: true,
+      onClose: () => { toolsOpen = null; if (button.isConnected) button.setAttribute('aria-expanded', 'false'); } });
+  }
+
+  /* A tool is on, or off again (js/dictation.js's Dictate): pressed in the strip, or shown on + More and its tile. */
+  function toolPressed(name, on) {
+    if (on) pressedTools.add(name); else pressedTools.delete(name);
+    const inStrip = parts.strip && parts.strip.querySelector(`[data-tool="${CSS.escape(name)}"]`);
+    if (inStrip) {
+      inStrip.classList.toggle('on', on);
+      inStrip.setAttribute('aria-pressed', String(on));
+    }
+    if (!parts.more) return;
+    // (by name only: asking each tool's `shown` here would ask Dictate's, which paints, which comes back here)
+    const label = (n) => ([...ownMore(), ...extraTools].find((t) => t.name === n) || { label: n }).label;
+    const onNow = [...pressedTools].filter((n) => !(parts.strip && parts.strip.querySelector(`[data-tool="${CSS.escape(n)}"]`)));
+    parts.more.classList.toggle('on', onNow.length > 0);
+    parts.more.setAttribute('aria-label', onNow.length ? `More tools (${onNow.map(label).join(', ')} on)` : 'More tools');
   }
 
   /* The tools fade out at the right while more of them are scrolled out of sight (a phone's narrow screen). */
@@ -3334,8 +3422,8 @@ V.editor = (() => {
 
   /* Another part of Vault adds a button to the writing tools: { name, label, icon (a util.js icon name, or a
      function making one), onClick, keepCaret (default true: the caret and the phone's keyboard stay), shown (optional:
-     (note, words) => whether it shows now), first (optional: before the other added tools, next to Voice memo) }.
-     Notes opened from then on show it. */
+     (note, words) => whether it shows now), first (optional: before the other added tools), strip (optional, 1.19: in
+     the strip itself; without it the tool is under + More) }. Notes opened from then on show it. */
   function addTool(tool) {
     if (!tool || !tool.name || extraTools.some((t) => t.name === tool.name)) return;
     if (tool.first) extraTools.unshift(tool); else extraTools.push(tool);
@@ -3470,7 +3558,7 @@ V.editor = (() => {
   }
 
   return { open, close, placeholder, move, openId: () => openId, covering: () => !!layer, parse, addPictures, addFiles,
-    settled, addTool, addThumb, addPictureAction, changeAttachments, addMeta, onTyped, onOpen, current: () => note, words,
+    settled, addTool, toolPressed, addThumb, addPictureAction, changeAttachments, addMeta, onTyped, onOpen, current: () => note, words,
     update, setWords, ask, refreshTools, restore, revealed: () => revealed,
     root: () => el };  // the open note's element (js/dictation.js finds the box with the caret and the tools in it)
 })();

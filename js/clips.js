@@ -97,9 +97,43 @@ V.clips = (() => {
     && !!(navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText);
   /* On a phone or a Chromebook it's on unless switched off here (AUTO 'off', kept for good): opening Vault after
      copying is then all it takes. Another browser (a Windows or Mac laptop's) only once it's switched on. One that
-     never decided (`undecided`) starts at its first look at the clipboard (begin()). */
+     never decided (`undecided`) starts at its first look at the clipboard (begin()).
+     An account made since 1.19 (`fresh`) is offered it instead, never switched on by itself: Share > Clipboard asks
+     once ("Copy on your phone, paste on your Chromebook?", offerCard), and until it's answered it's off. Everyone
+     else's choice, and the "on" of a device that never chose, are as they were. */
   const byDefault = () => V.device === 'phone' || ['android', 'chromebook'].includes(V.deviceKind.kind);
-  const undecided = () => canStep() && byDefault() && !['on', 'off'].includes(stored(AUTO));
+  /* A new account: the settings row says so (extra.clip_step 'offer', written once its first device has synced), or
+     this device made it (NEW_MARK, from js/welcome.js as the person joins: the cloud's flag may not be there yet). */
+  const NEW_MARK = 'vault-new-account';
+  const fresh = () => {
+    const extra = (V.data && V.data.settings && V.data.settings.extra) || {};
+    if (extra.clip_step === 'offer') return true;
+    const user = V.data && V.data.user;
+    return !!(user && user.id && stored(NEW_MARK) === user.id);
+  };
+  const undecided = () => canStep() && byDefault() && !['on', 'off'].includes(stored(AUTO)) && !fresh();
+  // (A new account's device that hasn't answered yet: the offer shows in Share > Clipboard.)
+  const offering = () => canStep() && !['on', 'off'].includes(stored(AUTO)) && fresh();
+  // Until this device has read the settings row, a never-decided one waits: it may be a new account's (offered, not on).
+  const known = () => !V.cloud || !V.cloud.settingsRead || V.cloud.settingsRead() || stored(NEW_MARK) === ((V.data.user || {}).id || '');
+
+  /* Joined just now (js/welcome.js): this device knows at once, and the account says so once its settings are there,
+     so the person's other devices offer it too. */
+  function markNew(userId) {
+    if (!userId) return;
+    store(NEW_MARK, String(userId));
+    tellCloud();
+  }
+  let telling = false;
+  function tellCloud() {
+    const user = V.data && V.data.user;
+    const extra = (V.data && V.data.settings && V.data.settings.extra) || {};
+    if (telling || !user || !user.id || stored(NEW_MARK) !== user.id || extra.clip_step) return;
+    if (!V.cloud || !V.cloud.settingsRead || !V.cloud.settingsRead()) return;  // (after the first sync: 'data' below)
+    telling = true;
+    V.cloud.changeExtra((now) => (now.clip_step ? now : { ...now, clip_step: 'offer' }))
+      .catch((error) => console.warn('Wefty: clipboard:', error)).finally(() => { telling = false; });
+  }
   // (One that never decided, where Chrome has been told to block Vault from the clipboard: as if switched off.)
   const stepping = () => canStep() && (stored(AUTO) === 'on' || (undecided() && readState !== 'denied'));
   const inFront = () => !V.away() && document.hasFocus();
@@ -526,8 +560,10 @@ V.clips = (() => {
      (clash). Never waits for the cloud: a write that comes meanwhile (something sent here) isn't held up by a slow
      network; what couldn't go is sent when the cloud's back (sendMine). Where Chrome blocks Vault from the clipboard,
      nothing is read: one that never decided is as if switched off, one switched on says why once (blocked()). */
+  let waitedForSettings = false;
   function step() {
     if (!stepping() || !V.data.user || !inFront() || busy) return busy;
+    if (undecided() && !known()) { waitedForSettings = true; return busy; }  // (looked at again once they're read)
     missed = false;
     busy = chain(async () => {
       if ((await askRead()) === 'denied') {
@@ -876,17 +912,47 @@ V.clips = (() => {
     parts = { latest: V.h('div.clip-latest'), history: V.h('div.clips'), paste, earlier: V.h('h2.section', { text: 'Earlier' }) };
     V.clear(container, V.h('div.page.clip-page', {},
       V.share ? V.share.head('clips') : V.appHead({ title: 'Share' }),  // (js/share.js: Share's top and switch)
+      offering() ? offerCard() : null,
       parts.latest,
       V.h('div.send-row', {}, paste, V.button('Send to all', { kind: 'primary', icon: 'send', onClick: () => { share(paste.value); paste.value = ''; pasted = ''; } })),
       V.desktop || stepping() ? null : V.button('Share my clipboard', { kind: 'wide-btn', icon: 'upload', onClick: shareMine }),
+      V.capture ? V.capture.pasteRow() : null,  // (an iPhone: copy in the other app, then Paste into Wefty: js/capture.js)
       parts.earlier,
       parts.history,
       V.h('div.clip-foot', {}, V.desktop ? pcStepRow() : stepRow())));
     draw();
   }
 
+  /* A new account's one offer (1.19), at the top of Share > Clipboard until it's answered: Turn on (reads the
+     clipboard in that tap, as the switch does) or Not now (off, as switching it off is; the switch at the foot
+     still turns it on any time). */
+  function offerCard() {
+    const phone = V.device === 'phone';
+    const chromebook = !phone && V.deviceLabel(V.device) === 'Chromebook';
+    const title = phone ? 'Copy on your phone, paste on your Chromebook?' : chromebook ? 'Copy on your Chromebook, paste on your phone?'
+      : 'Copy here, paste on your phone?';
+    return V.h('section.card.clip-offer', { 'aria-labelledby': 'clip-offer-title' },
+      V.h('h2', { id: 'clip-offer-title', text: title }),
+      V.h('p', { text: 'Turn this on and what you copy is ready on your other devices when you open Wefty there. '
+        + 'Never passwords or codes.' }),
+      V.h('div.clip-offer-buttons', {},
+        V.button('Turn on', { kind: 'primary', icon: 'clip', onClick: () => turnOn() }),
+        V.button('Not now', { kind: 'quiet', onClick: () => {
+          store(AUTO, 'off');
+          redraw();
+          V.emit('clip-stepping');
+          V.toast('OK. The switch at the bottom turns it on any time.');
+        } })));
+  }
+
   let looked = false;  // the first look comes once the clips are in, after starting
   V.on('data', (table) => {
+    if (table === 'settings') {
+      tellCloud();
+      if (waitedForSettings && known()) { waitedForSettings = false; step(); }
+      if (root && root.isConnected && root.dataset.tab === 'clips' && !!root.querySelector('.clip-offer') !== offering()) redraw();
+      return;
+    }
     if (table !== 'clips') return;
     draw();
     if (!looked && V.data.user) { looked = true; step(); }
@@ -943,7 +1009,7 @@ V.clips = (() => {
 
   return {
     render, share, mayShare, whyNot, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
-    stepping: () => stepping(), setStepping, canStep: () => canStep(),
+    stepping: () => stepping(), setStepping, canStep: () => canStep(), markNew, offering: () => offering(), fresh: () => fresh(),
     quiet: hush,  // (js/editor.js, while a locked note's words show)
     // What's been put on this clipboard (and the look at it on coming back) finished first.
     settled: () => Promise.all([busy, writing]).then(() => {}, () => {}),

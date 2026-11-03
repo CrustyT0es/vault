@@ -108,6 +108,7 @@ V.settings = (() => {
         + 'haven\'t reached your cloud yet (are you offline?). Signing out now throws them away. Wait until your picture '
         + 'at the top has no dot to keep them.', { ok: 'Sign out anyway', danger: true });
       if (!sure) return;
+      if (V.push) await V.push.beforeSignOut();  // (this device's notifications off first: never the next person's)
       await V.cloud.signOut();
       location.reload();
       return;
@@ -116,6 +117,7 @@ V.settings = (() => {
       ? `Wefty on this PC${V.pc.standalone() ? '' : ' (and Jarvis\'s notes)'} stops until you sign in again. Your notes stay safe in the cloud.`
       : 'Wefty on this phone stops until you sign in again. Your notes stay safe in the cloud.', { ok: 'Sign out', danger: true });
     if (!ok) return;
+    if (V.push) await V.push.beforeSignOut();
     await V.cloud.signOut();
     location.reload();
   }
@@ -363,6 +365,10 @@ V.settings = (() => {
       ios ? V.welcome.iosIcon((V.data.user || {}).email || 'your e-mail') : null));
   }
 
+  // "PC files" (1.19, js/share.js): Files in Share, off unless switched on. One card of its own.
+  const filesShown = () => !V.share || !V.share.shows || V.share.shows('files');
+  const filesCard = (ui) => (V.share && V.share.filesRow ? ui.card('', V.share.filesRow(ui)) : null);
+
   function devicesPage(ui) {
     if (!V.desktop) {
       const phone = V.device === 'phone';
@@ -373,10 +379,11 @@ V.settings = (() => {
           V.arrive && V.arrive.rows ? V.arrive.rows(ui) : null,  // js/arrive.js: a Chromebook's copying and saving
           stepLine(ui), installLine(ui)),
         addLine(ui),
+        filesCard(ui),
         ui.more(`This is your ${word()} · change what this device is`, [which]),
       ];
     }
-    if (!V.prefs) return [addLine(ui)];
+    if (!V.prefs) return [addLine(ui), filesCard(ui)];
     return [
       addLine(ui),
       ui.card('This PC',
@@ -391,12 +398,13 @@ V.settings = (() => {
             try { const answer = await V.pc.call('pickFolder'); if (answer.path) { V.prefs.downloads = answer.path; draw(); } } catch (error) { V.problem(error); }
           } }))),
         pcStepLine(ui)),
-      ui.more('Start with Windows · the quick note shortcut · each clipboard direction · folders your phone can see', [
+      filesCard(ui),
+      ui.more(`Start with Windows · the quick note shortcut · each clipboard direction${filesShown() ? ' · folders your phone can see' : ''}`, [
         ui.line('Start Wefty with Windows', 'Quietly, in the tray, so files and the clipboard always come through.', toggle('autostart')),
         ui.line('Quick note', `Press ${V.prefs.hotkey} anywhere for a little note box.`, V.button('Change', { onClick: hotkey })),
         ui.line('Share what I copy', 'Text only; never passwords, keys or what password managers hide.', toggle('clipboardShare', draw)),
         ui.line('Copy what my phone and Chromebook share', 'Onto this PC\'s clipboard as it arrives.', toggle('clipboardReceive', draw)),
-        ui.line('Folders your phone can see', 'Pick them in Share > Files.', V.button('Open Files', { icon: 'folder', onClick: () => V.go('files') })),
+        filesShown() ? ui.line('Folders your phone can see', 'Pick them in Share > Files.', V.button('Open Files', { icon: 'folder', onClick: () => V.go('files') })) : null,
       ]),
     ];
   }
@@ -454,6 +462,8 @@ V.settings = (() => {
       V.button(V.lock.hasPin() ? 'Change PIN' : 'Set a PIN', { icon: 'lock', onClick: pin }))),
       ui.card('Backups', backups.rows),
       search.rows.length ? ui.card('Search', search.rows) : null,
+      // (1.19: extras that are off unless switched on, to keep Wefty calm: js/subs.js)
+      V.subs && V.subs.settingsRow ? ui.card('Extras', V.subs.settingsRow(ui)) : null,
       backups.foot ? V.h('p.hint.set-foot', { text: backups.foot }) : null,
       more.length ? ui.more(says.replace(/^./, (c) => c.toUpperCase()), more) : null,
     ];
@@ -568,6 +578,9 @@ V.settings = (() => {
       return { parts: lead([installed ? (phone ? 'On your home screen' : 'Installed') : (phone ? 'Not on your home screen yet' : 'In a browser tab'),
         step ? 'clipboard in step' : '']) };
     },
+    notifications() {
+      return V.push ? V.push.summary() : { parts: [] };
+    },
     notes() {
       const backup = V.backup && V.backup.info ? V.backup.info() : null;  // (the PC's: js/history.js)
       const day = (iso) => new Date(iso).toLocaleDateString([], Date.now() - Date.parse(iso) < 6 * 86400000 ? { weekday: 'short' }
@@ -597,9 +610,13 @@ V.settings = (() => {
   /* The categories, in the home's order (two groups). `page(ui)` builds a page as a list of sections. */
   const CATEGORIES = [
     { id: 'account', title: 'Account', icon: 'user', group: 1, page: accountPage },
-    { id: 'appearance', title: 'Appearance', icon: 'contrast', group: 1, page: (ui) => [appearanceCard(ui), readingCard(ui)] },
+    { id: 'appearance', title: 'Appearance', icon: 'contrast', group: 1, page: (ui) => [appearanceCard(ui), readingCard(ui),
+      V.streak ? V.streak.settingsCard(ui) : null] },  // (Studying: the streak, js/streak.js)
     { id: 'ai', title: 'AI', icon: 'spark', group: 1, page: (ui) => (V.ai ? built(ui, V.ai.page(ui)) : []) },
     { id: 'devices', title: 'Devices', icon: 'devices', group: 1, page: devicesPage },
+    // (1.19, js/push.js: phones and Chromebooks only; the PC has Jarvis for its reminders)
+    { id: 'notifications', title: 'Notifications', icon: 'bell', group: 1, shown: () => !V.desktop && !!V.push,
+      page: (ui) => V.push.page(ui) },
     { id: 'notes', title: 'Notes & files', icon: 'folder', group: 1, page: notesPage },
     { id: 'friends', title: 'Friends', icon: 'users', group: 2, shown: canInvite, page: friendsPage },
     { id: 'about', title: 'About & feedback', icon: 'info', group: 2, page: aboutPage },

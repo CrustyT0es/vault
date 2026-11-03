@@ -251,6 +251,7 @@ V.learn = (() => {
 
     function pick(option) {
       if (answered || !asked) return;
+      if (V.streak) V.streak.studied(asked.card);  // (a day studied: js/streak.js)
       const correct = asked.kind === 'truth' ? option === asked.truth : option === asked.card.answer;
       if (correct) right(false, option);
       else wrong(option);
@@ -258,6 +259,7 @@ V.learn = (() => {
 
     function typed(text) {
       if (answered || !asked || !String(text || '').trim()) return;
+      if (V.streak) V.streak.studied(asked.card);
       const result = check(text, asked.card.answer);
       if (result.right) right(result.typo, text);
       else wrong(text);
@@ -297,6 +299,7 @@ V.learn = (() => {
         V.h('span.study-end-mark', {}, V.icon('check')),
         V.h('h3', { text: 'Done for now' }),
         V.h('p.study-end-sum', { text: `You learned all ${cards.length} card${cards.length === 1 ? '' : 's'}.` }),
+        V.streak ? V.streak.endLine() : null,
         V.h('p.study-end-next', { text: missed.size ? `${missed.size} needed another go: they come back for review tomorrow.`
           : 'Every one right the first time. Nice work!' })));
       V.clear(scr.foot, V.h('div.study-end-go', {},

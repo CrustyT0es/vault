@@ -445,6 +445,8 @@ V.notetaker = (() => {
     extra.notetaker = { ...(extra.notetaker || {}), seconds: Math.round(elapsed() / 1000), words: session.words,
       engine: session.engine, ...(session.source !== 'mic' ? { source: session.source } : {}) };
     await V.cloud.save('notes', { ...row, body: join(above, text()), extra });
+    // A class recorded (its first words kept): the study loop done once, so Today's "Start here" goes (js/starthere.js).
+    if (session && session.words > 0 && !session.looped) { session.looped = true; V.emit('study-loop', 'record'); }
   }
 
   /* A very long one: this note is full, so it carries on in "<title> (part 2)" in the same folder. */
@@ -551,6 +553,8 @@ V.notetaker = (() => {
       aboveLength: parts.above.length, part: (note.extra.notetaker && note.extra.notetaker.part) || 1,
       counted: ((note.extra.notetaker && note.extra.notetaker.seconds) || 0) * 1000, runningSince: 0, dirty: false,
       trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '' };
+    session.from = session.counted;     // (what this recording adds: the streak's minutes, js/streak.js)
+    session.fromWords = session.words;
     session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers(), { background: HEARS_HIDDEN });
     draw();
     told();
@@ -595,6 +599,10 @@ V.notetaker = (() => {
     saveSoon.cancel();
     was.dirty = true;
     await save();
+    // A recording that heard something is a day studied (js/streak.js), its minutes the week's too.
+    if (V.streak && was.words > was.fromWords) {
+      V.streak.recorded(Math.round((was.counted + (was.runningSince ? Date.now() - was.runningSince : 0) - was.from) / 1000));
+    }
     const id = was.id;
     const anything = !!text().trim();
     session = null;
@@ -727,6 +735,7 @@ V.notetaker = (() => {
     delete nt.wants_notes; delete nt.wants_device; delete nt.wants_cards;  // the notes are made: any auto-make flag clears
     const extra = { ...(now.extra || {}), notetaker: nt };
     await V.cloud.save('notes', { ...now, title, body, extra });
+    V.emit('study-loop', 'notes');  // (the study loop done once: Today's "Start here" goes, js/starthere.js)
     return { cost: answer.cost, cut, soonest: deadline(notes) };
   }
 
@@ -1550,8 +1559,9 @@ V.notetaker = (() => {
   V.on('back', () => autoMake().catch(() => {}));
   V.on('data', (table) => { if (table === 'notes' && anyWants()) startAutoTimer(); });
 
-  /* The note-taker's first screen: for a new note (from the new-note sheet), or into note `id`. */
-  function open(id = null) {
+  /* The note-taker's first screen: for a new note (from the new-note sheet), or into note `id`. `folderId`: the folder a
+     new note goes in, picked already (an empty folder's "Record a class", Today's "Start here"). */
+  function open(id = null, { folderId = null } = {}) {
     if (session) { openLayer(); draw(); return; }
     const note = id ? V.data.notes.get(id) : null;
     if (note && note.locked) return V.toast('Unlock the note first.');
@@ -1562,7 +1572,8 @@ V.notetaker = (() => {
     show();
     function show() {
       openLayer();
-      ui.ready = { id: note ? note.id : null, source: stored(SOURCE) === 'pc' ? 'pc' : 'mic', withMic: stored(WITH_MIC) === 'on' };
+      ui.ready = { id: note ? note.id : null, source: stored(SOURCE) === 'pc' ? 'pc' : 'mic', withMic: stored(WITH_MIC) === 'on',
+        folderId: !note && folderId && V.data.folders.has(folderId) ? folderId : undefined };
       ui.problem = null;
       ui.making = null;
       draw();

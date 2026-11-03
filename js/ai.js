@@ -568,11 +568,23 @@ V.ai = (() => {
   const TELL_EVERY = 250;
   const LETTERS_A_TOKEN = 4;
 
+  /* What one request shows Claude: the words alone, or pictures (and PDFs) first, then the words (Snap a page,
+     js/capture.js). `images`: [{ mime, data (base64) }]. */
+  function claudeContent(text, images = []) {
+    if (!images || !images.length) return text;
+    return [...images.map((i) => (i.mime === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: i.mime, data: i.data } }
+      : { type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), { type: 'text', text }];
+  }
+  /* The same for Gemini: one part each, then the words. */
+  const geminiParts = (text, images = []) => [...(images || []).map((i) => ({ inlineData: { mimeType: i.mime, data: i.data } })),
+    { text }];
+
   /* The note-taker's request straight to Claude (a phone, a Chromebook), streamed like the PC's: `progress(words)` as
      Claude writes (the words of the notes so far; its thinking counts as writing too), and `signal` stops it. An answer
      that didn't come to its end (stopped, cut off, Claude's own trouble part-way) is never returned, and what it had
      cost by then is added to the tally here (`charge`). */
-  async function direct(system, text, signal = null, progress = null) {
+  async function direct(system, text, signal = null, progress = null, images = []) {
     const sending = await within(getKey(), waits.look, cloudSlow());
     let response;
     try {
@@ -581,7 +593,7 @@ V.ai = (() => {
         signal,
         headers: headers(sending),
         body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, stream: true, output_config: { effort: 'low' },
-          system, messages: [{ role: 'user', content: text }] }),
+          system, messages: [{ role: 'user', content: claudeContent(text, images) }] }),
       });
     } catch (error) {  // no internet, or a network that blocks Claude (a school's)
       if (signal && signal.aborted) throw STOPPED();
@@ -1630,8 +1642,9 @@ V.ai = (() => {
      `signal` does. What an answer that didn't come to its end had cost (Python says: its `usage`) is added to the
      tally, and so is an answer that comes after it was stopped (on an older PC, which can't be told to stop): both cost
      money, and neither is ever written. */
-  async function viaPc(system, text, signal = null, onProgress = null) {
+  async function viaPc(system, text, signal = null, onProgress = null, images = []) {
     if (!claudeOn()) throw new AiError('off', WORDS.off);  // (Jarvis's key is never used while Claude is off)
+    if (images && images.length) return viaPcChat(system, text, images, signal, onProgress);
     if (!V.pc.can('makeNotes')) throw new AiError('old', WORDS.old);
     const ref = V.pc.can('makeNotesStop') ? `notes-${Date.now().toString(36)}-${++refs}` : '';
     if (ref && onProgress) progressFor.set(ref, onProgress);
@@ -1659,12 +1672,72 @@ V.ai = (() => {
     return { text: answer.text || '', stopReason: answer.stop_reason || '', usage: answer.usage || {} };
   }
 
+  /* A request with pictures from the PC (Snap a page, js/capture.js): Python's makeNotes takes words only, so it goes
+     the way the Chat tab's does (chatSend: Python adds Jarvis's key and streams Claude's events back as "chat-event"),
+     with the pictures in it as base64 (claudechat.put_in_files lets them through as they are). Only the words of the
+     answer are kept; Stop ends it (chatStop). What it cost is counted like any Claude answer (ask's tally), and an
+     answer that didn't finish what it had cost by then. */
+  const pcChats = new Map();
+  V.on('pc:chat-event', (data) => {
+    const told = pcChats.get((data || {}).id);
+    if (told) told(data.event);
+  });
+  async function viaPcChat(system, text, images, signal = null, onProgress = null) {
+    if (!V.pc.can('chatSend')) throw new AiError('old', WORDS.old);
+    const id = `capture-${V.uuid()}`;
+    const got = { words: [], blocks: {}, usage: null, letters: 0, stopReason: '', finished: false, error: null };
+    let toldAt = 0;
+    pcChats.set(id, (event) => {
+      if (!event || typeof event !== 'object') return;
+      if (event.type === 'message_start') got.usage = { ...((event.message || {}).usage || {}) };
+      else if (event.type === 'content_block_start') {
+        const block = event.content_block || {};
+        got.blocks[event.index] = block.type;
+        if (block.type === 'text' && block.text) got.words.push(String(block.text));
+      } else if (event.type === 'content_block_delta') {
+        const d = event.delta || {};
+        got.letters += String(d.text || d.thinking || '').length;
+        if (d.type === 'text_delta' && got.blocks[event.index] === 'text') got.words.push(String(d.text || ''));
+        const now = Date.now();
+        if (onProgress && now - toldAt >= TELL_EVERY) { toldAt = now; onProgress(countWords(got.words.join(''))); }
+      } else if (event.type === 'message_delta') {
+        const d = event.delta || {};
+        if (d.stop_reason) got.stopReason = d.stop_reason;
+        for (const [k, v] of Object.entries(event.usage || {})) if (v !== null && v !== undefined) got.usage = { ...(got.usage || {}), [k]: v };
+      } else if (event.type === 'message_stop') got.finished = true;
+      else if (event.type === 'error') got.error = event.error || { type: 'api_error' };
+    });
+    const spent = () => (got.usage ? { ...got.usage,
+      output_tokens: Math.max(Number(got.usage.output_tokens) || 0, Math.ceil(got.letters / LETTERS_A_TOKEN)) } : null);
+    const call = V.pc.call('chatSend', { id, betas: [], body: { model: MODEL, max_tokens: MAX_TOKENS, stream: true,
+      output_config: { effort: 'low' }, system, messages: [{ role: 'user', content: claudeContent(text, images) }] } });
+    let answer;
+    try {
+      answer = await untilStopped(call, signal);
+    } catch (error) {
+      if (signal && signal.aborted) V.pc.call('chatStop', { id }).catch(() => {});
+      if (spent()) await charge(spent());
+      throw signal && signal.aborted ? STOPPED() : new AiError('bad', `Claude couldn't read this (${error.message || 'no answer'}).`);
+    } finally {
+      pcChats.delete(id);
+    }
+    if (!answer || !answer.ok || answer.stopped || got.error || !got.finished) {
+      if (spent()) await charge(spent());
+      const kind = (answer && answer.kind) || (got.error ? 'busy' : 'bad');
+      if (answer && answer.stopped) throw STOPPED();
+      if (kind === 'nokey') throw new AiError('nokey', (answer && answer.message) || WORDS.off);
+      throw new AiError(['key', 'busy', 'offline'].includes(kind) ? kind : 'bad', WORDS[kind] || `Claude couldn't read this${
+        answer && answer.message ? ` (${answer.message})` : ''}.`);
+    }
+    return { text: got.words.join(''), stopReason: got.stopReason, usage: got.usage || {} };
+  }
+
   /* The note-taker's request to the free Gemini (its key fetched in time, or it's "your cloud is taking too long"), by
      Gemini Fast unless "Smarter Gemini notes" is on (notesTier). `onProgress` gets the words written so far; an answer
      that stopped coming part-way is 'busy' (made again later). */
-  async function geminiNotes(system, text, signal = null, onProgress = null) {
+  async function geminiNotes(system, text, signal = null, onProgress = null, images = []) {
     await within(getGeminiKey(), waits.look, cloudSlow());
-    const answer = await callGemini({ system, contents: [{ role: 'user', parts: [{ text }] }], use: 'notes', signal,
+    const answer = await callGemini({ system, contents: [{ role: 'user', parts: geminiParts(text, images) }], use: 'notes', signal,
       tier: notesTier(), onText: onProgress ? (so) => onProgress(countWords(so)) : null });
     if (answer.stopReason === 'cut_off') throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });
     return answer;
@@ -1901,7 +1974,7 @@ V.ai = (() => {
      from the cloud on a device that hasn't yet (modeReady). With Claude on, Gemini still writes them when its key is
      set up, unless "Write notes with Claude" is on (brain, pick). `tallyFree` false (the flash cards made with AI,
      js/aicards.js): a free Gemini answer isn't counted as a request in this month's tally at all; Claude's always is. */
-  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null, tallyFree = true }) {
+  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null, tallyFree = true, images = [] }) {
     await modeReady(waits.look);  // ("Use Claude too" as the cloud has it: a new device reads it with its first sync)
     if (!known || known.failed) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
     const off = !claudeOn();
@@ -1918,9 +1991,9 @@ V.ai = (() => {
     const unstoppable = !useGemini && V.desktop && !V.pc.can('makeNotesStop');  // (Jarvis 1.8.2's Python)
     let answer;
     try {
-      answer = await bounded((inner, progress) => (useGemini ? geminiNotes(system, text, inner, progress)
-        : V.desktop ? viaPc(system, text, inner, progress)
-        : direct(system, text, inner, progress)),
+      answer = await bounded((inner, progress) => (useGemini ? geminiNotes(system, text, inner, progress, images)
+        : V.desktop ? viaPc(system, text, inner, progress, images)
+        : direct(system, text, inner, progress, images)),
       { signal, who: useGemini ? 'gemini' : 'claude', ms: unstoppable ? null : waits.ask, onProgress });
     } catch (error) {
       if (error instanceof AiError && !error.brain) error.brain = useGemini ? 'gemini' : 'claude';  // (whose trouble)

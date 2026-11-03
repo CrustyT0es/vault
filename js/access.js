@@ -38,6 +38,7 @@ V.invites = (() => {
   const PHONE_URL = 'https://crustyt0es.github.io/wefty/';  // vault/__init__.py's, for a device that doesn't say
   const JOIN_SINCE = 2;  // the helper's first version that makes join codes (vault/helper.py's JOIN_SINCE)
   const NEWS_SINCE = 3;  // ...and the first with announcements (vault/helper.py's NEWS_SINCE)
+  const PUSH_SINCE = 4;  // ...and the first that sends phone notifications (vault/helper.py's PUSH_SINCE)
   const JOINED_SLACK = 5000;  // the cloud's sign-in service and its helper may not quite agree on the time
   const waits = { tick: 30000, poll: 15000 };  // the join sheet's countdown, and asking who joined (tests shorten them)
   const TOKENS_PAGE = 'https://supabase.com/dashboard/account/tokens';
@@ -629,7 +630,8 @@ V.invites = (() => {
       rows.push(ui.line('Invite from your phone too', 'Set up Wefty\'s helper once (with a Supabase access token), and your '
         + 'phone and Chromebook can invite people and see stats too.', V.button('Set up', { onClick: () => setUpSheet(ui) })));
     } else if (state.how === 'pc' && Number(state.helper.version) < state.current) {
-      rows.push(ui.line('Update the helper', 'This Wefty has a newer helper for your cloud. Paste an access token to put it in.',
+      rows.push(ui.line('Update the helper', `This Wefty has a newer helper for your cloud${Number(state.helper.version) < PUSH_SINCE
+        ? ': it sends phone notifications to everyone who turns them on' : ''}. Paste an access token to put it in.`,
         V.button('Update', { onClick: () => setUpSheet(ui, true) })));
     }
     if (state.how === 'old') rows.push(updateLine(ui));

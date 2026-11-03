@@ -257,22 +257,41 @@ V.review = (() => {
   let cache = null;
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') version++; });
 
-  /* Every card, the tests coming up (soonest first) and the cards pulled forward for them today. */
-  function now(today = V.today()) {
-    const key = `${today}|${version}`;
-    if (cache && cache.key === key) return cache;
+  /* Every card, the tests coming up (soonest first) and the cards pulled forward for them on `today`. */
+  function compute(today) {
     const list = all();
     const plans = [...V.data.notes.values()].map((note) => planFor(note, list, today)).filter(Boolean)
       .sort((a, b) => a.day.localeCompare(b.day) || a.name.localeCompare(b.name));
     const pulled = new Set();
     for (const plan of plans) for (const id of plan.today) pulled.add(id);
-    cache = { key, today, list, plans, pulled };
+    return { today, list, plans, pulled };
+  }
+  function now(today = V.today()) {
+    const key = `${today}|${version}`;
+    if (cache && cache.key === key) return cache;
+    cache = { key, ...compute(today) };
     return cache;
   }
 
   const isDue = (card, at = now()) => { const due = dueOn(card.state); return !due || due <= at.today || at.pulled.has(card.id); };
   const dueIn = (deck = 'all') => { const at = now(); const test = inDeck(deck); return at.list.filter((c) => test(c) && isDue(c, at)); };
   const dueCount = () => { const at = now(); return at.list.filter((c) => isDue(c, at)).length; };
+
+  /* What the cloud's study nudge needs (1.19, js/push.js keeps it in the settings row for the helper, which can't read
+     cards itself): { day: today, cards: how many to study each day from today on, as Today would count them that day
+     if none were studied meanwhile (today's: those still left), tests: the ones coming up within two weeks, soonest
+     first, with what's left to go over before each }. Worked out without touching what Today has (`now`'s cache). */
+  function ahead(days = 14, today = V.today()) {
+    const at = now(today);
+    const cards = [at.list.filter((c) => isDue(c, at)).length];
+    for (let k = 1; k < days; k++) {
+      const later = compute(V.addDays(today, k));
+      cards.push(later.list.filter((c) => isDue(c, later)).length);
+    }
+    const tests = at.plans.filter((plan) => plan.days <= 14).slice(0, 5)
+      .map((plan) => ({ id: plan.note.id, day: plan.day, name: plan.name.slice(0, 60), left: plan.left }));
+    return { day: today, cards, tests };
+  }
 
   /* -- answers, saved in batches */
 
@@ -435,8 +454,9 @@ V.review = (() => {
     if (!at.list.length) {
       return V.h('div.empty.review-empty', {}, V.mark(40),
         V.h('p', { text: 'No flash cards yet.' }),
-        V.h('p.hint', { text: 'Write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to study.' }),
-        V.h('p.hint', { text: 'Or let AI make them from a folder of your notes.' }),
+        // (the study loop, 1.19: what most people will do first)
+        V.h('p.hint.loop-line', { text: 'Record a class or snap a page: AI writes your notes, then makes the cards from them.' }),
+        V.h('p.hint', { text: 'Or write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to study.' }),
         V.h('div.review-make', {}, makeButton()));
     }
     const due = at.list.filter((c) => isDue(c, at)).length;
@@ -757,6 +777,7 @@ V.review = (() => {
       if (over) return;
       const c = queue.shift();
       if (!c) return;
+      if (V.streak) V.streak.studied(c, { graded: kind !== 'next' });  // (a day studied: js/streak.js)
       if (kind === 'next') {
         if (!first.has(c.id)) passed.add(c.id);
         if (round === 1) aside.push(c);
@@ -800,10 +821,19 @@ V.review = (() => {
       return nextDue(at);
     }
 
+    // (once a go of real study ends, or is left part-way with something answered: js/push.js may offer study nudges)
+    let told = false;
+    const tellStudied = () => {
+      if (told || practice || !first.size) return;
+      told = true;
+      V.emit('study-done', { answered: first.size });
+    };
+
     function end() {
       over = true;
       scr.progress('', 1);
       scr.ended(true);
+      tellStudied();
       const grades = [...first.values()];
       const knew = grades.filter((r) => r === GOOD).length;
       const learning = grades.length - knew;
@@ -829,6 +859,7 @@ V.review = (() => {
         V.h('span.study-end-mark', {}, V.icon('check')),
         V.h('h3', { text: 'Done for now' }),
         V.h('p.study-end-sum', { text: sum }),
+        V.streak ? V.streak.endLine() : null,  // ("🔥 6 days in a row", when the streak is on: js/streak.js)
         lines.map((text) => V.h('p.study-end-next', { text }))));
       V.clear(scr.foot, V.h('div.study-end-go' + (go.length === 1 ? '.one' : ''), {}, go));
       requestAnimationFrame(() => { if (done.isConnected) done.focus({ preventScroll: true }); });
@@ -868,6 +899,7 @@ V.review = (() => {
       menu,
       leave: ({ closing }) => {
         if (closing && !over && first.size && queue.length) V.toast('Saved. The rest wait for next time.');
+        if (closing) tellStudied();
       },
     });
     scr.stage.append(card);
@@ -879,6 +911,6 @@ V.review = (() => {
 
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
-    dueByFolder, nextDue,
+    dueByFolder, nextDue, ahead,
     start, study, session, screen, question, answerOf, shuffle, cardsOf, pending: () => pending, shown: () => shown };
 })();

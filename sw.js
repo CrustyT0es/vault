@@ -11,7 +11,7 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.18.0-607619b36395';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.19.0-6ac6aec4a3e7';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 /* Since Wefty moved (1.15: crustyt0es.github.io/vault/ -> /wefty/, one origin, so one set of caches), the new
    address's caches are called "wefty-...": a worker from before 1.15 at the old address deletes every "vault-..." cache
    but its own when it switches over, and would take the new address's offline copy with it. Anywhere else (the old
@@ -150,7 +150,47 @@ self.addEventListener('fetch', (event) => {
     .then((kept) => kept || fetch(event.request)));
 });
 
-/* A reminder's notification tapped (js/reminders.js): Vault comes to the front with that note, or opens with it. */
+/* Notifications pushed by the helper in the person's cloud (1.19, js/push.js; vault/functions/vault-admin's "push-tick"):
+   a reminder, the day's study nudge, the evening before a test, or the test one from Settings. Each comes as a little
+   JSON (encrypted for this device alone; the browser has opened it by now) and is always shown: a phone's browser
+   takes it badly when a push shows nothing (Chrome shows its own "updated in the background", Safari stops sending).
+   A reminder has the tag js/reminders.js gives its own (vault-<note>), so one already shown here is replaced, never
+   doubled. Only plain words are shown; where a tap goes is one of a few known places, on this site. */
+const KINDS = ['reminder', 'study', 'test'];
+const PLACES = ['note', 'study', 'test', 'today'];
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const words = (value, most) => {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  return text.length > most ? text.slice(0, most - 1) + '…' : text;
+};
+
+/* What a push says, as a notification: [title, options]. Anything unexpected in it is left out. */
+function pushed(said) {
+  const data = said && typeof said === 'object' ? said : {};
+  const id = typeof data.id === 'string' && ID.test(data.id) ? data.id : '';
+  const open = PLACES.includes(data.open) && (id || (data.open !== 'note' && data.open !== 'test')) ? data.open : 'today';
+  const url = open === 'note' ? './#note=' + id : open === 'test' ? './#test=' + id : open === 'study' ? './#study' : './';
+  const tag = typeof data.tag === 'string' && /^[a-z0-9-]{1,60}$/.test(data.tag) ? data.tag : 'wefty';
+  const at = Date.parse(typeof data.at === 'string' ? data.at : '');
+  return [words(data.title, 80) || 'Wefty', { body: words(data.body, 160), tag, icon: 'icons/wefty-192.png',
+    badge: 'icons/wefty-mono-512.png', timestamp: Number.isFinite(at) ? at : Date.now(),
+    data: { kind: KINDS.includes(data.kind) ? data.kind : 'other', open, id: open === 'note' ? id : '', test: open === 'test' ? id : '', url } }];
+}
+
+self.addEventListener('push', (event) => {
+  let said = null;
+  try { said = event.data ? event.data.json() : null; } catch (error) { said = null; }
+  const [title, options] = pushed(said);
+  // Wefty in front: shown without a sound or a buzz (it says reminders itself while it's open).
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).catch(() => []).then((open) => {
+    if (open.some((page) => page.visibilityState === 'visible')) options.silent = true;
+    return self.registration.showNotification(title, options);
+  }));
+});
+
+/* A notification tapped (a reminder's from js/reminders.js, or a pushed one): Wefty comes to the front at the place it's
+   about (the note; the cards to study; the test's cards; Today), or opens there. */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
@@ -158,9 +198,17 @@ self.addEventListener('notificationclick', (event) => {
     const page = open.find((client) => 'focus' in client);
     if (page) {
       if (data.id) page.postMessage({ vault: 'open-note', id: data.id });
+      else if (data.open && data.open !== 'note') page.postMessage({ vault: 'open', open: data.open, id: data.test || '' });
       return page.focus();
     }
     const own = new URL(String(data.url || './'), self.registration.scope);
     return self.clients.openWindow(own.origin === self.location.origin ? own.href : './');
   }));
+});
+
+/* The browser renewed this device's subscription by itself (rare): the next time Wefty opens, js/push.js signs the new
+   one up (this worker has no sign-in to do it with). */
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then((open) => { for (const page of open) page.postMessage({ vault: 'push-renewed' }); }));
 });

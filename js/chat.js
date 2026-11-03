@@ -605,6 +605,18 @@ V.chat = (() => {
     }
   }
 
+  /* Snap a page (js/capture.js) from the attach menu: the page read into a note, and the note put with this message
+     (as "A note" does), so it can be asked about straight away. */
+  function snapIntoMessage() {
+    const id = openId;
+    V.capture.snap({ onSaved: (note) => {
+      if (!note || !chatOf(id)) return;
+      const draft = draftOf(id);
+      if (!draft.notes.some((n) => n.id === note.id)) draft.notes.push({ id: note.id, title: V.noteTitle(note), text: note.body || '' });
+      if (openId === id) drawBox();
+    } });
+  }
+
   function unattach(item) {
     const draft = draftOf(openId);
     draft.files = draft.files.filter((f) => f !== item);
@@ -716,7 +728,9 @@ V.chat = (() => {
   const weftyFor = (model) => !!V.chatTools && (isGemini(model) || !V.desktop || V.pc.can('chatTools'));
   /* The system prompt sent: today's built-in one for a chat begun on an older one (systemOf), plus what Wefty's tools
      can do when the request offers them (added here, never stored, so older chats get it too). */
-  const systemFor = (chat, wefty) => (wefty ? `${systemOf(chat)}\n\n${V.chatTools.PROMPT}` : systemOf(chat));
+  // (the tools' part follows what's offered now: without Subscriptions while they're switched off, 1.19)
+  const toolsPrompt = () => (V.chatTools.prompt ? V.chatTools.prompt() : V.chatTools.PROMPT);
+  const systemFor = (chat, wefty) => (wefty ? `${systemOf(chat)}\n\n${toolsPrompt()}` : systemOf(chat));
   /* A change may be asked for only in a message with the owner's own words (a picture alone is never a request). */
   const mayWrite = (turn) => !!String(turn.text || '').trim();
   const claudeId = (call) => String(call.id || 'call').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
@@ -756,6 +770,8 @@ V.chat = (() => {
     // message when it was sent, so it's the same every time it goes)
     if ((turn.news || []).length) lines.push(`(In Wefty since your last answer: ${turn.news.join(' ')})`);
     if (!wefty && actionWords(turn)) lines.push(`(Already done in Wefty for this message: ${actionWords(turn)}.)`);
+    // (asked about subscriptions while they were switched off: kept with the message, so it's sent the same each time)
+    if (turn.subsOff) lines.push('(Subscriptions are switched off in Wefty, so there are no subscription tools. Tell them it\'s off and that they can turn it on in Settings > Notes & files > Subscriptions.)');
     return lines;
   }
 
@@ -919,7 +935,8 @@ V.chat = (() => {
   const toolsFor = (turn) => (turn.search ? [{ type: modelOf(turn.model).search, name: 'web_search', max_uses: SEARCHES }] : []);
   /* What a turn's `tools` keeps: the tools its request had, Wefty's by their version only (an older Wefty, whose own
      key never has it, drops the thinking that hung on them rather than sending it where it no longer fits). */
-  const keyFor = (turn, wefty) => JSON.stringify([...toolsFor(turn), ...(wefty ? [{ wefty: V.chatTools.VERSION }] : [])]);
+  const keyFor = (turn, wefty) => JSON.stringify([...toolsFor(turn),
+    ...(wefty ? [V.chatTools.key ? V.chatTools.key() : { wefty: V.chatTools.VERSION }] : [])]);
 
   /* The request for `turn`: the chat's sent turns before it, exactly as they were, then this one (and its paused
      answer, when web search paused it). */
@@ -1727,6 +1744,7 @@ V.chat = (() => {
           w: f.w, h: f.h, pages: f.pages, tokens: f.tokens })),
         content: contentFor(taken.text.trim(), taken.notes, !!current.search), replies: [], state: 'answering' };
       turn.tools = keyFor(turn, weftyFor(model));
+      if (V.chatTools && V.chatTools.aboutSubs && !V.chatTools.subsOn() && V.chatTools.aboutSubs(turn.text)) turn.subsOff = true;
       sentNotes.set(turn, taken.notes);
       if (!current.title) current.title = titleFrom(turn);
       current.turns.push(turn);
@@ -1992,7 +2010,9 @@ V.chat = (() => {
   function emptyChat() {
     return V.h('div.chat-empty', {}, V.h('span.chat-empty-mark', {}, V.icon('spark', 'big')),
       V.h('h2', { text: 'Ask anything' }),
-      V.h('p', { text: 'Homework, ideas, a quick explanation. Attach a note, a picture or a PDF to ask about it, and save any answer as a note.' }));
+      V.h('p', { text: 'Homework, ideas, a quick explanation. Attach a note, a picture or a PDF to ask about it, and save any answer as a note.' }),
+      // (the study loop, 1.19: Chat can read what was recorded and make the cards)
+      V.h('p.chat-empty-loop', { text: 'Recorded a class? Ask about it, or say "make flash cards from my notes".' }));
   }
 
   function chatRow(chat) {
@@ -2111,6 +2131,8 @@ V.chat = (() => {
     const clip = V.iconButton('paperclip', 'Attach', (event) => V.menu(event.currentTarget, [
       { label: 'A picture or file', icon: 'file', onClick: () => pick.click() },
       V.device === 'phone' ? { label: 'Take a photo', icon: 'camera', onClick: () => photo.click() } : null,
+      // (js/capture.js: a page read into a note, which then goes with this message)
+      V.capture ? { label: 'Snap a page to notes', icon: 'spark', onClick: () => snapIntoMessage() } : null,
       { label: 'From Wefty', icon: 'stack', onClick: fromVault },
       { label: 'A note', icon: 'notes', onClick: pickNotes },
     ]), 'chat-clip');

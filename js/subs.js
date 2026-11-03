@@ -16,7 +16,14 @@
    and is written back later, quietly. A trial whose end has passed is a paid one from then on.
 
    Never a card number, a password or anything that looks secret (the shared clipboard's own check, js/clips.js): a
-   subscription needs only its name and price. Passwords aren't kept here at all (the list's last line says where). */
+   subscription needs only its name and price. Passwords aren't kept here at all (the list's last line says where).
+
+   Off unless switched on (1.19; the owner: "toggle off but have available, to keep things clean"): Settings > Notes &
+   files > Subscriptions, for every device (extra.subscriptions_on, through changeExtra). While off nothing about them
+   shows: not on Today (its days, the first-run card, the ⋯ menu), not in Settings' search (only the switch) and not in
+   Chat (js/chattools.js offers no subscription tools then, and tells the model it's switched off). An account that
+   already keeps some and never chose counts as on, so an update never hides anyone's list; switching off deletes
+   nothing. */
 'use strict';
 
 V.subs = (() => {
@@ -97,10 +104,54 @@ V.subs = (() => {
 
   /* -- what's kept */
 
-  const stored = () => {
-    const extra = (V.data && V.data.settings && V.data.settings.extra) || {};
-    return tidyAll(extra.subscriptions);
-  };
+  const extraNow = () => (V.data && V.data.settings && V.data.settings.extra) || {};
+  const stored = () => tidyAll(extraNow().subscriptions);
+
+  /* -- on or off (1.19): switched on or off in Settings (`subscriptions_on`); never chosen = on only for an account that
+     already keeps some (an update never hides someone's list). */
+  function on() {
+    const extra = extraNow();
+    if (typeof extra.subscriptions_on === 'boolean') return extra.subscriptions_on;
+    return stored().length > 0;
+  }
+  const OFF_WORDS = 'Subscriptions are switched off. Turn them on in Settings > Notes & files.';
+  // (an old Chat answer's Open, or anything else that asks for them while they're off: said, with the way to the switch)
+  function saysOff() {
+    V.toast(OFF_WORDS, { action: 'Settings', onAction: () => V.settings.open('notes', { row: 'subscriptions' }) });
+  }
+  let switching = false;
+  /* The switch (Settings > Notes & files): for every device. Nothing is deleted either way. Throws when the cloud
+     couldn't be reached (the switch goes back and says so). */
+  async function setOn(value) {
+    await V.cloud.changeExtra((extra) => ({ ...extra, subscriptions_on: !!value }));
+    V.emit('subs', !!value);
+  }
+
+  /* Settings > Notes & files' row (js/settings.js): the switch, with what it does in one line. */
+  function settingsRow(ui) {
+    const now = on();
+    const count = stored().length;
+    const hint = now ? 'On: renewals and free trials show on Today. The list is in Today\'s ⋯ menu.'
+      : count ? `Off: your ${count === 1 ? 'one subscription is' : `${count} subscriptions are`} kept, just hidden.`
+        : 'Keep track of what you pay for: Today shows a renewal a few days before, and warns you before a free trial ends.';
+    const toggle = V.h('input.switch', { type: 'checkbox', checked: now, disabled: switching, 'aria-label': 'Subscriptions',
+      onchange: async (event) => {
+        const want = event.target.checked;
+        switching = true;
+        ui.draw();
+        try {
+          await setOn(want);
+          if (want) V.toast('Subscriptions are on. Add them from Today\'s ⋯ menu.', { action: 'Open', onAction: () => open() });
+        } catch (error) {
+          console.warn('Wefty: subscriptions:', error);
+          V.toast('That setting wasn\'t changed: Wefty couldn\'t reach your cloud. Try again in a moment.', { kind: 'err', ms: 5000 });
+        } finally {
+          switching = false;
+          ui.draw();
+        }
+      } });
+    return ui.line('Subscriptions', hint, toggle, 'subscriptions');
+  }
 
   /* The subscription as it stands on `today`: a renewal day that has passed moved on by whole periods (a trial whose
      end has passed is a paid one from then). Its own day of the month is kept (`day`), so the 31st never drifts. */
@@ -211,8 +262,11 @@ V.subs = (() => {
   /* -- changes, for every device */
 
   // `change(list)` gives the new list, made on the cloud's newest copy (so another device's change in between stays).
+  // (A change made while it was never switched either way says it's on from now: deleting the last one never makes
+  // the list vanish.)
   function change(fn) {
-    return V.cloud.changeExtra((extra) => ({ ...extra, subscriptions: tidyAll(fn(tidyAll(extra.subscriptions))) }));
+    return V.cloud.changeExtra((extra) => ({ ...extra, subscriptions: tidyAll(fn(tidyAll(extra.subscriptions))),
+      ...(typeof extra.subscriptions_on === 'boolean' ? {} : { subscriptions_on: true }) }));
   }
   // `check(all)`: looks at the cloud's newest list first and may throw (the Chat tab's add_subscription: no second one
   // of the same name, whatever this device's copy says).
@@ -231,7 +285,7 @@ V.subs = (() => {
   let rolling = false;
   function rollLater() {
     const today = V.today();
-    if (rolling || Date.now() - lastRoll < 60000 || !V.cloud || !V.cloud.settingsRead || !V.cloud.settingsRead()) return;
+    if (rolling || !on() || Date.now() - lastRoll < 60000 || !V.cloud || !V.cloud.settingsRead || !V.cloud.settingsRead()) return;
     if (!stored().some((s) => { const r = rolled(s, today); return r.next !== s.next || r.trial !== s.trial; })) return;
     rolling = true;
     lastRoll = Date.now();
@@ -270,7 +324,7 @@ V.subs = (() => {
 
   function todayCard() {
     // (Today's days have every renewal on its day: this card is for the first-run screen, which has none)
-    if (V.today.showsDays && V.today.showsDays()) return null;
+    if (!on() || (V.today.showsDays && V.today.showsDays())) return null;
     const today = V.today();
     rollLater();
     const coming = soon(null, today);
@@ -285,6 +339,7 @@ V.subs = (() => {
   /* -- Today's days (1.17): each renewal from `from` to `to` on its own day (a weekly one on each), and a trial's end
      (amber, with Cancel here when there's a link). Paused ones never. A tap opens it as it is now. */
   function dayItems(from, to) {
+    if (!on()) return [];
     rollLater();
     const out = [];
     for (const sub of list(from)) {
@@ -349,6 +404,7 @@ V.subs = (() => {
 
   function open() {
     if (shown) return;
+    if (!on()) { saysOff(); return; }
     rollLater();
     const body = V.h('div.sub-page');
     const sheet = V.sheet({
@@ -366,6 +422,7 @@ V.subs = (() => {
   /* -- the sheet for one (null: a new one) */
 
   function edit(sub) {
+    if (!on()) { saysOff(); return; }
     const today = V.today();
     const was = sub ? rolled(sub, today) : null;
     const lastCurrency = (() => { const all = stored(); return all.length ? all[all.length - 1].currency : 'CAD'; })();
@@ -472,15 +529,19 @@ V.subs = (() => {
 
   /* -- on Today */
 
-  V.on('data', (table) => { if (table === 'settings') drawList(); });
+  V.on('data', (table) => {
+    if (table !== 'settings') return;
+    if (shown && !on()) shown.close();  // (switched off on another device)
+    else drawList();
+  });
   V.on('signing-out', () => { if (shown) shown.close(); });
   if (V.today && V.today.addSection) {  // (ORDER.subs: Today's own slot for it, after the flash cards)
     V.today.addSection({ id: 'subs', order: (V.today.ORDER && V.today.ORDER.subs) || 45, column: 'right', build: todayCard });
     if (V.today.addDayItems) V.today.addDayItems({ id: 'subs', items: dayItems });
-    V.today.addMenuItem({ id: 'subs', label: 'Subscriptions', icon: 'restore', onClick: () => open() });
+    V.today.addMenuItem({ id: 'subs', label: 'Subscriptions', icon: 'restore', onClick: () => open(), shown: on });
   }
 
   // (save/remove/stored/validDate/MOST: the Chat tab's tools, js/chattools.js, go through the same path and checks)
   return { open, edit, list, soon, totals, rolled, refused, tidy, todayCard, dayItems, money, line, monthly, save, remove,
-    stored, validDate, safeLink, when, perWords, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
+    stored, validDate, safeLink, when, perWords, on, setOn, settingsRow, OFF_WORDS, MOST, NAME_MOST, NOTE_MOST, CURRENCIES, EVERY };
 })();

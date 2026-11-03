@@ -663,7 +663,17 @@ V.send = (() => {
 
      Words alone (no files) are copied on all the other devices at once: Android lets no app but the keyboard read the
      clipboard in the background, so Share > Vault is the one-tap way to copy something everywhere. Not words that
-     look like a password or a code (V.clips.mayShare): for those "Copy on all my devices" stays the owner's choice. */
+     look like a password or a code (V.clips.mayShare): for those "Copy on all my devices" stays the owner's choice.
+     Since 1.19 the sheet is js/capture.js's: what came, tidied, and "Save to Wefty" (a note at once, then what's next);
+     Send to PC is still there (`stage`). */
+
+  /* Into the tray, with the words in the box: a look first, then Send. */
+  function stage(words, list = [], to = 'pc') {
+    if (words) draft = draft.trim() ? `${draft}\n${words}` : words;
+    target = to;
+    V.go('send');
+    if (list.length) files(list, { to });
+  }
 
   async function takeShared() {
     const shared = await V.db.all('shared');
@@ -677,6 +687,10 @@ V.send = (() => {
     const where = ['Paste it on your PC now',
       V.device !== 'web' ? 'on the Chromebook, click Wefty\'s tab first' : '',
       V.device !== 'phone' ? 'on your phone, open Wefty first' : ''].filter(Boolean).join('; ') + '.';
+    if (V.capture) {
+      V.capture.share(shared, { copied, where });
+      return;
+    }
     const content = [
       copied === 'sent' ? V.h('p.hint', { text: where }) : null,
       copied === 'later' ? V.h('p.hint', { text: 'Couldn\'t copy it right now: it goes when you\'re back online.' }) : null,
@@ -696,13 +710,7 @@ V.send = (() => {
         } },
         ...(words && !all.length && copied !== 'sent'
           ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
-        { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => {
-          // Into the tray, with the words in the box: a look first, then Send.
-          if (words) draft = draft.trim() ? `${draft}\n${words}` : words;
-          target = 'pc';
-          V.go('send');
-          if (all.length) files(all, { to: 'pc' });
-        } },
+        { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => stage(words, all) },
       ],
     });
   }
@@ -1178,7 +1186,7 @@ V.send = (() => {
   window.addEventListener('online', runQueue);
 
   return {
-    render, files, text, sendFiles, unsend, runQueue, takeShared, unseen, deviceSetting,
+    render, files, text, sendFiles, unsend, runQueue, takeShared, stage, unseen, deviceSetting,
     targets, preview,
     // For js/arrive.js's card: the preview, the big view, opening and marking what came as arrived.
     image, viewer, received, openHere, openLink, kindIcon,

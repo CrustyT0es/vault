@@ -40,6 +40,7 @@
   V.go = (view, opts = {}) => {
     if (view === 'chat') view = 'claude';  // the Chat tab, by its name since 1.8.3
     if (view === 'share') view = sharePart();
+    if (view === 'files' && V.share && V.share.shows && !V.share.shows('files')) view = 'send';  // (Files is off: 1.19)
     if (!VIEWS[view]) view = 'notes';  // (an id this version doesn't know)
     const was = current;
     if (shell && shown && was) keepPlace(was);  // (before anything is drawn over it)
@@ -1425,11 +1426,16 @@
     }
     firstSync.then(async () => {
       if (V.deviceLog) V.deviceLog.start();  // this device's line in the owner's Stats (js/access.js), now and then
-      if (V.cloud.status === 'synced' || V.cloud.status === 'held') await V.notes.ensureStarterFolders();
+      if (V.cloud.status === 'synced' || V.cloud.status === 'held') {
+        // (the classes picked in the welcome, js/welcome.js, are a new account's starter folders; then its test)
+        await V.notes.ensureStarterFolders(V.welcome.starterFolders());
+        await V.welcome.applyPlan().catch((error) => console.error('Wefty: the welcome\'s classes and test', error));
+      }
       V.send.checkIncoming();
       V.send.runQueue();
       if (!V.desktop) V.send.takeShared();
       if (asked === '#clip' && !V.desktop) V.clips.sendNow();
+      if (V.push) V.push.start();  // (1.19: this device's notifications kept up, the study nudge's numbers kept)
     });
     V.on('badge', badge);
     V.on('signed-out', async () => {

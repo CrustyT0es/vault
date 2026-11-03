@@ -475,7 +475,7 @@ V.study = (() => {
   // Not in a locked note: a card's progress is kept by a code made from its words, which would give them away.
   const hasCards = (note, text) => !note.locked && cards(text).length > 0;
   V.editor.addTool({ name: 'study', label: 'Study', icon: () => icon('cards'), keepCaret: false, onClick: studySheet,
-    shown: hasCards });
+    shown: hasCards, strip: true });
   // (1.18: no Learn button beside it any more: Learn is in the study screen's ⋯, with the cards it quizzes.)
   V.editor.addTool({ name: 'focus', label: 'Focus timer', icon: () => icon('timer'), keepCaret: false, onClick: focusSheet });
   V.editor.addTool({ name: 'repeat', label: 'Repeat', icon: () => icon('repeat'), keepCaret: false, onClick: repeatSheet,

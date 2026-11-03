@@ -38,6 +38,13 @@
      actions sit above the columns, never in one. Wide, the days took the places of `due` and `later`; on a phone since
      1.18 Today's own day is `due` and the rest of the days are where `later` was, after the flash cards.) */
   const ORDER = { quick: 10, days: 20, due: 20, howto: 25, tests: 30, cards: 40, subs: 45, later: 50, devices: 55, jump: 60 };
+  /* A phone's Today stays calm (1.18: "on my phone today felt really overwhelming"). Of the cards that come and go
+     (1.19: a test's check-in, js/checkin.js; the offer of notifications, js/push.js; the week's picture, js/week.js) it
+     shows one at a time, the first in ONE_OFFS with something to say (the others wait for a later draw), never above
+     Today's own day (PHONE_ORDER), and beside a new person's Start here only the check-in, as it's asked on one day only.
+     Wide shows each where its part put it. */
+  const ONE_OFFS = ['checkin', 'push', 'week'];
+  const PHONE_ORDER = { checkin: 22, push: 42, week: 43 };
   const MOST_DUE = 8;      // rows in Today's day before "N more in Upcoming"
   const MOST_PER_NOTE = 5; // a note's to-dos in Today's day before "+N more"
   const MOST_PER_DAY = 5;  // rows in one of the coming days before "+N more"
@@ -109,10 +116,11 @@
     if (at >= 0) extra[at] = entry; else extra.push(entry);
     redraw();
   }
-  function addMenuItem({ id, label, icon: name = '', onClick } = {}) {
+  /* `shown` (optional): whether it's in the menu now (asked at each draw: Subscriptions only while they're on). */
+  function addMenuItem({ id, label, icon: name = '', onClick, shown = null } = {}) {
     if (!id || !label || typeof onClick !== 'function') return;
     const at = menuItems.findIndex((one) => one.id === id);
-    const entry = { id: String(id), label: String(label), icon: name, onClick };
+    const entry = { id: String(id), label: String(label), icon: name, onClick, shown: typeof shown === 'function' ? shown : null };
     if (at >= 0) menuItems[at] = entry; else menuItems.push(entry);
     redraw();
   }
@@ -602,8 +610,12 @@
 
   function head() {
     const actions = [V.iconButton('search', 'Search your notes', () => V.notes.search(), 'today-search')];  // (Notes at its top)
-    if (menuItems.length) {
-      const more = V.iconButton('more', 'More', () => V.menu(more, menuItems.map((item) => ({
+    // (asked again as it opens: a setting that came in since this draw, Subscriptions switched on elsewhere, counts)
+    const items = () => menuItems.filter((item) => {
+      try { return !item.shown || !!item.shown(); } catch (error) { console.error(error); return false; }
+    });
+    if (items().length) {  // (nothing in it, no ⋯)
+      const more = V.iconButton('more', 'More', () => V.menu(more, items().map((item) => ({
         label: item.label, icon: item.icon || null, onClick: item.onClick }))), 'today-more');
       actions.push(more);
     }
@@ -658,6 +670,8 @@
     return part('quick', 'Quick actions', V.h('div.today-tiles', {},
       tile('new', 'plus', 'New note', 'Start writing', newNote, { title: V.appShortcuts ? 'New note (Ctrl+N)' : null, big: true }),
       V.notetaker ? tile('notetaker', 'listen', 'Note-taker', 'Record a class', () => V.notetaker.open(), { big: true }) : null,
+      // (1.19, js/capture.js: a photo of a page, read into a note; the camera on a phone)
+      V.capture ? tile('snap', 'camera', 'Snap', 'A page to notes', () => V.capture.snap(), { big: true }) : null,
       canDictate() ? tile('dictate', 'dictate', 'Dictate', 'Talk to type', dictate) : null,
       V.review ? tile('cards', 'cards', 'Flash cards', due ? `Study ${due}` : 'All done today',
         () => (cardsDue() ? RV().start('all') : toNotes('review')), { count: due, said: `${due} due today` }) : null));
@@ -936,11 +950,11 @@
       V.h('div.test-go', {}, go));
   }
 
-  function testsSection(cards) {
+  function testsSection(cards, lead = true) {
     if (!cards.length) return null;
     const shown = cards.slice(0, MOST_TESTS);
     const rest = cards.length - shown.length;
-    return part('tests', 'Tests coming up', V.h('div.today-tests', {}, shown.map((c, i) => testCard(c, i === 0))),
+    return part('tests', 'Tests coming up', V.h('div.today-tests', {}, shown.map((c, i) => testCard(c, lead && i === 0))),
       rest > 0 ? { label: `${rest} more`, onClick: () => toNotes('review') } : null);
   }
 
@@ -1280,13 +1294,16 @@
     const known = synced || (status === 'offline' && !list.length);
     const fresh = known && !welcoming && nothingYet(list, at, plan);
     daysOn = !fresh;  // (before the other parts' sections are built: js/subs.js asks)
+    // A new person's "Start here" (1.19, js/starthere.js): the next step of the study loop, in place of the first-run
+    // words and how-tos; its button is then the screen's one solid iris one (the tests' and flash cards' go tonal).
+    const start = !welcoming && V.startHere ? section('start', () => V.startHere.card()) : null;
     const tests = section('tests', () => testCards(at, list)) || [];
     // (Quick actions aren't one of these any more: they go across the top, under the days, 1.17; the days' list took
     // the places of Due today and Later this week. A phone, 1.18: Today's own day first, the rest of the days after
     // the flash cards, where Later this week was.)
     const daysPart = () => (due ? daysSection(plan || dayPlan(now, list, due), now, wide) : null);
     const ownParts = fresh ? [
-      { id: 'howto', column: 'left', build: howTo },
+      ...(start ? [] : [{ id: 'howto', column: 'left', build: howTo }]),
       { id: 'devices', column: 'right', build: devicesSection },
       { id: 'jump', column: 'left', build: () => jumpSection(jumpBack(list)) },
     ] : [
@@ -1294,12 +1311,24 @@
         { id: 'due', column: 'right', build: () => (due ? todaySection(plan || dayPlan(now, list, due)) : null) },
         { id: 'days', order: ORDER.later, column: 'right', build: daysPart },
       ]),
-      { id: 'tests', column: 'left', build: () => (Array.isArray(tests) ? testsSection(tests) : tests) },
-      { id: 'cards', column: 'left', build: () => cardsSection(at, !(Array.isArray(tests) && tests.length)) },
+      { id: 'tests', column: 'left', build: () => (Array.isArray(tests) ? testsSection(tests, !start) : tests) },
+      { id: 'cards', column: 'left', build: () => cardsSection(at, !start && !(Array.isArray(tests) && tests.length)) },
       { id: 'jump', column: 'left', build: () => jumpSection(jumpBack(list)) },
     ];
-    const parts = [...ownParts.map((p) => ({ ...p, order: p.order || ORDER[p.id] })), ...extra].sort((a, b) => a.order - b.order);
-    const built = parts.map((one) => ({ one, el: section(one.id, one.build) })).filter((x) => x.el);
+    const parts = [...ownParts.map((p) => ({ ...p, order: p.order || ORDER[p.id] })),
+      ...extra.map((p) => (!wide && PHONE_ORDER[p.id] ? { ...p, order: PHONE_ORDER[p.id] } : p))].sort((a, b) => a.order - b.order);
+    // (a phone: the one card that comes and goes, built first; js/checkin.js marks a test asked as it's built)
+    const oneOff = new Map();
+    if (!wide) {
+      for (const id of ONE_OFFS) {
+        const one = parts.find((p) => p.id === id);
+        if (!one || (start && id !== 'checkin')) continue;
+        const el = section(one.id, one.build);
+        if (el) { oneOff.set(id, el); break; }
+      }
+    }
+    const built = parts.map((one) => ({ one, el: !wide && ONE_OFFS.includes(one.id) ? oneOff.get(one.id) || null
+      : section(one.id, one.build) })).filter((x) => x.el);
     if (due === null) built.unshift({ one: { column: 'right', order: 0 }, el: V.h('p.today-trouble.hint', { text: 'Couldn\'t show this part.' }) });
     const column = (side) => built.filter((x) => !wide || x.one.column === side).map((x) => x.el);
 
@@ -1316,9 +1345,11 @@
         if (todo) counts.push(['checklist', `${todo} to do today`]);
       } catch (error) { console.error(error); }
     }
+    // (the study streak, "🔥 6 days", js/streak.js: first among the counts when wide, else beside the greeting)
+    const streak = V.streak ? V.streak.chip() : null;
     const greet = V.h('div.today-greet', {},
       V.h('div.today-hello', {}, V.h('h1', { text: greeting(now) }), V.h('p.today-date', { text: date })),
-      counts.length ? V.h('p.today-counts', {}, counts.map(([name, text]) => V.h('span', {}, name === 'cards' ? R().icon('cards') : V.icon(name), text))) : null);
+      counts.length ? V.h('p.today-counts', {}, streak, counts.map(([name, text]) => V.h('span', {}, name === 'cards' ? R().icon('cards') : V.icon(name), text))) : streak);
     // The days at the top, on every device since 1.17 (a phone too), once there's something to show in them.
     // (the day the strip was at, put back after the redraw unless the day has turned over since; the strip's title
     // starts on its week)
@@ -1329,7 +1360,7 @@
     const strip = !fresh ? section('week', () => weekStrip(weekCells(now, list, due || [], plan), now, shownDay && shownDay.day)) : null;
     const quickTop = section('quick', quick);
     const before = !known && !welcoming && !list.length ? V.h('p.today-quiet.today-getting', { text: 'Getting your notes…' }) : null;
-    const welcomeText = fresh ? V.h('p.today-welcome', { text: 'Welcome to Wefty. Today fills up from your notes: give one a date, a test or some flash cards, and they show here.' }) : null;
+    const welcomeText = fresh && !start ? V.h('p.today-welcome', { text: 'Welcome to Wefty. Today fills up from your notes: give one a date, a test or some flash cards, and they show here.' }) : null;
 
     // (what had the focus and how far Jump back in was scrolled: put back after the redraw)
     const focused = root.contains(document.activeElement) && document.activeElement.closest('[data-key]');
@@ -1338,7 +1369,7 @@
     const scrolled = jump ? jump.scrollLeft : 0;
 
     V.clear(root, V.h('div.page.today' + (wide ? '.wide' : '') + (fresh ? '.fresh' : ''), {},
-      head(), greet, line(), strip, welcomeText, quickTop, before,
+      head(), greet, line(), strip, welcomeText, start, quickTop, before,
       V.h('div.today-cols', {}, V.h('div.today-col.left', {}, wide ? column('left') : column()),
         wide ? V.h('div.today-col.right', {}, column('right')) : null)));
 
@@ -1403,6 +1434,7 @@
   // it comes back to the front, so a long screen was drawn again under a finger scrolling it)
   V.on('data', (table) => { if (table !== 'clips' && table !== 'transfers') redrawSoon(); });
   V.on('notetaker', () => redrawSoon());
+  V.on('streak', () => redrawSoon());
   V.on('note-left', () => redrawSoon());
   V.on('status', (value) => { if ((value === 'synced' || value === 'held') && !synced) { synced = true; redrawSoon(); } });
   V.on('back', () => { if (showing() && V.today() !== drawnDay) redrawSoon(); });

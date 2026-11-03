@@ -217,7 +217,8 @@ V.cloud = (() => {
      (extra.edited_print): the other devices go by that time for as long as the print still matches, and by the
      cloud's again as soon as the note really changes, wherever that was. History (js/history.js) only ever looks at
      the title and the words, so cards moving on never make a copy either. */
-  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print']);
+  // (checkin: after a test, how it went, js/checkin.js: asked and answered quietly, never an edit)
+  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print', 'checkin']);
   const prints = new WeakMap();
   function notePrint(row) {
     if (prints.has(row)) return prints.get(row);
@@ -283,6 +284,8 @@ V.cloud = (() => {
     for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
       if (stable(was[key]) === stable(now[key])) continue;
       if (top && key === 'cards' && isObject(now.cards) && isObject(out.cards)) out.cards = mergeExtra(was.cards, now.cards, out.cards, false);
+      // (after a test, js/checkin.js: an answer given on the other device beats "asked" from this one)
+      else if (top && key === 'checkin' && isObject(out.checkin) && out.checkin.mood && !(isObject(now.checkin) && now.checkin.mood)) continue;
       else if (key in now) out[key] = now[key];
       else delete out[key];
     }
@@ -841,10 +844,12 @@ V.cloud = (() => {
     }
   }
 
-  /* How many changes made here haven't reached the cloud yet (signing out would throw them away). */
+  /* How many changes made here haven't reached the cloud yet (signing out would throw them away): rows, files sent,
+     and page photos or shared files still waiting here to go up (js/capture.js). */
   async function unsent() {
     let count = (await V.db.all('outgoing')).length + (V.data.settings._dirty ? 1 : 0);
     for (const table of SYNCED) count += [...V.data[table].values()].filter((row) => row._dirty).length;
+    if (V.capture && V.capture.waitingFiles) count += await V.capture.waitingFiles().catch(() => 0);
     return count;
   }
 

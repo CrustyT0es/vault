@@ -1086,9 +1086,10 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 @media (pointer: coarse) { .t-actions .btn { min-height: 44px; } }
 .space-row { display: flex; align-items: center; gap: 12px; margin-top: 24px; color: var(--muted); font: 500 12.5px/16px var(--font); flex-wrap: wrap; }
 .space-row .bar { min-width: 120px; }
-.shared-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.shared-list li { display: flex; gap: 10px; align-items: center; }
-.shared-list li span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.shared-list li { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.shared-list li span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-list li .icon, .shared-list li .muted { flex: none; }
 .shared-text { white-space: pre-wrap; background: var(--sunken); padding: 12px; border-radius: var(--r-md); color: var(--text); }
 
 .latest { margin-bottom: 12px; }
@@ -1177,6 +1178,12 @@ button.send-to-row:active { background: var(--surface-2); }
 .clips .clip-actions .btn { min-height: 36px; }
 @media (pointer: coarse) { .clips .clip-actions .btn { min-height: 44px; } }
 .clip-page > .btn.wide-btn { margin: 10px 0 0; }
+/* A new account's one offer (1.19, js/clips.js): Turn on, or Not now */
+.clip-offer { display: grid; gap: 8px; margin-bottom: 12px; padding: 16px; }
+.clip-offer h2 { margin: 0; color: var(--text); font: 600 16px/22px var(--font); }
+.clip-offer p { margin: 0; color: var(--text-2); font: 400 14px/20px var(--font); }
+.clip-offer-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.clip-offer-buttons .btn { min-height: 44px; }
 .clip-foot:not(:empty) { margin-top: 20px; border-top: 1px solid var(--line); }
 .clip-step .switch-row { padding: 12px 4px; }
 .clip-step .switch-text strong { font: 500 16px/22px var(--font); }
@@ -1516,6 +1523,33 @@ button.send-to-row:active { background: var(--surface-2); }
 .tool-btn[aria-disabled="true"] { color: var(--faint); background: transparent; cursor: default; }
 .tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tool-sep { width: 1px; height: 22px; margin: 0 5px; background: var(--line); flex: none; }
+/* + More (1.19): every other tool in one menu, its button outside the strip so it never scrolls away */
+.tool-btn.tool-more {
+  display: inline-flex; align-items: center; gap: 4px; width: auto; padding: 0 10px 0 7px; color: var(--text-2);
+  font: 600 13.5px/18px var(--font); white-space: nowrap;
+}
+.tool-more .icon { width: 19px; height: 19px; }
+.tool-more[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.tool-more.on { background: var(--accent-soft); color: var(--accent-ink); }
+.tool-more.on::before {  /* (a tool under it is on: Dictate listening) */
+  content: ""; position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+}
+.editor.reading .tool-more, .editor-tools.recording .tool-more { display: none; }
+.menu.tools-more-menu { width: min(348px, calc(100vw - 16px)); min-width: 0; padding: 8px; border-radius: 14px; }
+.more-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.more-tool {
+  position: relative; display: grid; justify-items: center; align-content: center; gap: 6px; min-width: 0; min-height: 72px;
+  padding: 10px 4px 8px; border: none; border-radius: 10px; background: none; color: var(--text);
+  font: 500 13px/16px var(--font); text-align: center; overflow-wrap: anywhere;
+}
+.more-tool .icon { width: 22px; height: 22px; color: var(--text-2); }
+.more-tool:hover, .more-tool:focus { background: light-dark(var(--surface-2), color-mix(in oklab, var(--text) 6%, transparent)); outline: none; }
+.more-tool:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.more-tool-on {
+  position: absolute; top: 5px; right: 5px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft);
+  color: var(--accent-ink); font: 600 10.5px/16px var(--font);
+}
+@media (forced-colors: active) { .more-tool:focus-visible { outline: 2px solid CanvasText; } }
 .tools-end { display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
 .tools-info { display: grid; justify-items: end; gap: 0; min-width: 0; padding-left: 2px; }
 .tools-info .save-state { padding: 0 4px; font-size: 11.5px; line-height: 14px; white-space: nowrap; }
@@ -2894,11 +2928,12 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-trouble { margin: 16px 0 0; }
 .today-welcome { margin: 16px 0 0; max-width: 760px; color: var(--text-2); font: 500 15px/22px var(--font); }
 
-/* Quick actions (1.17): across the top under the days, as one grid: New note and Note-taker big in its first row,
-   Dictate and Flash cards smaller in its second (each keeps its row when another tile isn't there). */
-.today-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.today-tile { grid-row: 2; }
-.today-tile.big { grid-row: 1; }
+/* Quick actions (1.17): across the top under the days, as one grid: New note, Note-taker and Snap (1.19) big in its
+   first row, Dictate and Flash cards smaller in its second (each keeps its row when another tile isn't there). Six
+   columns: a big tile takes two, a small one three. */
+.today-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.today-tile { grid-row: 2; grid-column: span 3; }
+.today-tile.big { grid-row: 1; grid-column: span 2; }
 .today-tile {
   display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 52px; padding: 6px 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: inset 0 1px 0 var(--edge-hi);
@@ -3225,18 +3260,18 @@ button.today-row-text {
   /* the strip: its title only while it's on another week (the list's "This week" is the one heading for this one) */
   .today-week[data-week="0"] .today-week-title { visibility: hidden; }
 
-  /* Quick actions: one row of four, each an icon over its name (the big tiles took a third of the screen) */
+  /* Quick actions: one row of five (1.19: Snap), each an icon over its name (the big tiles took a third of the screen) */
   .today-sec[data-section=quick] { padding-top: 14px; }
   .today-tiles { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
   .today-tile, .today-tile.big {
-    grid-row: 1; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-height: 0;
-    padding: 4px 2px 6px; border: none; border-radius: var(--r-md); background: none; box-shadow: none; text-align: center;
+    grid-row: 1; grid-column: auto; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-height: 0;
+    padding: 4px 0 6px; border: none; border-radius: var(--r-md); background: none; box-shadow: none; text-align: center;
   }
   .today-tile .tile-ic, .today-tile.big .tile-ic { width: 48px; height: 48px; border-radius: 15px; transition: transform var(--d-1) var(--ease-out); }
   .today-tile .tile-ic .icon, .today-tile.big .tile-ic .icon { width: 22px; height: 22px; }
   .today-tile:active .tile-ic { transform: scale(.94); }
   .today-tile .tile-text, .today-tile.big .tile-text { align-self: stretch; justify-items: center; }
-  .today-tile .tile-label, .today-tile.big .tile-label { color: var(--text-2); font: 600 12.5px/16px var(--font); }
+  .today-tile .tile-label, .today-tile.big .tile-label { color: var(--text-2); font: 600 12px/16px var(--font); }
   .today-tile .tile-text small, .today-tile.big .tile-text small { display: none; }
   .today-tile .tile-count { box-shadow: 0 0 0 2px var(--bg); }
 
@@ -3593,13 +3628,13 @@ html:has(#app.gate) .nt-strip { display: none; }
 .nt-card-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 
 /* the way in: above the new-note sheet's templates, and the chip on a note that has a transcript without notes */
-.template.nt-entry {
+.template.nt-entry, .template.cap-entry {
   width: 100%; margin-bottom: 8px; grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; align-items: center;
   border-color: var(--accent-line); background: var(--accent-wash);
 }
-.template.nt-entry:hover, .template.nt-entry:focus-visible { border-color: var(--accent); background: var(--accent-wash); }
-.template.nt-entry .icon { grid-row: span 2; margin: 0; background: var(--card); }
-.template.nt-entry .t-hint { color: var(--text-2); }
+.template.nt-entry:hover, .template.nt-entry:focus-visible, .template.cap-entry:hover, .template.cap-entry:focus-visible { border-color: var(--accent); background: var(--accent-wash); }
+.template.nt-entry .icon, .template.cap-entry .icon { grid-row: span 2; margin: 0; background: var(--card); }
+.template.nt-entry .t-hint, .template.cap-entry .t-hint { color: var(--text-2); }
 .note-meta .nt-chip { color: var(--accent-ink); background: var(--accent-wash); border-color: var(--accent-line); }
 
 /* Settings > AI */
@@ -4140,3 +4175,290 @@ html[data-quick-plain] :is(.quick-lead, .blank-shade .shade-q) { background: non
 /* a switch in a menu (a note's ⋯: Quick read, dyslexia-friendly text) says whether it's on */
 .menu-item .menu-state { margin-left: auto; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .menu-item[aria-checked="true"] .menu-state { color: var(--accent-ink); font-weight: 600; }
+
+/* ------------------------------------------------------------ the study loop first (1.19)
+
+   The welcome (js/welcome.js): what Wefty does in three steps, the classes as chips, and a test's class and day.
+   Today's "Start here" (js/starthere.js): one calm card with the next step, its one solid iris button (the tests' and
+   flash cards' go tonal while it shows), the loop in three words, and the free AI's setup when there's no key yet.
+   Empty lists (Notes, Flash cards, Chat) point at the loop in one line. */
+.welcome-loop { list-style: none; padding: 0; margin: 10px 0 2px; display: grid; gap: 10px; }
+.welcome-loop li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); box-shadow: inset 0 1px 0 var(--edge-hi); }
+.loop-ic { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; background: var(--accent-wash);
+  color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.loop-ic .icon { width: 24px; height: 24px; }
+.loop-text { display: grid; gap: 2px; min-width: 0; }
+.loop-text strong { font: 600 15px/21px var(--font); color: var(--text); }
+.loop-text span { color: var(--text-2); font: 400 14px/20px var(--font); }
+.gate-box > .welcome-setup-hint { text-align: center; margin: 2px 0 0; }
+.gate-box > .welcome-next { text-align: center; margin: 4px 0 0; }
+.welcome-subjects { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 8px 0 4px; }
+.subject-chip { max-width: 100%; }
+.subject-chip > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.subject-chip .emo { font: 15px/1 "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+@media (pointer: coarse) { .subject-chip { height: 40px; } }
+.welcome-own { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 6px; }
+.gate-box > div.label { margin-top: 10px; }
+.welcome-day { margin-top: 6px; }
+
+.start-here { margin-top: 16px; }
+.start-box { padding: 14px 16px 16px; }
+.start-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px -8px 4px 0; }
+.start-label { margin: 0; color: var(--accent-ink); font: 600 13px/18px var(--font); letter-spacing: .01em; }
+.start-close { flex: none; }
+@media (pointer: coarse) { .start-close { width: 44px; height: 44px; } }
+.start-next { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start; }
+/* (a phone: the words get the card's whole width; the icon is in the button) */
+@media (max-width: 479px) { .start-next { grid-template-columns: minmax(0, 1fr); } .start-ic.tile-ic { display: none; } }
+.start-ic.tile-ic { width: 44px; height: 44px; border-radius: 13px; }
+.start-ic .icon { width: 24px; height: 24px; }
+.start-text { display: grid; gap: 4px; min-width: 0; }
+.start-text h2 { margin: 0; color: var(--text); font: 600 18px/24px var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.start-text p { margin: 0; color: var(--text-2); font: 400 14px/20px var(--font); max-width: 640px; }
+.start-why { margin: 10px 0 0; }
+.start-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.start-acts .btn { min-height: 44px; }
+@media (max-width: 899px) { .start-acts .btn { flex: 1 1 auto; } }
+.start-box > .start-ai-note { margin: 8px 0 0; }
+.start-loop { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 0; padding: 12px 0 0;
+  border-top: 1px solid var(--line-soft); color: var(--muted); font: 500 13px/18px var(--font); }
+.start-loop li { display: inline-flex; align-items: center; gap: 6px; }
+.start-n { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-strong);
+  font: 600 11px/1 var(--font); font-variant-numeric: tabular-nums; }
+.start-loop li.now { color: var(--text); font-weight: 600; }
+.start-loop li.now .start-n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.start-ai { display: grid; justify-items: start; gap: 8px; margin-top: 12px; padding: 12px; border-radius: var(--r-md);
+  background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.start-ai > p:first-child { display: flex; gap: 8px; align-items: flex-start; margin: 0; color: var(--text); font: 500 14px/20px var(--font); }
+.start-ai > p:first-child .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--accent-ink); }
+.start-ai > .start-ai-note { margin: 0; }
+.start-ai .btn { min-height: 40px; }
+@media (pointer: coarse) { .start-ai .btn { min-height: 44px; } }
+/* (a phone without an AI key yet: the AI's box is the card's second ask, so the quiet second step and the loop in
+   three words step aside, and Quick actions stay on the first screen) */
+@media (max-width: 479px) { .start-box.no-key .start-acts .btn.quiet, .start-box.no-key .start-loop { display: none; } }
+
+.empty .loop-line { max-width: 320px; }
+.loop-line .link-btn.loop-go { display: inline; padding: 0; min-height: 0; }
+@media (pointer: coarse) { .loop-line .link-btn.loop-go { display: inline-block; padding: 12px 4px; } }
+.chat-empty .chat-empty-loop { color: var(--text-2); font-size: 13.5px; line-height: 20px; }
+
+/* Notifications (1.19, js/push.js): Settings > Notifications' times and quiet hours, and Today's one offer after the
+   first study session */
+.push-time { width: 128px; min-height: 40px; padding: 8px 10px; flex: none; }
+.push-pair { display: flex; align-items: center; gap: 12px; flex: none; }
+.push-quiet { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 0 12px; }
+.push-quiet .label { margin: 0; grid-auto-flow: column; align-items: center; gap: 8px; }
+.warn-text { color: var(--warn); margin: 0 0 10px; }
+.push-steps { margin: 0 0 12px; }
+.push-trouble { margin: 0 0 10px; }
+@media (max-width: 420px) {
+  .setting:has(> .push-pair) { flex-wrap: wrap; }
+  .setting:has(> .push-pair) > .push-pair { margin-left: auto; }
+}
+@media (pointer: coarse) { .push-time { min-height: 44px; } }
+.push-offer { margin-top: 24px; }
+.push-offer-box { padding: 14px 16px; display: grid; gap: 12px; }
+.push-offer-top { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.push-offer-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-ink); }
+.push-offer-icon svg { width: 20px; height: 20px; }
+.push-offer-words { min-width: 0; }
+.push-offer-words h2 { margin: 0; color: var(--text); font: 600 16px/22px var(--font); }
+.push-offer-words p { margin: 2px 0 0; color: var(--text-2); font: 400 14px/20px var(--font); overflow-wrap: anywhere; }
+.push-offer-go { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+@media (pointer: coarse) { .push-offer-go .btn { min-height: 44px; } }
+
+/* ==== 1.19: reasons to come back ==== */
+/* The study streak (js/streak.js): a small chip beside the greeting ("🔥 6 days"; first among the counts when wide),
+   a line at the end of a study go, and its sheet with this week's days. Calm: the card's colours, never a warning. */
+.streak-fire { font-size: 15px; line-height: 1; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+.streak-chip {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; padding: 0 12px 0 10px;
+  border: 1px solid var(--line); border-radius: var(--r-full); background: var(--card); box-shadow: inset 0 1px 0 var(--edge-hi);
+  color: var(--text); font: 600 14px/20px var(--font); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.streak-chip::after { content: ""; position: absolute; inset: -6px -2px; }  /* (44 px tall for a finger) */
+@media (hover: hover) { .streak-chip:hover { border-color: var(--line-strong); } }
+.today-greet > .streak-chip { margin-bottom: 2px; }
+.today-counts .streak-chip { min-height: 28px; padding: 0 10px 0 8px; }
+.study-end .study-streak {
+  display: inline-flex; align-items: center; gap: 8px; max-width: none; margin: 6px 0 2px; padding: 6px 14px;
+  border-radius: var(--r-full); background: var(--warn-soft); color: var(--text); font-weight: 600;
+}
+.study-end .study-streak.fresh { animation: streak-in .5s var(--ease-spring) both; }
+@keyframes streak-in { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .study-end .study-streak.fresh { animation: none; } }
+@media (forced-colors: active) { .study-end .study-streak, .streak-chip { border: 1px solid CanvasText; } }
+.sheet-body > .streak-big {
+  display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0 14px; color: var(--text);
+  font: 600 24px/30px var(--font-display); letter-spacing: -.01em;
+}
+.streak-big .streak-fire { font-size: 26px; }
+.streak-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; }
+.streak-day { display: grid; justify-items: center; gap: 6px; min-width: 0; }
+.streak-dot {
+  display: grid; place-items: center; width: 100%; max-width: 36px; aspect-ratio: 1; border-radius: 50%;
+  background: var(--surface-2); color: var(--muted); font: 600 16px/1 var(--font);
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--font);
+}
+.streak-day[data-state=done] .streak-dot { background: var(--warn-soft); }
+.streak-day[data-state=rest] .streak-dot { background: var(--accent-wash); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.streak-day[data-state=today] .streak-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+.streak-day[data-state=later] .streak-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.streak-name { color: var(--muted); font: 600 12px/16px var(--font); }
+
+/* Today's cards of their own (no heading over them): the week's story on Sundays and Mondays (js/week.js), and how a
+   test went (js/checkin.js). */
+.today-sec.today-weekly, .today-sec.today-checkin-sec { margin-top: 20px; }
+.week-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 12px; padding: 14px 6px 14px 16px; }
+.week-card-mark { display: grid; padding-top: 2px; }
+.week-card-text { display: grid; justify-items: start; gap: 2px; min-width: 0; }
+.week-card-text h2 { margin: 0; color: var(--text); font: 600 15.5px/22px var(--font); overflow-wrap: anywhere; }
+.week-card-text p { margin: 0 0 8px; color: var(--muted); font: 500 13.5px/20px var(--font); overflow-wrap: anywhere; }
+.week-card-x { margin: -6px 0 0; }
+@media (max-width: 359px) { .week-card { grid-template-columns: minmax(0, 1fr) auto; } .week-card-mark { display: none; } }
+.today-checkin { padding: 14px 6px 14px 16px; }
+.checkin-head { display: flex; align-items: flex-start; gap: 4px; }
+.checkin-text { flex: 1; min-width: 0; padding-top: 2px; }
+.checkin-text h2 { margin: 0; color: var(--text); font: 600 16px/22px var(--font); overflow-wrap: anywhere; }
+.checkin-text p { margin: 2px 0 0; color: var(--muted); font: 500 13.5px/20px var(--font); }
+.checkin-x { flex: none; margin: -6px 0 0; }
+.checkin-moods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 10px 0 0; }
+.checkin-mood {
+  display: grid; justify-items: center; align-content: center; gap: 2px; min-width: 0; min-height: 68px; padding: 8px 4px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: transparent; color: var(--text); font: 600 13.5px/18px var(--font);
+}
+@media (hover: hover) { .checkin-mood:hover { border-color: var(--line-strong); background: color-mix(in oklab, var(--text) 4%, transparent); } }
+.checkin-face { font-size: 26px; line-height: 30px; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+.checkin-word { max-width: 100%; overflow-wrap: anywhere; }
+.today-checkin.answered { padding-right: 16px; }
+.checkin-top { display: flex; align-items: flex-start; gap: 12px; }
+.checkin-big { flex: none; font-size: 32px; line-height: 38px; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+.checkin-said { flex: 1; min-width: 0; margin: 0; padding-top: 6px; color: var(--text); font: 500 15px/22px var(--font); overflow-wrap: anywhere; }
+.checkin-go { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.checkin-go .btn { min-height: 44px; white-space: normal; text-align: center; }
+@media (max-width: 419px) { .checkin-go .btn { flex: 1 1 auto; } }
+
+/* The week's picture in its sheet (js/week.js): the picture itself, which week, a first name or not. */
+.week-frame { display: grid; place-items: center; margin: 4px 0 12px; }
+.week-shot {
+  display: block; height: min(48vh, 440px); height: min(48dvh, 440px); max-width: 100%; aspect-ratio: 9 / 16; object-fit: contain;
+  border-radius: var(--r-lg); background: #100f20; box-shadow: var(--shadow-2); transition: opacity var(--d-2);
+}
+.week-frame[aria-busy="true"] .week-shot { opacity: .55; }
+.week-controls > .week-empty { margin: -4px 0 12px; }
+.week-controls > .week-private { margin: 8px 0 0; text-align: center; }
+@media (min-width: 700px) {
+  .week-sheet .sheet-body { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 24px; }
+  .week-sheet .week-frame { margin: 4px 0; }
+  .week-sheet .week-shot { height: min(62vh, 440px); height: min(62dvh, 440px); }
+  .week-controls > .week-private { text-align: left; }
+}
+.segmented.week-which { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; margin: 0 0 8px; }
+.week-name { display: grid; gap: 8px; margin: 0 0 4px; }
+.week-name-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 52px; cursor: pointer; }
+.week-name-text { display: grid; min-width: 0; }
+.week-name-text strong { color: var(--text); font: 600 15px/20px var(--font); }
+.week-name-text span { color: var(--muted); font: 500 13px/18px var(--font); }
+
+/* Today's quick actions, five in a row on a small phone (or bigger text): the icons a little smaller, so each fits its
+   fifth (1.19: Snap) */
+@media (max-width: 359px) {
+  .today-tile .tile-ic, .today-tile.big .tile-ic { width: 42px; height: 42px; border-radius: 13px; }
+  .today-tile .tile-ic .icon, .today-tile.big .tile-ic .icon { width: 20px; height: 20px; }
+}
+@media (max-width: 299px) {
+  .today-tiles { gap: 2px; }
+  .today-tile, .today-tile.big { padding-left: 0; padding-right: 0; }
+  .today-tile .tile-ic, .today-tile.big .tile-ic { width: 36px; height: 36px; border-radius: 11px; }
+  .today-tile .tile-label, .today-tile.big .tile-label { font-size: 11.5px; line-height: 15px; }
+}
+
+/* -- capture (1.19, js/capture.js): Snap a page's sheet (the photos along the top, then reading, the note to check or
+   what went wrong), the share sheet's tidied card and where it goes, what's next after Save to Wefty, the note's
+   "Read this page" chip, and Share > Clipboard's way in on an iPhone */
+.sheet.cap-sheet { max-width: 640px; }
+.cap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.cap-pages { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 2px 4px; scrollbar-width: none; }
+.cap-pages::-webkit-scrollbar { display: none; }
+.cap-page {
+  position: relative; flex: none; width: 64px; height: 84px; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.cap-page img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cap-pdf { display: grid; place-items: center; align-content: center; gap: 4px; height: 100%; color: var(--text-2); font: 600 12px/1 var(--font); }
+.cap-page-n {
+  position: absolute; left: 4px; bottom: 4px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 72%, transparent); color: var(--bg); font: 700 11px/18px var(--font); text-align: center;
+}
+.cap-page .cap-page-out {
+  position: absolute; top: 2px; right: 2px; width: 30px; height: 30px; min-width: 0; min-height: 0; padding: 0; border-radius: 15px;
+  background: color-mix(in srgb, var(--card) 88%, transparent); box-shadow: 0 0 0 1px var(--line);
+}
+.cap-page .cap-page-out .icon { width: 15px; height: 15px; }
+.cap-add {
+  flex: none; display: grid; place-items: center; align-content: center; gap: 4px; width: 64px; height: 84px; padding: 4px;
+  border: 1.5px dashed var(--line-strong); border-radius: 10px; background: none; color: var(--accent-ink);
+  font: 600 11.5px/14px var(--font); text-align: center;
+}
+.cap-add:hover { background: var(--accent-wash); border-color: var(--accent-line); }
+.cap-add .icon { width: 20px; height: 20px; }
+.sheet-body > .cap .cap-state { padding: 16px 0 8px; }
+.cap-check { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.cap-check > .label:first-child { margin-top: 0; }
+.cap-title.field { font: 600 17px/24px var(--font); }
+.cap-words-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.cap-words-head .label { margin: 0; }
+.cap-edit.link-btn { padding: 8px 0; min-height: 40px; }
+.cap-preview {
+  max-height: 40vh; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--page);
+}
+.cap-preview .read-body { font-size: 15px; line-height: 23px; }
+textarea.field.cap-words { min-height: 200px; max-height: 50vh; resize: vertical; font: 400 15px/22px var(--font); field-sizing: content; }
+.cap-unclear.hint { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 0; text-align: left; color: var(--text-2); }
+.cap-unclear .icon { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--warn); }
+.cap-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 10px; }
+.cap-where { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 48px; }
+.cap-where-label { flex: none; color: var(--text-2); font: 600 14px/20px var(--font); }
+.cap-where select.field { flex: 1; min-width: 0; }
+.cap-cards { display: flex; align-items: center; gap: 12px; min-height: 44px; color: var(--text); font: 500 15px/20px var(--font); cursor: pointer; }
+.cap-share { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.sheet-body > .cap-share > .hint { margin: 0; text-align: left; }
+.cap-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); min-width: 0; }
+:root[data-theme="dark"] .cap-card { box-shadow: inset 0 1px 0 var(--edge-hi); }
+.cap-card-title { color: var(--text); font: 600 16px/22px var(--font); overflow-wrap: anywhere; }
+.cap-link { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: 500 13.5px/18px var(--font); }
+.cap-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cap-link .icon { flex: none; width: 15px; height: 15px; }
+.cap-card .shared-text { margin: 0; max-height: 160px; overflow: auto; overflow-wrap: anywhere; }
+.cap-nexts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.cap-saved { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--text); font: 600 15px/21px var(--font); overflow-wrap: anywhere; min-width: 0; }
+.cap-saved .icon { flex: none; color: var(--accent-ink); }
+.cap-next {
+  display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 12px; border: 1px solid var(--line);
+  border-radius: var(--r-lg); background: var(--card); color: var(--text); text-align: left; min-width: 0;
+}
+.cap-next:hover { border-color: var(--line-strong); }
+:root[data-theme="dark"] .cap-next { box-shadow: inset 0 1px 0 var(--edge-hi); }
+.cap-next-ic {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px;
+  background: var(--accent-wash); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+.cap-next-ic .icon { width: 19px; height: 19px; }
+.cap-next-text { display: grid; gap: 1px; min-width: 0; }
+.cap-next-text strong { font: 600 15px/20px var(--font); overflow-wrap: anywhere; }
+.cap-next-text small { color: var(--muted); font: 500 13px/18px var(--font); overflow-wrap: anywhere; }
+.cap-meta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.note-meta .cap-chip { color: var(--accent-ink); background: var(--accent-wash); border-color: var(--accent-line); }
+.cap-waiting { color: var(--muted); font: 500 12.5px/16px var(--font); }
+.cap-paste-row { display: grid; gap: 8px; margin: 4px 0 12px; }
+.cap-paste-row .hint { margin: 0; text-align: left; }
+.cap-paste-row .btn { justify-self: start; }
+@media (pointer: coarse) { .cap-page .cap-page-out::after { content: ""; position: absolute; inset: -7px; } }
+/* the share sheet on a phone: its buttons in rows that fill the width, Save to Wefty last (under the thumb) */
+@media (max-width: 699px) {
+  .sheet:has(.cap-share) .sheet-actions > .btn { flex: 1 1 40%; min-height: 48px; }
+}

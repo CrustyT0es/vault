@@ -217,13 +217,37 @@ V.notes = (() => {
     return list.sort((a, b) => (b.pinned - a.pinned) || order(a, b));
   }
 
+  /* An empty list's one line about the study loop (1.19): record a class (into `folder`, when there is one) or snap a
+     page, and AI makes the notes and flash cards. Its link opens the note-taker where it can hear here (not an
+     iPhone's home screen icon, say: js/notetaker.js's engine), else Snap a page (js/capture.js, when this Wefty has
+     it); each is said only where it works. */
+  function loopLine(folder) {
+    const snap = !!(V.capture && typeof V.capture.snap === 'function');
+    let record = false;
+    try { record = !!(V.notetaker && V.notetaker.engine && V.notetaker.engine().kind); } catch (error) { record = false; }
+    if (!record && !snap) return null;
+    const what = record && snap ? 'Record a class or snap a page' : record ? 'Record a class' : 'Snap a page of notes';
+    return V.h('p.hint.loop-line', {},
+      V.h('span', { text: `${what}${folder ? ` for ${folder.name}` : ''}, and AI turns it into notes and flash cards.` }), ' ',
+      record ? V.h('button.link-btn.loop-go', { type: 'button', text: 'Record a class',
+        onclick: () => V.notetaker.open(null, folder ? { folderId: folder.id } : {}) }) : null,
+      snap && !record ? V.h('button.link-btn.loop-go', { type: 'button', text: 'Snap a page', onclick: () => V.capture.snap() }) : null);
+  }
+
   /* -- making things */
 
-  async function ensureStarterFolders() {
+  /* `list`: [name, emoji] pairs (a new friend's classes, js/welcome.js starterFolders), Inbox first. One at a time: a
+     second ask while the first is making them waits for it (the first sync and the welcome's plan can both ask). */
+  let starting = null;
+  function ensureStarterFolders(list = V.STARTER_FOLDERS) {
+    if (!starting) starting = makeStarterFolders(list).finally(() => { starting = null; });
+    return starting;
+  }
+  async function makeStarterFolders(list) {
     if (V.data.folders.size || (await V.db.meta('starter-made'))) return;
     await V.db.meta('starter-made', true);
     let sort = 0;
-    for (const [name, icon] of V.STARTER_FOLDERS) {
+    for (const [name, icon] of Array.isArray(list) && list.length ? list : V.STARTER_FOLDERS) {
       await V.cloud.save('folders', { id: V.uuid(), name, icon, sort: sort++, deleted: false, extra: {} });
     }
     const home = inbox();
@@ -292,6 +316,7 @@ V.notes = (() => {
       title: here ? `New note in ${here.name}` : 'New note',
       content: [
         V.notetaker ? V.notetaker.sheetEntry(() => sheet.close()) : null,  // js/notetaker.js
+        V.capture ? V.capture.sheetEntries(() => sheet.close()) : null,  // js/capture.js: Snap a page, Paste into Wefty
         V.h('div.templates', {}, list.map((t) => V.h('button.template', {
           type: 'button', onclick: () => { chosen = t; sheet.close(); },
         }, V.icon(t.icon), V.h('span.t-name', { text: t.name }),
@@ -1032,10 +1057,12 @@ V.notes = (() => {
           V.h('p', { text: 'Start a note here, or move notes in from other folders.' }),
           V.button(`New note in ${folder.name}`, { kind: wide ? 'tonal' : 'primary', icon: 'plus',
             onClick: () => create(V.TEMPLATES[0], { folder_id: folder.id }).catch(V.problem) }),
-          V.h('button.link-btn.move-here', { type: 'button', text: 'Move notes here', onclick: () => moveHere(folder) }));
+          V.h('button.link-btn.move-here', { type: 'button', text: 'Move notes here', onclick: () => moveHere(folder) }),
+          loopLine(folder));
       }
       // ('tonal': the round + or the New note above the list is the screen's main iris button; the same in light)
-      return say('No notes here yet.', V.button('New note', { kind: 'tonal', icon: 'plus', onClick: chooseTemplate }));
+      return say('No notes here yet.', V.button('New note', { kind: 'tonal', icon: 'plus', onClick: chooseTemplate }),
+        filter === 'all' || (folder && folder === inbox()) ? loopLine(null) : null);
     };
     const trashBar = filter === 'trash' && list.length ? V.h('div.list-bar', {}, V.button('Empty the Trash', {
       kind: 'danger-quiet', icon: 'trash', onClick: async () => {
