@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.19.1';
+V.VERSION = '1.19.2';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):

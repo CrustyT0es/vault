@@ -11,7 +11,7 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.19.1-5127b190fbeb';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.19.2-3e05e5577c63';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 /* Since Wefty moved (1.15: crustyt0es.github.io/vault/ -> /wefty/, one origin, so one set of caches), the new
    address's caches are called "wefty-...": a worker from before 1.15 at the old address deletes every "vault-..." cache
    but its own when it switches over, and would take the new address's offline copy with it. Anywhere else (the old

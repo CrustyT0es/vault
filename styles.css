@@ -3026,12 +3026,14 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   .today-tile.big .tile-text small { font-size: 14px; line-height: 20px; }
 }
 
-/* Due today and Later this week: a row per to-do, its box on the left */
+/* The picked day's rows (Due today and Later this week until 1.17): a row per to-do, its box on the left, its ⋯ on
+   the right (1.19.2) */
 .today-todo { padding: 4px 0; }
 .today-row {
   display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 0 8px;
-  min-height: 56px; padding: 4px 12px 4px 4px;
+  min-height: 56px; padding: 4px;
 }
+.today-row.dg-extra { padding-right: 12px; }
 .today-row + .today-row, .today-row + .today-more-row { border-top: 1px solid var(--line-soft); }
 .today-tick { position: relative; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: none; background: none; border-radius: var(--r-md); }
 .today-tick::before {
@@ -3056,9 +3058,6 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-where > span:not(.icon):not(.emo) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .today-where .icon, .today-sub > .icon { width: 13px; height: 13px; }
 .today-where .emo, .today-sub .emo { flex: none; font-size: 12px; }
-@media (hover: hover) { .today-where:hover > span:last-child { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; } }
-/* (a finger gets 44 px on the note's name without the row growing) */
-@media (pointer: coarse) { .today-where { position: relative; } .today-where::after { content: ""; position: absolute; inset: -12px 0; } }
 .today-chip { flex: none; }
 .today-chip.plain { background: var(--surface-2); color: var(--text-2); }
 .today-more-row {
@@ -3195,27 +3194,48 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .wd-item.test .icon { width: 16px; height: 16px; }
 .wd-item .wd-more { flex: none; color: var(--muted); font-size: 12.5px; }
 
-/* The days' list (1.17, js/today.js "the days, one by one"): a part per week of the strip ("This week", "Next
-   week"...), each day a heading with its date (and how many to do, or "Nothing due" on the same line), then a card
-   with what's on it. A repeating note's later ones and other parts' things (a renewal) have no box: their mark sits
-   where it would be. A day tapped in the strip is lit for a moment. */
-.today-daylist { display: grid; min-width: 0; }
-.days-week { min-width: 0; }
-.day-group { min-width: 0; margin-top: 16px; border-radius: var(--r-lg); scroll-margin-top: 16px; }
-.days-week > .today-sec-head + .day-group { margin-top: 0; }
-/* (a day with nothing on it: never the class "empty", the empty screens' own, which centred it with 56 px of
-   padding above and below in 1.17) */
-.day-group.dg-empty { margin-top: 10px; }
-.dg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-height: 22px; margin: 0 2px 6px; }
-.day-group.dg-empty .dg-head { margin-bottom: 0; }
-.dg-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--text); font: 600 15px/22px var(--font); }
-.dg-title:focus { outline: none; }
-.dg-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+/* The picked day (1.19.2, js/today.js "the picked day"): the day picked in the strip, all of it (the first five rows,
+   then "Show all N"), its heading with Add, a box per to-do, each row's ⋯ at its end. A repeating note's later ones and
+   other parts' things (a renewal) have no box: their mark sits where it would be. A day with nothing on it is one
+   quiet line. (1.17's list of every day, and 1.18's phone version of it, are gone: the strip is the week.) */
+.today-day { min-width: 0; scroll-margin-top: 16px; }
+.dp-head { align-items: center; }
+.dp-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; flex: 1; min-width: 0; }
+.dp-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; color: var(--text); font: 600 16px/22px var(--font); letter-spacing: -.005em; }
+.dp-title:focus { outline: none; }
+.dp-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
 .dg-name { flex: none; }
 .dg-date { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 500 13.5px/20px var(--font); }
-.day-group.dg-empty .dg-name { color: var(--text-2); font-weight: 500; }
 .dg-meta { flex: none; color: var(--muted); font: 500 13px/18px var(--font); white-space: nowrap; }
 .dg-meta .late-w { color: var(--danger); font-weight: 600; }
+.dp-add { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.dp-add .icon { width: 16px; height: 16px; }
+.dp-none { margin: 0; padding: 4px 2px; color: var(--muted); font: 500 14px/20px var(--font); }
+.dp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.dp-foot .dp-upcoming { display: inline-flex; align-items: center; gap: 2px; margin: 0 -8px 0 auto; }
+.dp-upcoming .icon { width: 16px; height: 16px; }
+.dp-all {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0 0 0 -8px; padding: 0 8px;
+  border: none; border-radius: var(--r-sm); background: none; color: var(--accent-ink); font: 600 14px/20px var(--font);
+}
+.dp-all .icon { width: 16px; height: 16px; }
+@media (hover: hover) { .dp-all:hover { background: color-mix(in oklab, var(--text) 6%, transparent); } }
+/* a day gone by: the notes written then, a few small buttons */
+.dp-written { margin-top: 8px; }
+.dp-sub { margin: 0 2px 6px; color: var(--muted); font: 600 13px/18px var(--font); }
+.dp-notes { display: flex; flex-wrap: wrap; gap: 8px; }
+.dp-notes > div { min-width: 0; max-width: 100%; }
+.dp-note {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card); box-shadow: inset 0 1px 0 var(--edge-hi);
+  color: var(--text); font: 500 14px/20px var(--font);
+}
+.dp-note > span:not(.icon):not(.emo) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-note .emo { flex: none; font-size: 13px; }
+.dp-note .icon { width: 14px; height: 14px; color: var(--muted); }
+.dp-note.more { color: var(--accent-ink); font-weight: 600; }
+@media (hover: hover) { .dp-note:hover { border-color: var(--line-strong); } }
+
 .dg-list { margin: 0; list-style: none; }
 .dg-list > li { min-width: 0; }
 .dg-list > li + li { border-top: 1px solid var(--line-soft); }
@@ -3230,6 +3250,14 @@ button.today-row-text {
 /* (a repeating note's later ones read a step quieter than what can be ticked) */
 .dg-repeat .today-row-text strong { color: var(--text-2); }
 .today-row .dg-test { display: inline-block; width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px; color: var(--accent-ink); }
+/* each row's ⋯: what can be done with it (when, where), quiet until it's wanted */
+.today-row-more {
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: none; border-radius: var(--r-md);
+  background: none; color: var(--muted);
+}
+.today-row-more .icon { width: 20px; height: 20px; }
+.today-row-more[aria-expanded=true] { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) { .today-row-more:hover { background: color-mix(in oklab, var(--text) 6%, transparent); color: var(--text); } }
 /* a trial ending: amber, inset in the card so its corners stay round */
 .dg-list > li.warn { margin: 2px 4px; padding-right: 8px; border-radius: calc(var(--r-lg) - 4px); background: var(--warn-soft); }
 .dg-list > li.warn, .dg-list > li.warn + li { border-top-color: transparent; }
@@ -3240,21 +3268,22 @@ button.today-row-text {
   .today-row.dg-extra:has(.sub-cancel) { grid-template-columns: 44px minmax(0, 1fr); padding-bottom: 10px; }
   .today-row.dg-extra .sub-cancel { grid-column: 2; justify-self: start; }
 }
-.days-more {
-  display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; margin: 12px 0 0 -8px; padding: 0 8px;
-  border: none; border-radius: var(--r-sm); background: none; color: var(--accent-ink); font: 600 14px/20px var(--font);
+
+/* The strip's days (1.19.2): the picked one ringed (its things are under Quick actions), a dot in a day's corner for a
+   test (filled) or a reminder (a ring). */
+.wday { position: relative; }
+.wday[aria-selected=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), inset 0 1px 0 var(--edge-hi); }
+.wday[aria-selected=true] .wd-label { color: var(--accent-ink); }
+.wd-dots { position: absolute; top: 9px; right: 9px; display: flex; gap: 4px; pointer-events: none; }
+.wday:has(.wd-dots) .wd-label { padding-right: 20px; }
+.wd-dot { display: block; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
+.wd-dot.test { background: var(--accent); }
+.wd-dot.remind { border: 1.75px solid var(--accent); }
+@media (forced-colors: active) {
+  .wday[aria-selected=true] { outline: 2px solid Highlight; outline-offset: -3px; }
+  .wd-dot.test { background: CanvasText; }
+  .wd-dot.remind { border-color: CanvasText; }
 }
-.days-more .icon { width: 16px; height: 16px; }
-@media (hover: hover) { .days-more:hover { background: color-mix(in oklab, var(--text) 6%, transparent); } }
-.day-group.flash { animation: day-lit 1.8s ease-out; }
-@keyframes day-lit {
-  0%, 35% { background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
-  100% { background: transparent; box-shadow: 0 0 0 8px transparent; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .day-group.flash { animation: none; background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); }
-}
-@media (forced-colors: active) { .day-group.flash { outline: 2px solid Highlight; outline-offset: 6px; } }
 
 /* (the tiles sit right under the days, as in the mockup's phone: their own words say what they are) */
 .today-sec[data-section=quick] > .today-sec-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; }
@@ -3289,20 +3318,11 @@ button.today-row-text {
 }
 
 /* 1.18: a calm Today on a phone (the owner: "on my phone today felt really overwhelming", js/today.js). Under 900 px:
-   no title over the strip on this week, Quick actions one row of four small buttons, Today's own day near the top, a
-   row's time chip under its title (beside the folder), compact test and flash card cards, and a run of days with
-   nothing on them as one quiet line. */
-.day-gap { margin: 10px 2px 0; border-radius: 6px; color: var(--muted); font: 500 13.5px/20px var(--font); scroll-margin-top: 16px; }
-.days-week > .today-sec-head + .day-gap { margin-top: 0; }
-.day-gap:focus { outline: none; }
-.day-gap:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-.day-gap.flash { animation: day-lit 1.8s ease-out; }
-@media (prefers-reduced-motion: reduce) { .day-gap.flash { animation: none; background: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
-@media (forced-colors: active) { .day-gap.flash { outline: 2px solid Highlight; outline-offset: 6px; } }
-.days-more-n { color: var(--muted); font-weight: 500; }
+   no title over the strip on this week, Quick actions one row of small buttons, the picked day near the top (1.19.2;
+   Today's own day in 1.18), a row's time chip under its title (beside the folder), compact test and flash card cards. */
 @media (max-width: 899px) {
   .today-sec-head { margin-top: 20px; }
-  /* the strip: its title only while it's on another week (the list's "This week" is the one heading for this one) */
+  /* the strip: its title only while it's on another week (the picked day's heading says which day is shown) */
   .today-week[data-week="0"] .today-week-title { visibility: hidden; }
 
   /* Quick actions: one row of five (1.19: Snap), each an icon over its name (the big tiles took a third of the screen) */
@@ -3320,14 +3340,11 @@ button.today-row-text {
   .today-tile .tile-text small, .today-tile.big .tile-text small { display: none; }
   .today-tile .tile-count { box-shadow: 0 0 0 2px var(--bg); }
 
-  /* Today's own day, on its own near the top */
-  .today-col > .day-group.dg-top { margin-top: 22px; }
-  .day-group.dg-top > .dg-head { margin-bottom: 8px; }
-  h2.dg-title { font-size: 16px; }
 
   /* a row: the title gets the whole width (two lines), the chip goes under it, at the end of the folder's line (or on
      a line of its own when both don't fit); the box stays by the first line */
-  .today-row { align-items: start; padding: 2px 12px 8px 4px; }
+  .today-row { align-items: start; padding: 2px 0 8px 4px; }
+  .today-row.dg-extra { padding-right: 12px; }
   .today-row-text { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 11px; }
   button.today-row-text { align-content: flex-start; }
   .today-row-text > strong {
