@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f5f6f8",
-  "theme_color": "#f5f6f8",
+  "background_color": "#0d0d17",
+  "theme_color": "#13131f",
   "icons": [
     {
       "src": "icons/seam-192.png",

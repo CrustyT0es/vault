@@ -114,6 +114,10 @@ V.notetaker = (() => {
   // never had such a pause is ended at its next finished phrase once it's `most` ms old (a stop, which still hands
   // over what it heard; words said while the next one starts can be missed there). (Tests shorten them.)
   const rotate = { age: 20000, words: 35, quiet: 1000, most: 60000 };
+  // A session that ended by itself starts again after `again` ms (1.19.5: was 150 ms, and 2 s after a few empty ends:
+  // words said in that gap were never heard); only one ending over and over with nothing heard (no internet, say)
+  // waits `often` ms, and a start that failed `failed` ms. (Tests read them.)
+  const restartGaps = { again: 0, often: 1000, failed: 300, emptyEnds: 6 };
   // Out of sight (1.17; the owner: "even to switch tabs it still listens until stopped"). Chrome on a Chromebook or a
   // computer keeps a page's speech recognition going while its tab is hidden (another tab, another app, the window
   // minimised: only Chrome on Android ends it when hidden, and newer versions there won't start one hidden either:
@@ -140,12 +144,47 @@ V.notetaker = (() => {
     return text;
   }
 
-  /* 'pc' (Python listens), 'web' (the browser's speech recognition), or null with why not. */
+  /* What Android's unfinished words (`pending`, left when a session ended with no final result: common in a noisy
+     room) add after the words kept, or '' when they're only those again (1.19.5: a whole-word check; the old one, a
+     plain endsWith on the letters, dropped "no" after "piano" and a new "yes" after a kept "...said yes"). */
+  function unfinishedPart(kept, last, pending) {
+    const words = newPart(kept, pending);
+    if (!plainWords(words)) return '';
+    if (endsAgain(kept, words)) return '';
+    return sameAgain(last, words) ? '' : words;
+  }
+
+  /* Unfinished words that are only the end of what was kept, whole words and three or more of them ("answer is
+     twelve" left over after "so the answer is twelve"); a short "yes" after "...said yes" is a new one, and kept. */
+  function endsAgain(kept, words) {
+    const end = plainWords(kept).split(' ');
+    const these = plainWords(words).split(' ');
+    return these.length >= 3 && these.length <= end.length && end.slice(-these.length).join(' ') === these.join(' ');
+  }
+
+  /* A finished phrase that's only the last one handed over again (Chrome on Android): whole phrases of three words or
+     more. A short one said twice ("okay", "no no") is the teacher really saying it again, and is kept. */
+  const sameAgain = (last, words) => plainWords(words) === plainWords(last) && plainWords(words).split(' ').length >= 3;
+
+  /* The words of one result: the best alternative that has any (Chrome puts the likeliest first; an empty first one
+     with words in the next isn't dropped). */
+  function bestWords(result) {
+    const n = Math.max(1, Number(result && result.length) || 1);
+    for (let i = 0; i < n; i++) {
+      const words = result && result[i] && result[i].transcript;
+      if (words && words.trim()) return words;
+    }
+    return '';
+  }
+
+  /* 'pc' (Python listens), 'ai' (AI listening: the recording written down by Gemini, 1.19.5; `preview` when the
+     browser's speech recognition can run beside it), 'web' (the browser's speech recognition), or null with why not. */
   function engine() {
     if (V.desktop) {
       return V.pc && V.pc.can('listenStart') ? { kind: 'pc' }
         : { kind: null, why: 'Use your phone or Chromebook for the note-taker (this PC\'s Wefty needs an update for it: open Jarvis and click Update).' };
     }
+    if (aiWanted()) return { kind: 'ai', preview: aiPreview() };  // (an iPhone's home screen icon too: it records)
     const ios = iosWhyNot();
     if (ios) return { kind: null, why: ios };
     return Recognition() ? { kind: 'web' }
@@ -227,14 +266,14 @@ V.notetaker = (() => {
         let finals = 0;
         for (let i = Math.min(event.resultIndex, taken); i < event.results.length; i++) {
           const result = event.results[i];
-          let words = (result[0] && result[0].transcript) || '';
-          if (!result.isFinal) { interim += words; continue; }
+          let words = bestWords(result);
+          if (!result.isFinal) { interim += words; continue; }  // (bestWords: an empty likeliest one isn't all)
           if (i < taken) continue;  // already kept
           taken = i + 1;
           if (ANDROID) {
             // The words so far again, with the new ones after them: only the new ones (and never the same twice).
             words = newPart(kept, words);
-            if (plainWords(words) === plainWords(last)) continue;
+            if (sameAgain(last, words)) continue;
           }
           if (!plainWords(words)) continue;
           last = words.trim();
@@ -287,11 +326,12 @@ V.notetaker = (() => {
         unquiet();
         // Android sometimes ends before the last words are final (but never twice over what was kept); elsewhere a
         // session that was stopped hands its unfinished words over here.
-        if (pending.trim() && !(ANDROID && plainWords(kept).endsWith(plainWords(pending)))) {
+        const unfinished = !pending.trim() ? '' : ANDROID ? unfinishedPart(kept, last, pending) : pending;
+        if (unfinished.trim()) {
           heard = true;
-          last = pending.trim();
+          last = unfinished.trim();
           kept = kept ? `${kept} ${last}` : last;
-          on.final(pending);
+          on.final(unfinished);
         }
         pending = '';
         on.interim('');
@@ -300,7 +340,8 @@ V.notetaker = (() => {
         if (rotating) { rotating = false; begin(); return; }  // ended for a fresh session: straight on
         const now = Date.now();
         ends = ends.filter((t) => now - t < 10000).concat(heard ? [] : [now]);
-        restart = setTimeout(begin, ends.length > 4 ? 2000 : 150);  // stopping over and over, hearing nothing: a breath first
+        // (straight on; only when it keeps stopping with nothing heard, a breath first)
+        restart = setTimeout(begin, ends.length >= restartGaps.emptyEnds ? restartGaps.often : restartGaps.again);
       };
       try {
         rec.start();
@@ -308,7 +349,7 @@ V.notetaker = (() => {
       } catch (error) {
         rec = null;
         if (refused()) return;  // (out of sight: it starts again once Wefty is back)
-        restart = setTimeout(begin, 1000);
+        restart = setTimeout(begin, restartGaps.failed);
       }
     }
 
@@ -325,7 +366,8 @@ V.notetaker = (() => {
           try { rec.stop(); } catch (error) { resolve(); }
           setTimeout(() => {  // it never said it ended: what it heard so far is kept anyway
             if (finished !== resolve) return;
-            if (pending.trim()) on.final(pending);
+            const unfinished = !pending.trim() ? '' : ANDROID ? unfinishedPart(kept, last, pending) : pending;
+            if (unfinished.trim()) on.final(unfinished);
             pending = '';
             rec = null;
             finished = null;
@@ -374,6 +416,595 @@ V.notetaker = (() => {
     };
   }
 
+  /* -- AI listening (1.19.5; the owner, in a real class on a Samsung phone: "it doesn't pick up well in class with
+     other groups talking, and it gets many of the words wrong... it's trying to dodge too much"). The browser's speech
+     service is made for one person talking into the phone: in a room of groups it drops or garbles most of the
+     teacher. With AI listening (on by default once the free Gemini is set up, phones and Chromebooks; the start
+     screen's switch and Settings > AI turn it off), the phone records the room itself (getUserMedia, with the
+     browser's echo cancellation, noise suppression and gain on, MediaRecorder: opus in webm on Chrome, AAC in mp4 on
+     an iPhone) in pieces of `aiChunk.seconds`, each overlapping the one before by `overlap` seconds, and the person's
+     own free Gemini writes down what the main speaker says (AI_PROMPT), one piece at a time, in order. The words land
+     in the transcript about half a minute behind; where the browser lets its own speech recognition run beside the
+     recorder (not Android or an iPhone: one app at a time has the microphone there), its words show meanwhile in grey
+     ("hearing..."), never kept. Each piece waits in this device's IndexedDB ("wefty-listening") until it's written
+     down, then it's deleted: the sound never goes to the cloud or into the note. Offline, or Gemini busy or out of its
+     free quota for now: the pieces wait (longer each time, `aiChunk.retry` up to `most`; a used-up quota `quota` at
+     least) and go in order when it can be reached, before the notes are made (autoMake waits for them). Stop waits for
+     the last piece ("Finishing the transcript...", with Skip). Never more than one piece's request at a time (`alone`:
+     no second model racing it), as each counts against the free daily limit. */
+  const AI_PREF = 'vault-notetaker-ai';
+  // (tests shorten them)
+  const aiChunk = { seconds: 35, overlap: 1.5, least: 0.5, retry: 8000, quota: 30000, most: 60000, bitrate: 32000 };
+  const AI_PROMPT = [
+    'You write down a recording made in a class, lecture or meeting, for the student who recorded it.',
+    'Transcribe faithfully, word for word, everything the main speaker says (usually the teacher: the voice talking to '
+      + 'the whole room). Keep everything they say, repeats and asides too, in the language they speak. A student near '
+      + 'the phone asking or answering the teacher counts too.',
+    'Ignore background chatter: other groups or people talking among themselves, not to the room.',
+    'Never invent, guess or fill in words. Where a bit can\'t be made out, write [unclear] in its place.',
+    'Add normal punctuation, and start a new paragraph where the topic changes. No summaries, no notes, no title, no '
+      + 'timestamps, no speaker names, nothing but the words said.',
+    'The recording may start or end in the middle of a sentence: write what is there.',
+    'If the main speaker says nothing in it, answer exactly: [silence]',
+  ].join('\n');
+  const AI_ASK = 'Transcribe this part of the recording.';
+  const NOT_WRITTEN = '[a part of the recording couldn\'t be written down]';
+  const AUDIO_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac',
+    'audio/ogg;codecs=opus'];
+
+  /* AI listening can run here (a phone's or a Chromebook's browser that records sound; the PC listens with Python). */
+  const aiCan = () => !V.desktop && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+    && typeof window.MediaRecorder === 'function';
+  const aiPicked = () => stored(AI_PREF) !== 'off';  // (on unless switched off, on this device)
+  /* It's used for the next recording: it can run here, it isn't switched off, and the free Gemini is set up. */
+  const aiWanted = () => aiCan() && aiPicked() && !!(V.ai && V.ai.has('gemini'));
+  function setAiPicked(on) {
+    store(AI_PREF, on ? 'on' : 'off');
+    V.emit('notetaker-ai', !!on);
+  }
+  // Where the browser's own speech recognition can run beside the recorder (its words shown in grey meanwhile): not
+  // Android's Chrome or an iPhone, where only one thing at a time has the microphone (unverified on real phones: the
+  // safe side), so there the recorder runs alone.
+  const aiPreview = () => !ANDROID && !(V.deviceKind && V.deviceKind.ios) && !!Recognition();
+
+  function audioType() {
+    const R = window.MediaRecorder;
+    if (!R || typeof R.isTypeSupported !== 'function') return '';
+    return AUDIO_TYPES.find((type) => { try { return R.isTypeSupported(type); } catch (e) { return false; } }) || '';
+  }
+  const baseType = (type) => String(type || '').split(';')[0].trim().toLowerCase() || 'audio/webm';
+
+  /* The microphone recorded in overlapping pieces, each handed to `on.chunk` ({ blob, mime, at, ends, overlaps })
+     once it has stopped. `preview`: the browser's speech recognition runs beside it for the grey words (`on.preview`,
+     webHearing's handlers). */
+  function recorderHearing(on, { preview = false } = {}) {
+    let stream = null;
+    let wanted = false;
+    let opening = null;
+    let pieces = [];    // recordings going now (two during an overlap)
+    let timer = null;   // the next piece's start
+    let fresh = true;   // the next piece is the first since a start: nothing before it to overlap
+    let ears = null;
+    let handed = Promise.resolve();  // the piece before this one handed over: pieces go in the order they started
+
+    function piece() {
+      const type = audioType();
+      let rec;
+      try {
+        rec = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: aiChunk.bitrate });
+      } catch (error) {
+        rec = new MediaRecorder(stream);
+      }
+      const got = { rec, parts: [], at: Date.now(), overlaps: !fresh };
+      fresh = false;
+      // (Stop, or a lost microphone, inside an overlap ends two at once: the newer one never goes ahead of the older)
+      const before = handed;
+      got.done = new Promise((resolve) => {
+        rec.ondataavailable = (event) => { if (event.data && event.data.size) got.parts.push(event.data); };
+        rec.onstop = () => {
+          pieces = pieces.filter((p) => p !== got);
+          const mime = baseType(rec.mimeType || type || (got.parts[0] && got.parts[0].type));
+          const blob = new Blob(got.parts, { type: mime });
+          const ends = Date.now();
+          if (!blob.size || ends - got.at < aiChunk.least * 1000) { before.then(resolve); return; }
+          before.then(() => on.chunk({ blob, mime, at: got.at, ends, overlaps: got.overlaps }))
+            .catch((error) => console.warn('Wefty note-taker:', error)).then(resolve);
+        };
+      });
+      handed = got.done;
+      rec.start();
+      pieces.push(got);
+      return got;
+    }
+
+    const end = (got) => {
+      if (got.rec.state !== 'inactive') { try { got.rec.stop(); } catch (error) { /* stopped already */ } }
+      return got.done;
+    };
+
+    /* Half a minute on: the next piece starts, and this one ends `overlap` seconds later (both hear that bit). */
+    function roll() {
+      timer = null;
+      if (!wanted || !stream) return;
+      const old = pieces[pieces.length - 1];
+      piece();
+      timer = setTimeout(roll, aiChunk.seconds * 1000);
+      if (old) setTimeout(() => end(old), aiChunk.overlap * 1000);
+    }
+
+    function letGo() {
+      clearTimeout(timer);
+      timer = null;
+      const going = Promise.all(pieces.slice().map(end));
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          track.onended = null;
+          track.onmute = null;
+          track.onunmute = null;
+          try { track.stop(); } catch (e) { /* gone */ }
+        });
+      }
+      stream = null;
+      return going;
+    }
+
+    /* The microphone went (Android taking it while Wefty was out of sight, or one unplugged): what was recorded is
+       kept, and it's opened again once Wefty is on the screen. */
+    function lost() {
+      if (!wanted || !stream) return;
+      letGo();
+      if (document.hidden) on.waiting(true);
+      else openMic();
+    }
+
+    /* Whether the microphone really hears: an audio track that's live and not muted. */
+    const hearing = () => !!stream && stream.getAudioTracks().some((track) => track.readyState === 'live' && !track.muted);
+
+    async function openMic() {
+      if (!wanted || stream || opening) return opening;
+      opening = (async () => {
+        let got;
+        try {
+          got = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true,
+            autoGainControl: true, channelCount: 1 } });
+        } catch (error) {
+          const name = (error && error.name) || '';
+          if (!wanted) return;
+          if (document.hidden && name !== 'NotFoundError') { on.waiting(true); return; }  // (once Wefty is back)
+          wanted = false;
+          on.fail(name === 'NotAllowedError' || name === 'SecurityError'
+            ? 'Wefty can\'t use the microphone. Allow it for Wefty in the browser\'s site settings, then try again.'
+            : name === 'NotFoundError' ? 'No microphone was found.'
+              : `The microphone couldn't be opened (${(error && error.message) || name || 'unknown'}).`);
+          return;
+        }
+        if (!wanted) { got.getTracks().forEach((track) => track.stop()); return; }
+        stream = got;
+        // A track muted (an iPhone sending Wefty to the background, a call taking the microphone) records only
+        // silence: the screen says words are missed, and it's opened again once Wefty is back.
+        stream.getAudioTracks().forEach((track) => {
+          track.onended = lost;
+          track.onmute = () => { if (wanted && stream === got) on.waiting(true); };
+          track.onunmute = () => { if (wanted && stream === got) on.waiting(false); };
+        });
+        fresh = true;
+        piece();
+        timer = setTimeout(roll, aiChunk.seconds * 1000);
+        on.waiting(false);
+        on.trouble(null);
+      })();
+      try { await opening; } finally { opening = null; }
+      return null;
+    }
+
+    return {
+      async start() {
+        wanted = true;
+        await openMic();
+        if (wanted && preview && !ears) {
+          ears = webHearing(on.preview, { background: HEARS_HIDDEN });
+          ears.start().catch(() => {});
+        }
+      },
+      async stop() {
+        wanted = false;
+        if (opening) await opening.catch(() => {});
+        const was = ears;
+        ears = null;
+        if (was) await was.stop().catch(() => {});
+        await letGo();
+      },
+      back() {
+        if (wanted && stream && !hearing()) { letGo(); }  // (muted, or ended unnoticed: a fresh microphone)
+        if (wanted && !stream) openMic();
+        if (ears) ears.back();
+      },
+      roll: () => { clearTimeout(timer); roll(); },  // (the next piece now: tests)
+    };
+  }
+
+  /* The pieces waiting to be written down, in this device's own IndexedDB ("wefty-listening", away from the app's own
+     copy of the notes), or in memory where it can't be opened (private browsing). Each: { id, owner, session, note,
+     title, seq, at, ends, mime, blob, overlaps, wav, tries }. */
+  const chunkStore = (() => {
+    const memory = new Map();
+    let opening = null;
+    let broken = false;
+    function open() {
+      if (broken || typeof indexedDB === 'undefined') return Promise.resolve(null);
+      if (opening) return opening;
+      opening = new Promise((resolve) => {
+        let request;
+        try { request = indexedDB.open('wefty-listening', 1); } catch (error) { broken = true; resolve(null); return; }
+        request.onupgradeneeded = () => request.result.createObjectStore('chunks', { keyPath: 'id' });
+        request.onsuccess = () => {
+          const db = request.result;
+          db.onversionchange = () => { db.close(); opening = null; };
+          resolve(db);
+        };
+        request.onerror = () => { broken = true; resolve(null); };
+      });
+      return opening;
+    }
+    async function run(mode, work) {
+      const db = await open();
+      if (!db) return work(null);
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('chunks', mode);
+        let result;
+        const request = work(tx.objectStore('chunks'));
+        if (request) request.onsuccess = () => { result = request.result; };
+        tx.oncomplete = () => resolve(result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('The recording couldn\'t be kept'));
+      });
+    }
+    const order = (a, b) => (a.at - b.at) || (a.seq - b.seq);
+    let told = false;
+    return {
+      // A piece this device's storage turns down (full, or a Safari that can't keep sound there) is kept in memory
+      // instead, never lost without a word: it's written down all the same while Wefty stays open.
+      put: async (row) => {
+        try {
+          await run('readwrite', (store) => (store ? store.put(row) : (memory.set(row.id, row), null)));
+          if (memory.has(row.id) && (await open())) memory.delete(row.id);  // (kept there now, after a retry)
+        } catch (error) {
+          memory.set(row.id, row);
+          if (!told) {
+            told = true;
+            V.toast('This device couldn\'t keep the recording in its storage (is it full?). Keep Wefty open until the '
+              + 'transcript is written down.', { ms: 9000 });
+          }
+        }
+      },
+      remove: async (id) => {
+        memory.delete(id);
+        await run('readwrite', (store) => (store ? store.delete(id) : null));
+      },
+      all: async () => {
+        const kept = await run('readonly', (store) => (store ? store.getAll() : null)).catch(() => null) || [];
+        const rows = [...kept.filter((row) => !memory.has(row.id)), ...memory.values()];
+        return rows.sort(order);
+      },
+    };
+  })();
+
+  let pumping = false;
+  let pumpTimer = null;
+  let pumpWait = 0;            // the wait before the next try now (ms), longer each time
+  let aiTrouble = null;        // why the pieces are waiting: { kind: 'offline' | 'busy' | 'nokey', words } or null
+  let waitingNotes = new Map();     // note id -> pieces waiting for it
+  let waitingSessions = new Map();  // session key -> pieces waiting for it
+  let piecesKnown = false;
+  const retarget = new Map();  // note id -> the note its words go to instead (it was locked or deleted meanwhile)
+  const mine = () => (V.data.user && V.data.user.id) || '';
+
+  /* Counted again (after each change): which notes and recordings still wait, and what shows it. */
+  async function recount() {
+    const all = await chunkStore.all();
+    // (another person's, left from before they signed out here: gone, as this device's copy of their notes is)
+    if (mine()) for (const row of all) if (row.owner !== mine()) await chunkStore.remove(row.id).catch(() => {});
+    const rows = all.filter((row) => row.owner === mine());
+    const notes = new Map();
+    const keys = new Map();
+    for (const row of rows) {
+      const note = retarget.get(row.note) || row.note;
+      notes.set(note, (notes.get(note) || 0) + 1);
+      keys.set(row.session, (keys.get(row.session) || 0) + 1);
+    }
+    const done = [...waitingNotes.keys()].filter((id) => !notes.has(id));
+    waitingNotes = notes;
+    waitingSessions = keys;
+    piecesKnown = true;
+    if (!rows.length) aiTrouble = null;
+    drawStatus();
+    finishingMoved();
+    if (done.length) setTimeout(() => autoMake().catch(() => {}), 0);  // (notes that waited for their transcript)
+    return rows;
+  }
+
+  /* A piece recorded: kept on this device, then written down in its turn. */
+  async function keepPiece(s, got) {
+    s.seq = (s.seq || 0) + 1;
+    const row = { id: `${s.key}-${String(s.seq).padStart(6, '0')}`, owner: mine(), session: s.key, note: s.id,
+      title: s.title, seq: s.seq, at: got.at, ends: got.ends, mime: got.mime, blob: got.blob, overlaps: !!got.overlaps,
+      wav: false, tries: 0 };
+    await chunkStore.put(row);
+    await recount();
+    pump().catch(() => {});
+  }
+
+  /* Starts writing down what waits (or carries on), unless it's at it already. */
+  function kick() {
+    if (!mine()) return;
+    if (!piecesKnown) { recount().then((rows) => { if (rows.length) pump().catch(() => {}); }).catch(() => {}); return; }
+    if (waitingNotes.size) pump().catch(() => {});
+  }
+
+  async function base64(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(out);
+  }
+
+  /* A recording as plain 16 kHz WAV, for a Gemini that turns its own format down. */
+  async function toWav(blob) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) throw new V.ai.AiError('bad', 'This browser can\'t read its own recording.');
+    const ctx = new Context();
+    let sound;
+    try {
+      sound = await ctx.decodeAudioData(await blob.arrayBuffer());
+    } catch (error) {
+      throw new V.ai.AiError('bad', 'This recording couldn\'t be read.');
+    } finally {
+      try { ctx.close(); } catch (e) { /* closed */ }
+    }
+    const rate = 16000;
+    const channels = Math.max(1, sound.numberOfChannels || 1);
+    const length = Math.max(1, Math.floor(sound.length * rate / sound.sampleRate));
+    const data = new DataView(new ArrayBuffer(44 + length * 2));
+    const text = (at, words) => { for (let i = 0; i < words.length; i++) data.setUint8(at + i, words.charCodeAt(i)); };
+    text(0, 'RIFF'); data.setUint32(4, 36 + length * 2, true); text(8, 'WAVEfmt ');
+    data.setUint32(16, 16, true); data.setUint16(20, 1, true); data.setUint16(22, 1, true);
+    data.setUint32(24, rate, true); data.setUint32(28, rate * 2, true); data.setUint16(32, 2, true);
+    data.setUint16(34, 16, true); text(36, 'data'); data.setUint32(40, length * 2, true);
+    const lines = [];
+    for (let c = 0; c < channels; c++) lines.push(sound.getChannelData(c));
+    for (let i = 0; i < length; i++) {
+      const at = Math.min(sound.length - 1, Math.floor(i * sound.sampleRate / rate));
+      let sum = 0;
+      for (const line of lines) sum += line[at] || 0;
+      const v = Math.max(-1, Math.min(1, sum / channels));
+      data.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+    return new Blob([data.buffer], { type: 'audio/wav' });
+  }
+
+  /* One piece written down by the person's free Gemini (Gemini Fast, one request at a time). */
+  async function transcribe(row) {
+    const blob = row.wav ? await toWav(row.blob) : row.blob;
+    const answer = await V.ai.callGemini({ system: AI_PROMPT, use: 'notes', tier: 'fast', alone: true, maxTokens: 4096,
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: row.wav ? 'audio/wav' : row.mime, data: await base64(blob) } },
+        { text: AI_ASK }] }] });
+    // (a stop part-way, RECITATION or SAFETY, after words written down: a teacher reading a poem aloud. What came is
+    // kept, the rest marked unclear; only a refusal with no words at all is one)
+    if (answer.stopReason === 'refusal') {
+      if (!String(answer.text || '').trim()) throw new V.ai.AiError('refusal', 'Gemini didn\'t write this part down.');
+      return `${answer.text.trim()} [unclear]`;
+    }
+    return answer.text || '';
+  }
+
+  /* What waits is written down, oldest first, one piece at a time; each piece is deleted once its words are in. */
+  async function pump(again = false) {
+    if (pumping || !mine() || (pumpTimer && !again)) return;  // (waiting out a busy Gemini: its timer goes on)
+    clearTimeout(pumpTimer);
+    pumpTimer = null;
+    pumping = true;
+    try {
+      for (;;) {
+        const next = (await chunkStore.all()).find((row) => row.owner === mine());
+        if (!next) { aiTrouble = null; break; }
+        if (!navigator.onLine) { setAiTrouble('offline', 'You\'re offline. The recording is kept on this device and written down when you\'re back online.'); break; }
+        let words;
+        try {
+          words = await transcribe(next);
+        } catch (error) {
+          const kind = (error && error.kind) || '';
+          // ("Gemini's models aren't available ... Try again later": none could be asked, not this piece's sound)
+          const unavailable = kind === 'bad' && error.why === 'unavailable';
+          if ((kind === 'bad' && !unavailable) || kind === 'refusal' || !(error instanceof V.ai.AiError)) {
+            // Its sound turned down (or unreadable here): once more as plain WAV, then once more, then a line in its
+            // place (never stuck on one piece).
+            next.tries = (next.tries || 0) + 1;
+            if (kind && !next.wav && (window.AudioContext || window.webkitAudioContext)) next.wav = true;
+            if (next.tries < 3) { await chunkStore.put(next); continue; }
+            words = NOT_WRITTEN;
+          } else if (['nokey', 'key', 'off'].includes(kind)) {
+            setAiTrouble('nokey', 'Set up the free Gemini (Settings > AI) to write the recording down. It\'s kept on this device meanwhile.');
+            break;
+          } else if (kind === 'stopped') {
+            break;
+          } else {  // offline, Gemini busy or slow, the free quota used up for now: later, waiting longer each time
+            const quota = error && error.why === 'quota';
+            pumpWait = Math.min(aiChunk.most, Math.max(quota ? aiChunk.quota : aiChunk.retry, pumpWait * 2));
+            setAiTrouble(kind === 'offline' ? 'offline' : 'busy', kind === 'offline'
+              ? 'Gemini can\'t be reached right now. The recording is kept on this device and written down when it can be.'
+              : `Gemini is busy, so the transcript is a little behind. It carries on by itself.`);
+            pumpTimer = setTimeout(() => pump(true).catch(() => {}), pumpWait);
+            break;
+          }
+        }
+        pumpWait = 0;
+        aiTrouble = null;
+        // (its recording saving its last words just now: they go in after them, into the saved note)
+        // (or another recording listening into the same note, stopping: its last save first, then these go in)
+        while (session && (session.key === next.session || session.id === (retarget.get(next.note) || next.note))
+          && session.state === 'stopping') await new Promise((r) => setTimeout(r, 50));
+        await deliver(next, words);
+        await chunkStore.remove(next.id);  // (the sound is gone once its words are in)
+        await recount();
+      }
+    } finally {
+      pumping = false;
+      await recount().catch(() => {});
+    }
+  }
+
+  function setAiTrouble(kind, words) {
+    aiTrouble = { kind, words };
+    drawStatus();
+    finishingMoved();
+  }
+
+  const ENDED = /[.!?…:;"”')\]]$/;  // a transcript ending a sentence (else the next words carry it on)
+  const plainWord = (word) => plainWords(word).replace(/\s+/g, '');
+
+  /* `after` without what it repeats of the end of `before` (the second or so both pieces heard). At least two words
+     the same, from its first few words; a cut-off word at either edge is allowed for. */
+  function withoutOverlap(before, after) {
+    const tail = String(before || '').split(/\s+/).filter(Boolean).slice(-40).map(plainWord);
+    const lines = String(after || '').split('\n');
+    const head = lines[0].trim().split(/\s+/).filter(Boolean);
+    const plainHead = head.map(plainWord);
+    for (let cut = 0; cut <= 2; cut++) {
+      const end = tail.length - cut;
+      for (let skip = 0; skip <= 3; skip++) {
+        for (let k = Math.min(end, plainHead.length - skip, 30); k >= 2; k--) {
+          let same = true;
+          for (let i = 0; i < k && same; i++) same = !!plainHead[skip + i] && plainHead[skip + i] === tail[end - k + i];
+          if (same) return [head.slice(skip + k).join(' '), ...lines.slice(1)].join('\n').trim();
+        }
+      }
+    }
+    return String(after || '').trim();
+  }
+
+  /* A piece's words into its transcript: the live recording's own (the screen shows them), else straight into the
+     note (a recording stopped meanwhile, or one from before Wefty was last closed). */
+  async function deliver(row, words) {
+    let said = String(words || '').replace(/\r/g, '').trim();
+    if (/^\[?\s*silence\s*\]?\.?$/i.test(said)) said = '';
+    const live = !!session && session.key === row.session;
+    if (live) dropPreview(row.ends);
+    if (!said) return;
+    if (live) {
+      const before = text();
+      if (row.overlaps) said = withoutOverlap(before, said);
+      // (a piece ending mid-sentence: the next one's first words carry it on, in the same paragraph)
+      let carry = !!before.trim() && !ENDED.test(before.trim());
+      for (const para of said.split(/\n+/).map((p) => p.trim()).filter(Boolean)) {
+        heard(para, '', carry ? { join: true, asIs: true } : { fresh: true });
+        carry = false;
+      }
+      return;
+    }
+    // An earlier recording's late words for the note a new one is listening into now: they go into that recording's
+    // transcript, after what it started from (its saves write the whole transcript, so they'd be written over).
+    if (session && session.id === (retarget.get(row.note) || row.note)) {
+      const before = session.base.trim();
+      if (row.overlaps) said = withoutOverlap(before, said);
+      if (!said) return;
+      session.base = !before ? said : `${before}${ENDED.test(before) ? '\n\n' : ' '}${said}`;
+      session.words += wordCount(said);
+      session.fromWords += wordCount(said);  // (not this recording's own: the streak counts only those)
+      session.dirty = true;
+      saveSoon();
+      drawWords();
+      return;
+    }
+    await intoNote(row, said);
+  }
+
+  /* Words written down after their recording ended, added to the end of its note's transcript. Never into a locked
+     note (as plain words): a locked or deleted note's words go to a new note with its title. */
+  async function intoNote(row, said) {
+    let id = retarget.get(row.note) || row.note;
+    let note = V.data.notes.get(id);
+    if (!note || note._purge || note.deleted || note.locked) {
+      const locked = !!(note && note.locked && !note._purge && !note.deleted);
+      const title = locked ? `${row.title} (transcript)` : row.title;
+      const next = V.notes.blankNote({ folder_id: (note && note.folder_id) || null, title, body: join('', ''),
+        extra: { notetaker: { started: new Date().toISOString(), auto_title: '', engine: 'ai' } } });
+      await V.cloud.save('notes', next);
+      retarget.set(row.note, next.id);
+      if (id !== row.note) retarget.set(id, next.id);
+      V.toast(locked ? `"${titleShown(row.title)}" is locked, so the rest of its transcript goes in "${titleShown(title)}".`
+        : `"${titleShown(row.title)}" was deleted, so the rest of its transcript goes in a new note.`, { ms: 7000 });
+      id = next.id;
+      note = V.data.notes.get(id) || next;
+    }
+    const parts = split(note.body);
+    if (row.overlaps) said = withoutOverlap(parts.transcript, said);
+    if (!said) return;
+    const extra = { ...(note.extra || {}) };
+    const nt = { ...(extra.notetaker || {}) };
+    nt.words = (Number(nt.words) || 0) + wordCount(said);
+    extra.notetaker = nt;
+    const before = parts.transcript.trim();
+    const body = !before ? said : `${before}${ENDED.test(before) ? '\n\n' : ' '}${said}`;
+    await V.cloud.save('notes', { ...note, body: join(parts.above, body), extra });
+  }
+
+  /* The grey words the browser's speech recognition heard (beside the recorder), until Gemini's words for that time
+     are in. */
+  function dropPreview(until) {
+    if (!session || !session.heardSoFar) return;
+    session.heardSoFar = session.heardSoFar.filter((p) => p.at > until);
+    showPreview();
+  }
+  function showPreview() {
+    if (!session) return;
+    const so = [...(session.heardSoFar || []).map((p) => p.words), session.previewInterim || ''].join(' ').trim();
+    session.interim = so ? `hearing… ${so.length > 240 ? '…' + so.slice(-240) : so}` : '';
+    drawWords();
+  }
+
+  /* -- Stop waits for the last pieces ("Finishing the transcript...", with Skip) */
+  let finishWait = null;  // { id, key, resolve }
+
+  function finishTranscript(id, key) {
+    if (!(waitingSessions.get(key) > 0)) return Promise.resolve('done');
+    // (what last held it up may be over: the pump says again if not)
+    if (aiTrouble && ((aiTrouble.kind === 'offline' && navigator.onLine) || (aiTrouble.kind === 'nokey' && V.ai.has('gemini')))) aiTrouble = null;
+    if (aiTrouble && aiTrouble.kind !== 'busy') return Promise.resolve('later');
+    return new Promise((resolve) => {
+      finishWait = { id, key, resolve };
+      openLayer();
+      ui.problem = null;
+      ui.making = null;
+      draw();
+      pump(!aiTrouble).catch(() => {});  // (at once, unless Gemini was busy a moment ago: its wait goes on)
+    });
+  }
+
+  function settleFinish(how) {
+    const was = finishWait;
+    if (!was) return;
+    finishWait = null;
+    was.resolve(how);
+  }
+
+  /* The pieces waiting changed: the finishing screen counts down, and ends once they're all in (or can't be, now). */
+  function finishingMoved() {
+    if (!finishWait) return;
+    if (!(waitingSessions.get(finishWait.key) > 0)) { settleFinish('done'); return; }
+    if (aiTrouble && aiTrouble.kind !== 'busy') { settleFinish('later'); return; }
+    if (ui && !ui.problem && !ui.making) draw();
+  }
+
+  function drawFinishing() {
+    const { body, foot } = ui.parts;
+    const left = waitingSessions.get(finishWait.key) || 0;
+    V.clear(body, V.h('div.nt-making.nt-finishing', { role: 'status' }, V.h('div.spinner.big'),
+      V.h('h3', { text: 'Finishing the transcript…' }),
+      V.h('p.muted.nt-finishing-left', { text: `Gemini is writing down the last ${left === 1 ? 'part' : `${left} parts`} of the recording. Then the notes are made.` }),
+      aiTrouble && aiTrouble.words ? V.h('p.nt-finishing-trouble', { text: aiTrouble.words }) : null));
+    V.clear(foot, V.button('Skip: make notes now', { onClick: () => settleFinish('skip') }));
+  }
+
   /* -- the session: one listening, into one note */
 
   let session = null;   // { id, title, base, paragraphs, interim, state, ... }
@@ -400,7 +1031,9 @@ V.notetaker = (() => {
 
   const text = () => [session.base, ...session.paragraphs].filter((p) => p && p.trim()).join('\n\n');
 
-  function heard(words, who) {
+  /* Words heard into the transcript: a new paragraph after a pause (or `fresh`), else on the last one (`join`: always
+     there, AI listening's words carrying on a sentence the piece before ended in). `asIs`: its first letter as it is. */
+  function heard(words, who, { fresh = false, join: onLast = false, asIs = false } = {}) {
     if (!session) return;
     const clean = String(words || '').replace(/\s+/g, ' ').trim();
     if (!clean) return;
@@ -409,9 +1042,9 @@ V.notetaker = (() => {
     const now = Date.now();
     const last = session.paragraphs.length - 1;
     const speaker = session.source === 'both' && WHO[who] ? who : '';  // "You:" / "Them:" when both are heard
-    if (last < 0 || now - session.lastWords > PARAGRAPH_GAP || session.paragraphs[last].length > PARAGRAPH_MOST
-      || speaker !== session.lastWho) {
-      const start = clean.charAt(0).toUpperCase() + clean.slice(1);
+    if (!(onLast && last >= 0) && (fresh || last < 0 || now - session.lastWords > PARAGRAPH_GAP
+      || session.paragraphs[last].length > PARAGRAPH_MOST || speaker !== session.lastWho)) {
+      const start = asIs ? clean : clean.charAt(0).toUpperCase() + clean.slice(1);
       session.paragraphs.push(speaker ? `${WHO[speaker]}: ${start}` : start);
     } else {
       session.paragraphs[last] += ' ' + clean;
@@ -518,6 +1151,21 @@ V.notetaker = (() => {
       setState(session.state);
     },
     fail: (words) => { if (session) stopListening({ make: false, problem: words }).catch(V.problem); },
+    // AI listening: a piece recorded (kept, then written down by Gemini), and the browser's own words meanwhile, in grey
+    // (never kept: a failing preview just stops, the recorder carries on)
+    chunk: (got) => (session ? keepPiece(session, got) : Promise.resolve()),
+    preview: {
+      final: (words) => {
+        if (!session) return;
+        session.heardSoFar = (session.heardSoFar || []).concat({ at: Date.now(), words: String(words).trim() }).slice(-40);
+        session.previewInterim = '';
+        showPreview();
+      },
+      interim: (words) => { if (session) { session.previewInterim = words; showPreview(); } },
+      trouble: () => {},
+      waiting: () => {},
+      fail: () => { if (session) { session.previewInterim = ''; showPreview(); } },
+    },
   });
 
   /* A new note for the note-taker, in the folder picked. */
@@ -552,10 +1200,14 @@ V.notetaker = (() => {
       interim: '', state: 'starting', engine: how.kind, words: wordCount(parts.transcript), lastWords: 0,
       aboveLength: parts.above.length, part: (note.extra.notetaker && note.extra.notetaker.part) || 1,
       counted: ((note.extra.notetaker && note.extra.notetaker.seconds) || 0) * 1000, runningSince: 0, dirty: false,
-      trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '' };
+      trouble: null, waiting: false, wasAway: false, problem: '', source, lastWho: '',
+      key: (window.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+      seq: 0, preview: !!how.preview, heardSoFar: [], previewInterim: '' };
     session.from = session.counted;     // (what this recording adds: the streak's minutes, js/streak.js)
     session.fromWords = session.words;
-    session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source) : webHearing(handlers(), { background: HEARS_HIDDEN });
+    session.hearing = how.kind === 'pc' ? pcHearing(handlers(), source)
+      : how.kind === 'ai' ? recorderHearing(handlers(), { preview: how.preview })
+        : webHearing(handlers(), { background: HEARS_HIDDEN });
     draw();
     told();
     session.saver = setInterval(() => { if (session && session.dirty) save().catch(V.problem); }, SAVE_EVERY);
@@ -603,10 +1255,33 @@ V.notetaker = (() => {
     if (V.streak && was.words > was.fromWords) {
       V.streak.recorded(Math.round((was.counted + (was.runningSince ? Date.now() - was.runningSince : 0) - was.from) / 1000));
     }
-    const id = was.id;
-    const anything = !!text().trim();
+    let id = was.id;
+    let anything = !!text().trim();
     session = null;
     told();
+    if (was.engine === 'ai') {
+      // AI listening: the last pieces are written down first (a screen says so, with Skip); the notes after.
+      await recount().catch(() => {});
+      kick();
+      if (make && !problem && waitingSessions.get(was.key) > 0) {
+        const how = await finishTranscript(id, was.key);
+        id = retarget.get(id) || id;
+        anything = !!split((V.data.notes.get(id) || {}).body).transcript.trim();
+        if (how === 'later' || (how === 'skip' && !anything)) {
+          // (offline, or no Gemini key: the notes are made by themselves once the transcript is written down)
+          await flagWants(id, wantsCards()).catch(() => {});
+          if (ui && !ui.making && !ui.problem) closeLayer();
+          openNote(id);
+          V.toast(aiTrouble && aiTrouble.kind === 'nokey' ? aiTrouble.words
+            : 'The rest of the recording is kept on this device and written down when Gemini can be reached. The notes are made by themselves after.',
+          { ms: 9000 });
+          return id;
+        }
+        if (how === 'skip') V.toast('The rest of the transcript is added to the note when it\'s written down.', { ms: 6000 });
+      } else if (!anything) {
+        anything = waitingSessions.get(was.key) > 0;
+      }
+    }
     if (problem) {
       if (ui && !shown) V.toast(problem, { kind: 'err', ms: 9000, action: 'Open', onAction: () => openNote(id) });
       else showProblem(problem, id, { tryAgain: false, stay: !shown });
@@ -870,7 +1545,8 @@ V.notetaker = (() => {
   function firstWanted() {
     for (const note of V.data.notes.values()) {
       // (not one being written right now, and nothing to make from an empty transcript)
-      if (wantsOf(note) && !inFlight.has(note.id) && !((resting.get(note.id) || 0) > Date.now())
+      // (nor one whose recording is still being written down: AI listening's pieces go in first)
+      if (wantsOf(note) && !inFlight.has(note.id) && !((resting.get(note.id) || 0) > Date.now()) && !waitingNotes.has(note.id)
         && split(note.body).transcript.trim()) return note;
     }
     return null;
@@ -1082,6 +1758,7 @@ V.notetaker = (() => {
     if (!ui) return;
     const { layer } = ui;
     ui = null;
+    settleFinish('later');  // (the finishing screen closed: the notes are made by themselves once it's all written down)
     cover(false);
     document.removeEventListener('keydown', escape, true);
     layer.classList.remove('shown');
@@ -1090,7 +1767,7 @@ V.notetaker = (() => {
   }
 
   /* Its live screen is showing (not put away, and not the writing or problem screen of another note meanwhile). */
-  const live = () => !!(session && ui && !ui.making && !ui.problem);
+  const live = () => !!(session && ui && !ui.making && !ui.problem && !finishWait);
 
   /* Hide: the screen goes, the listening doesn't (the bar at the top says so, and brings it back). Not while it's
      stopping: the notes' screen comes next. `focus` false: a tab was tapped, and the keyboard goes where it leads. */
@@ -1165,7 +1842,7 @@ V.notetaker = (() => {
     const where = ui && ui.layer.dataset.tabs;
     const how = where === 'below' ? 'Tap Hide, or a tab below, to use the rest of Wefty'
       : where === 'beside' ? 'Tap Hide, or a tab on the left, to use the rest of Wefty' : 'Tap Hide to use the rest of Wefty';
-    if (engine !== 'web' || ANDROID) return `${how}: it keeps listening.`;
+    if (!inBrowser(engine) || ANDROID) return `${how}: it keeps listening.`;
     return HEARS_HIDDEN ? `${how}: it keeps listening, in other tabs and apps too (keep this tab open).`
       : `${how}: it keeps listening. It pauses if Wefty leaves the screen and carries on when Wefty is back.`;
   }
@@ -1292,7 +1969,34 @@ V.notetaker = (() => {
 
   const hearsWith = (kind) => (kind === 'pc'
     ? 'This PC turns the talk into words itself, with its own speech recognition. Nothing is sent anywhere while it listens.'
-    : `${V.device === 'phone' ? 'Your phone\'s' : 'The browser\'s'} speech service (Google) turns the talk into words.`);
+    : kind === 'ai' ? 'AI listening: the recording goes to Google\'s Gemini (your free key), which writes down what the '
+      + 'teacher says, about half a minute behind. The sound is deleted from this device once it\'s written down, and '
+      + 'never goes to your cloud.'
+      : `${V.device === 'phone' ? 'Your phone\'s' : 'The browser\'s'} speech service (Google) turns the talk into words.`);
+  // The phone or Chromebook's browser hears (its speech recognition, or AI listening's recorder), not the PC's Python.
+  const inBrowser = (kind) => kind === 'web' || kind === 'ai';
+
+  /* "AI listening" as a switch (the start screen, Settings > AI): this device's choice, on unless switched off. */
+  function aiSwitchBox(onChange) {
+    const box = V.h('input.switch', { type: 'checkbox', checked: aiPicked(), 'aria-label': 'AI listening',
+      onchange: () => { setAiPicked(box.checked); if (onChange) onChange(box.checked); } });
+    return box;
+  }
+  const AI_HINT = 'Better in noisy rooms: sends the recording to Google\'s Gemini, which writes down what the teacher says.';
+
+  /* Settings > AI's row (phones and Chromebooks only: the PC listens with Python), once the free Gemini is set up
+     (without it there's nothing to switch: the browser's speech service hears). */
+  function aiSwitch(ui) {
+    if (!aiCan() || !V.ai.has('gemini')) return null;
+    const box = aiSwitchBox((on) => {
+      V.toast(on ? 'AI listening is on: Gemini writes down your recordings.'
+        : 'AI listening is off: the browser\'s speech service writes down your recordings.', { ms: 5000 });
+      if (ui && ui.draw) ui.draw();
+    });
+    const line = ui.line('AI listening', `${AI_HINT} The sound is deleted once it's written down. Just for this device.`, box);
+    line.classList.add('ai-listen-switch');
+    return line;
+  }
 
   function folderChoice(picked) {
     const folders = V.notes.folders();
@@ -1323,6 +2027,10 @@ V.notetaker = (() => {
     ready.folderEl = folder;
     const remember = () => { if (name) ready.name = name.value; if (folder) ready.folderId = folder.value; };
     const choice = how.kind === 'pc' && pcSoundKnown() ? soundChoice(remember) : null;
+    // AI listening (a phone or Chromebook with the free Gemini set up): on unless switched off here.
+    const aiRow = aiCan() && V.ai.has('gemini') ? V.h('label.switch-row.nt-ai', {},
+      V.h('span.switch-text', {}, V.h('strong', { text: 'AI listening' }), V.h('span', { text: `${AI_HINT} Free.` })),
+      aiSwitchBox(() => { remember(); draw(); })) : null;
     const pcSound = chosenSource(ready) !== 'mic';
     V.clear(body, V.h('div.nt-ready', {},
       V.h('div.nt-hero', {}, icon('listen', 'nt-hero-icon')),
@@ -1331,6 +2039,7 @@ V.notetaker = (() => {
       name ? V.h('label.label', {}, 'What is it? (optional)', name) : null,
       folder ? V.h('label.label', {}, 'Folder', folder) : null,
       choice,
+      aiRow,
       V.h('label.switch-row.nt-cards', {}, V.h('span.switch-text', {}, V.h('strong', { text: 'Also make flash cards' }),
         V.h('span', { text: 'For the Study button: question :: answer.' })), cards),
       how.kind ? null : V.h('p.nt-warn', {}, V.icon('alert'), V.h('span', { text: how.why })),
@@ -1342,7 +2051,7 @@ V.notetaker = (() => {
           V.h('span', { text: 'To make notes, set up Claude in Settings > AI. Listening works without it.' })),
       V.h('ul.nt-facts', {},
         how.kind ? V.h('li', { text: hearsWith(how.kind) }) : null,
-        how.kind === 'web' ? V.h('li', { text: ANDROID
+        inBrowser(how.kind) ? V.h('li', { text: ANDROID
           ? `You can use the rest of Wefty while it listens, but keep Wefty open${navigator.wakeLock ? ' (the screen stays on by itself)'
             : ', with the screen on'}: ${phoneName()} can't hear while Wefty is in the background.`
           : HEARS_HIDDEN ? 'You can use the rest of Wefty, other tabs and other apps while it listens. Keep this tab open.'
@@ -1351,7 +2060,8 @@ V.notetaker = (() => {
           : how.kind ? V.h('li', { text: 'You can use the rest of Wefty while it listens.' }) : null,
         how.kind === 'web' ? V.h('li', { text: 'In a quiet room, hold the phone nearer the speaker. The browser sets '
           + 'how sensitive the mic is here; the note-taker on your PC can boost soft voices.' }) : null,
-        how.kind === 'web' ? V.h('li', { text: 'To take notes from a video or class, use Wefty on your PC.' }) : null,
+        how.kind === 'ai' ? V.h('li', { text: 'Put the phone where it hears the teacher best, nearer the front if you can.' }) : null,
+        inBrowser(how.kind) ? V.h('li', { text: 'To take notes from a video or class, use Wefty on your PC.' }) : null,
         V.h('li.nt-consent', { text: pcSound ? CONSENT_WORDS : 'Ask people before you record them.' }))));
     V.clear(foot,
       hasTranscript ? V.button('Make notes now', { icon: 'check', onClick: () => makeNotes(note.id) }) : null,
@@ -1359,6 +2069,10 @@ V.notetaker = (() => {
         onClick: async () => {
           const source = chosenSource(ui.ready);
           if (source !== 'mic' && !(await consentFirst())) return;
+          // (AI listening is on here, and the free Gemini's key not looked for yet: a moment to know, at most 3 s)
+          if (aiCan() && aiPicked() && (!V.ai.state() || V.ai.state().failed)) {
+            await Promise.race([V.ai.check().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
+          }
           if (!ui || ui.ready !== ready) return;  // (the screen went meanwhile)
           const folderId = folder ? folder.value : null;
           if (folderId) { try { localStorage.setItem(FOLDER, folderId); } catch (e) { /* private browsing */ } }
@@ -1377,12 +2091,15 @@ V.notetaker = (() => {
     if (!ui || !ui.statusEl || !session) return;
     const s = session;
     const words = s.state === 'starting' ? 'Starting...' : s.state === 'paused' ? 'Paused' : s.state === 'stopping' ? 'Saving...'
-      : s.waiting ? 'Waiting for Wefty to be on the screen' : 'Listening';
+      : s.waiting ? 'Waiting for Wefty to be on the screen'
+        : s.engine === 'ai' && !s.preview ? 'Listening… words appear every half minute' : 'Listening';
     ui.statusEl.dataset.state = s.state === 'listening' && !s.waiting && !s.trouble ? 'on' : s.state === 'paused' ? 'paused' : 'wait';
     ui.statusEl.querySelector('.nt-state-word').textContent = words;
     ui.statusEl.querySelector('.nt-count').textContent = s.words ? `${s.words} word${s.words === 1 ? '' : 's'}` : '';
-    ui.troubleEl.hidden = !(s.trouble || s.waiting || s.wasAway);
-    ui.troubleEl.querySelector('span').textContent = s.trouble
+    // (AI listening's pieces waiting for Gemini: said, calmly; the recording goes on)
+    const behind = s.engine === 'ai' && aiTrouble && waitingSessions.get(s.key) > 0 ? aiTrouble.words : '';
+    ui.troubleEl.hidden = !(s.trouble || s.waiting || s.wasAway || behind);
+    ui.troubleEl.querySelector('span').textContent = s.trouble || behind
       || (s.waiting ? 'Wefty stopped listening in the background. It carries on when Wefty is back on the screen.'
         : 'Wefty was in the background for a moment and missed what was said then. Keep Wefty on the screen while it listens.');
   }
@@ -1431,9 +2148,11 @@ V.notetaker = (() => {
     ui.statusEl = V.h('div.nt-state', { role: 'status' }, V.h('span.nt-dot', { 'aria-hidden': 'true' }),
       V.h('span.nt-state-word'), V.h('span.nt-count.num'));
     ui.troubleEl = V.h('p.nt-warn.nt-trouble', { hidden: true }, V.icon('alert'), V.h('span'));
-    ui.emptyEl = V.h('p.nt-empty', { text: s.base ? 'Carrying on the transcript in this note. New words show here as they\'re heard.'
-      : 'Words show here as they\'re heard.' });
-    ui.interimEl = V.h('span.nt-interim');
+    ui.emptyEl = V.h('p.nt-empty', { text: s.engine === 'ai' && !s.preview
+      ? 'Listening… the words appear here about every half minute, as Gemini writes them down.'
+      : s.base ? 'Carrying on the transcript in this note. New words show here as they\'re heard.'
+        : 'Words show here as they\'re heard.' });
+    ui.interimEl = V.h(s.engine === 'ai' ? 'span.nt-interim.nt-hearing' : 'span.nt-interim');
     ui.wordsEl = V.h('div.nt-words', { 'aria-live': 'off' }, ui.emptyEl);
     ui.shown = 0;
     // Hearing the PC's sound: a bar that says so the whole time, with Stop (the tray says so too). It says
@@ -1445,7 +2164,7 @@ V.notetaker = (() => {
     // Out of sight: a phone can't hear (said where it's seen, not in the small print); Chrome on a Chromebook or a
     // computer carries on (HEARS_HIDDEN); other browsers pause (browseWords).
     V.clear(body, V.h('div.nt-live', {}, onAir, ui.statusEl, ui.troubleEl, ui.wordsEl,
-      s.engine === 'web' && ANDROID ? V.h('p.nt-bg', {}, V.icon('phone'), V.h('span', {
+      inBrowser(s.engine) && ANDROID ? V.h('p.nt-bg', {}, V.icon('phone'), V.h('span', {
         text: `Keep Wefty open: ${phoneName()} can't hear while Wefty is in the background (another app, or the screen `
           + 'locked). It carries on when Wefty is back.' })) : null,
       V.h('p.nt-small', { text: `${hearsWith(s.engine)} ${browseWords(s.engine)}` })));
@@ -1535,6 +2254,7 @@ V.notetaker = (() => {
     hideButton.disabled = stop.disabled = on && session.state === 'stopping';
     if (ui.problem) drawProblem();
     else if (ui.making) drawMaking();
+    else if (finishWait) drawFinishing();
     else if (session) drawLive();
     else if (ui.ready) drawReady();
   }
@@ -1566,6 +2286,13 @@ V.notetaker = (() => {
   // A note flagged for auto-making is tried whenever the network might be back (online, the page shown or focused,
   // the app coming to the front) and on the gentle timer.
   window.addEventListener('online', () => autoMake().catch(() => {}));
+  // AI listening's pieces waiting (offline, Gemini busy, Wefty closed before they were written down): written down
+  // whenever it may work now.
+  window.addEventListener('online', () => { if (aiTrouble && aiTrouble.kind === 'offline') { clearTimeout(pumpTimer); pumpTimer = null; } kick(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
+  V.on('back', () => kick());
+  V.on('ai', () => { if (aiTrouble && aiTrouble.kind === 'nokey') aiTrouble = null; kick(); });
+  V.on('data', (table) => { if (table === 'notes' && !piecesKnown) kick(); });
   window.addEventListener('focus', () => autoMake().catch(() => {}));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) autoMake().catch(() => {}); });
   V.on('back', () => autoMake().catch(() => {}));
@@ -1613,5 +2340,9 @@ V.notetaker = (() => {
   // listeningTo: the note it's writing into now (null when it isn't listening); V.editor.open sends that one here.
   return { open, sheetEntry, makeNotes, split, join, tidy, instructions, deadline, engine, listening: () => !!session,
     listeningTo: () => (session ? session.id : null), stopQuietly,
-    webHearing, rotate, slowness, iosWhyNot };  // (rotate, slowness: tests shorten them)
+    webHearing, rotate, slowness, iosWhyNot,  // (rotate, slowness: tests shorten them)
+    // AI listening (1.19.5): Settings > AI's switch, and what tests look at (aiChunk, restartGaps: tests shorten them)
+    aiSwitch, aiWanted, aiPicked, setAiPicked, aiChunk, restartGaps, AI_PROMPT, withoutOverlap, newPart,
+    hearing: () => (session ? session.hearing : null),
+    waiting: () => ({ notes: Object.fromEntries(waitingNotes), sessions: Object.fromEntries(waitingSessions), trouble: aiTrouble }) };
 })();

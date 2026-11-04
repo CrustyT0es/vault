@@ -18,7 +18,12 @@ const V = (window.V = window.V || {});
 V.theme = (() => {
   const KEY = 'vault-theme';
   const BLACK = 'vault-black';
-  // --bg, for the phone's status bar (the theme-color metas): light, dark, and dark with Pure black
+  // --bg, for the phone's status bar (the theme-color metas): light, dark, and dark with Pure black. (Android's
+  // navigation bar at the bottom of an installed app is another matter: since Chrome 153 it takes the manifest's
+  // theme_color, which Chrome copies into the installed app and nothing on the page can change. A manifest has one
+  // colour for both themes, so manifest.webmanifest's is the dark tab bar's, --surface #13131f, and its
+  // background_color, the launch screen's, the dark --bg: a white bar under a dark app glares, a dark one under a
+  // light app doesn't.)
   const BARS = { light: '#f5f6f8', dark: '#0d0d17', black: '#000000' };
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let system = /^(light|dark)$/.test(window.VAULT_SCHEME || '') ? window.VAULT_SCHEME : '';

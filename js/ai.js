@@ -1393,7 +1393,7 @@ V.ai = (() => {
      model's (none took the key), 'offline' (no answer: no internet, a network that blocks Google), else 'bad' (none
      offered). */
   async function geminiRequest(sending, { system, contents, maxTokens = MAX_TOKENS, signal, wait = 0, onText = null,
-    use = 'chat', tier = 'fast', tools = null, signedBy = null } = {}) {
+    use = 'chat', tier = 'fast', tools = null, signedBy = null, alone = false } = {}) {
     if (signal && signal.aborted) throw new AiError('stopped', 'Stopped.');
     const notes = use === 'notes';
     const first = wait || (notes ? waits.notesFirst : waits.first);
@@ -1526,7 +1526,9 @@ V.ai = (() => {
         }
         if (learn && !winner) refill();  // (models ListModels found meanwhile, after the rest)
         const live = runs.filter((r) => !r.done);
-        const canStart = !winner && !held && more && next < order.length && live.length < AT_ONCE
+        // (`alone`: one request at a time, never a second copy racing it: the note-taker's AI listening, 1.19.5, sends
+        // a recording every half minute and each copy counts against the free daily limit)
+        const canStart = !winner && !held && more && next < order.length && live.length < (alone ? 1 : AT_ONCE)
           && !(signal && signal.aborted);
         // The next model: at once when none is still trying or the newest one asked has already failed, else once the
         // newest one's head start has run out.
@@ -1568,7 +1570,8 @@ V.ai = (() => {
     if (firstOf('refused')) throw new AiError('key', keyWords(firstOf('refused').why, sending));
     if (firstOf('offline')) throw new AiError('offline', navigator.onLine ? WORDS.geminiOffline : WORDS.away);
     const said = failed[0] && failed[0].why && failed[0].why.message;
-    throw new AiError('bad', `Google's Gemini models aren't available for this key right now${said ? ` (${said})` : ''}. Try again later.`);
+    throw Object.assign(new AiError('bad', `Google's Gemini models aren't available for this key right now${said ? ` (${said})` : ''}. Try again later.`),
+      { why: 'unavailable' });
   }
 
   const megabytes = (size) => Math.max(1, Math.round(size / (1000 * 1000)));
@@ -1598,11 +1601,11 @@ V.ai = (() => {
      'busy' (why: 'quota'), so it waits and goes again later like a busy Claude. `tier`: 'fast' (Gemini Fast, the
      quickest here) or 'smart' (Gemini Smart, Flash first). */
   async function callGemini({ system, contents, maxTokens = MAX_TOKENS, signal, onText = null, use = 'chat',
-    tier = 'fast', tools = null, signedBy = null } = {}) {
+    tier = 'fast', tools = null, signedBy = null, alone = false } = {}) {
     const sending = await getGeminiKey();
     let answer;
     try {
-      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use, tools, signedBy,
+      answer = await geminiRequest(sending, { system, contents, maxTokens, signal, onText, use, tools, signedBy, alone,
         tier: tier === 'smart' ? 'smart' : 'fast' });
     } catch (error) {
       if (error.kind === 'key') geminiKey = null;  // forgotten, so a key set up again elsewhere is read next time
@@ -2349,13 +2352,16 @@ V.ai = (() => {
       parts: [
         tag(ui.card('Gemini', geminiKeyLine(ui)), 'free'),
         tag(ui.card('Claude', claudeSwitch(ui), on ? month : null, on && !keySet ? claudeKey : null), 'paid'),
-        ui.card('Note-taker', notesLine(ui)),
+        ui.card('Note-taker', notesLine(ui), V.notetaker && V.notetaker.aiSwitch ? V.notetaker.aiSwitch(ui) : null),
         ui.card('Test me', testMeSwitch(ui)),
         V.h('p.hint.set-foot.ai-privacy', { text: on
           ? 'Gemini (by Google) and Claude (by Anthropic) only read what you send them: your messages in Chat, and a '
-            + 'transcript when you make notes. Neither hears the sound itself. Gemini is free, so it isn\'t counted here.'
+            + 'transcript when you make notes. Claude never hears the sound itself; Gemini does only with AI listening on '
+            + '(the recording, half a minute at a time, deleted from this device once it\'s written down). Gemini is free, '
+            + 'so it isn\'t counted here.'
           : 'Gemini (by Google) only reads what you send it: your messages in Chat, and a transcript when you make notes. It '
-            + 'never hears the sound itself, and it\'s free.' }),
+            + 'hears the sound itself only with AI listening on (the recording, half a minute at a time, deleted from this '
+            + 'device once it\'s written down), and it\'s free.' }),
       ],
       more,
       says: says.join(' · '),

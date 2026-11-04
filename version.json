@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.4",
+ "version": "1.19.5",
  "min_shell": 1,
  "notes": [
+  "The note-taker hears a noisy class much better: with the free Gemini set up, AI listening records the room and writes down what the teacher says about every half minute, ignoring the groups chatting around you (switch it off on the note-taker's start screen or in Settings > AI). Without it, fewer words get dropped.",
   "Small fixes to Today on small phones: a test's Test me and Study sit under its numbers when there isn't room beside them, so Today stays short.",
   "Test me is easy to find: tap Test me on Today, beside each deck in Flash cards, in a note's tools or \u22ef, or on a folder or test. With AI on, the wrong answers to pick from are trickier, and a typed answer with the right idea counts (Settings > AI to turn it off).",
   "Today is calmer: the week is just the strip at the top. Tap a day to see its reminders and to-dos right there, and tick, move or change them from the same spot.",
@@ -11,7 +12,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.4-4cdfaf8dca69",
+ "build": "1.19.5-8d51615034c6",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -134,8 +135,8 @@
    "size": 58724
   },
   "js/ai.js": {
-   "sha256": "347b3770e91359115e42994fa17f960c5d7c21f00702a329ba32df314929f785",
-   "size": 148534
+   "sha256": "89b9fb20707522c56002aefb5d8012dab38e4fd8acffc2db4ed2a36187199148",
+   "size": 149210
   },
   "js/aicards.js": {
    "sha256": "acfd76f4daab52359356ed4e598ec8ad78d9b20d164a83f7458d15308560e9e0",
@@ -242,8 +243,8 @@
    "size": 84033
   },
   "js/notetaker.js": {
-   "sha256": "7e06e19da771d0a3eea5c352ea80ec03c55bd383ef657fd686e03d2b6b74a856",
-   "size": 90020
+   "sha256": "7fdc2c9572fb8d9590c3d279e3bf48b062101cd9f85654ad32b16ab2e5e2c54c",
+   "size": 129813
   },
   "js/organise.js": {
    "sha256": "171ef0f7ff533105e16e4cc8d06af6f7dbfae17adf2c3d9b919ed4c7597439f8",
@@ -306,8 +307,8 @@
    "size": 30971
   },
   "js/theme.js": {
-   "sha256": "2f2efdacab9e0982aef08241c39f639fa550f1615cc8306e1d7d3b28c147313c",
-   "size": 3935
+   "sha256": "c01b8b84be490d01341ded95c7ec6b26b1d393e0fcf067d1593e63ec48a8256e",
+   "size": 4422
   },
   "js/today.js": {
    "sha256": "9f069d7d1d67456ea53f71e1fa5f710a4540621f3c721e7e6f4fd622b8ae71b5",
@@ -318,7 +319,7 @@
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "8a280d5b849e161b7951eef329036e0490bafae4505c9c8ea0049f33c087fc6d",
+   "sha256": "b64e4f3b50e56351bb2aa443e42fe1db0dff54259eaca8dd354f7b8b640be5ec",
    "size": 71282
   },
   "js/week.js": {
@@ -330,7 +331,7 @@
    "size": 41994
   },
   "manifest.webmanifest": {
-   "sha256": "bdb192e238ac583d869d4b4b489530220bacf41d51e6839dc0bf1b0040b4bcb8",
+   "sha256": "b98bc48635bce6f1686f928c3b2d75c3245e2200551ad76b3d192c6ea73aef04",
    "size": 1858
   },
   "styles.css": {
@@ -338,7 +339,7 @@
    "size": 311795
   },
   "sw.js": {
-   "sha256": "cab98665c589a8079548298177db39bdc9b72305b0e4872871d715e8d8f95c87",
+   "sha256": "5cecde00daf043b93203a0d5d5a511d77f00bb013b407c95967bdf5472dcd522",
    "size": 12430
   },
   "vendor/LICENSE-supabase-js.txt": {
