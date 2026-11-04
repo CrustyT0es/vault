@@ -2516,6 +2516,20 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .study-progress { margin: 0; min-width: 0; color: var(--text-2); font: 600 14px/20px var(--font); font-variant-numeric: tabular-nums; }
 .study-aside { flex: none; color: var(--muted); font: 500 13px/18px var(--font); font-variant-numeric: tabular-nums; }
 .study-bar { display: block; flex: none; height: 4px; }
+/* the topic line (1.19.7): the note the card showing is from ("Biology · Photosynthesis", one line, cut short with
+   "…"), and Skip topic beside it */
+.study-topic { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; }
+.study-topic[hidden], .study-skip[hidden], .study.ended .study-topic { display: none; }
+.study-topic-name { flex: 1; display: flex; min-width: 0; margin: 0; overflow: hidden; color: var(--text); font: 600 15px/22px var(--font); }
+.study-topic-name > :is(.study-topic-folder, .study-topic-title) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.study-topic-folder { flex: none; max-width: 45%; color: var(--muted); font-weight: 500; }
+.study-topic-title { flex: 0 1 auto; min-width: 4em; }
+.study-topic-folder:empty { display: none; }
+.btn.study-skip { flex: none; gap: 6px; min-height: 32px; padding: 0 10px; color: var(--accent-ink); font: 600 14px/20px var(--font); white-space: nowrap; }
+.btn.study-skip .icon { width: 16px; height: 16px; }
+.study-skip-key { display: none; }
+@media (pointer: coarse) { .btn.study-skip { min-height: 44px; margin-right: -10px; } }
+@media (hover: hover) and (pointer: fine) { .study-skip-key { display: inline-block; } }
 .study-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 20px; }
 .study-foot { flex: none; padding: 0 20px calc(16px + var(--safe-bottom)); }
 .study-foot:empty { display: none; }
@@ -2551,7 +2565,33 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 }
 
 /* the three answers: Still learning, Next, I know it (the screen's main button), all the same size */
-.study-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+/* Back (1.19.7): beside the answers when the row has room for four (measured on the row itself, so bigger text counts),
+   else under Next on a slim row of its own, so the answers never get squeezed; it never moves, and is off on the
+   first card */
+.study-foot { container-type: inline-size; }
+.study-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "still next know" ". back ."; gap: 10px; }
+.study-actions > .still { grid-area: still; }
+.study-actions > .skip { grid-area: next; }
+.study-actions > .know { grid-area: know; }
+.btn.study-back {
+  grid-area: back; gap: 6px; min-height: 44px; min-width: 0; margin-top: -4px; padding: 0 6px; border-radius: var(--r-lg);
+  background: transparent; border-color: transparent; color: var(--text-2); font: 600 14px/18px var(--font); white-space: nowrap;
+}
+.btn.study-back .icon { width: 18px; height: 18px; }
+/* (a narrow row, as on a 320 px phone with bigger text: a little less padding, so "Still learning" keeps whole words) */
+@container (max-width: 299.98px) { .study-actions { gap: 8px; } .btn.study-btn { padding-inline: 2px; } }
+@container (min-width: 300px) {
+  .study-actions { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); grid-template-areas: "back still next know"; gap: 8px; }
+  .btn.study-back { flex-direction: column; gap: 4px; min-height: 72px; margin-top: 0; padding: 10px 2px; border-color: var(--line-strong); font-size: 12px; line-height: 16px; }
+  .btn.study-back .icon { width: 22px; height: 22px; }
+}
+@container (min-width: 440px) { .study-actions { grid-template-columns: 60px repeat(3, minmax(0, 1fr)); gap: 10px; } }
+.btn.study-back:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.btn.study-back:disabled { opacity: .4; cursor: default; }
+/* the answer given before, on a card Back brought back */
+.btn.study-btn.was { box-shadow: 0 0 0 2px var(--accent); }
+.flash-side.flash-was { color: var(--accent-ink); }
+@media (forced-colors: active) { .btn.study-btn.was { outline: 2px solid Highlight; outline-offset: 2px; } }
 .btn.study-btn {
   flex-direction: column; gap: 4px; min-height: 72px; padding: 10px 6px; border-radius: var(--r-lg);
   font: 600 15px/19px var(--font); white-space: normal; text-align: center; overflow-wrap: anywhere;
@@ -2573,6 +2613,8 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .study-end h3 { margin: 0; font: 600 24px/30px var(--font-display); letter-spacing: -.01em; }
 .study-end p { margin: 0; max-width: 32ch; color: var(--text-2); font: 500 16px/24px var(--font); overflow-wrap: anywhere; }
 .study-end .study-end-sum { color: var(--text); font-weight: 600; }
+.btn.study-end-back { margin-top: 6px; gap: 6px; color: var(--text-2); }
+.btn.study-end-back .icon { width: 18px; height: 18px; }
 .study-end-go { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .study-end-go.one { grid-template-columns: minmax(0, 1fr); }
 .study-end-go .btn { min-height: 52px; white-space: normal; text-align: center; }
@@ -2833,6 +2875,14 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .learn-option.wrong { border-color: var(--danger); background: var(--danger-soft); }
 .learn-option.wrong .learn-key { border-color: var(--danger); color: var(--danger); }
 .learn-option.faded { opacity: .5; }
+/* 1.19.7: Back brought this question back: the answer given before is outlined, and said above the choices */
+.learn-option.was { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.learn-option.was .learn-key { border-color: var(--accent); color: var(--accent-ink); }
+.learn-was { margin: 0; color: var(--text-2); font: 500 14px/20px var(--font); overflow-wrap: anywhere; }
+.learn-nav { display: flex; align-items: center; min-height: 48px; padding-top: 4px; }
+.btn.learn-back { gap: 6px; min-height: 44px; padding: 0 12px 0 8px; margin-left: -8px; }
+.btn.learn-back .icon { width: 18px; height: 18px; }
+@media (forced-colors: active) { .learn-option.was { outline: 2px solid Highlight; } }
 .learn-type { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .learn-type .btn { min-height: 48px; }
 .learn-input { font-size: 16px; }  /* (16 px: an iPhone zooms the page into a smaller box as it's typed in) */

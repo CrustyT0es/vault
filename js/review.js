@@ -312,6 +312,15 @@ V.review = (() => {
     return after;
   }
 
+  /* A card's progress put back as it was (1.19.7: Back to a card answered in this go, so a new answer replaces the
+     first, never adds to it). `value` undefined: a card never studied before (its saved progress is dropped). */
+  function setState(card, value) {
+    if (!pending.has(card.note)) pending.set(card.note, {});
+    pending.get(card.note)[card.key] = value;
+    version++;
+    if (!timer) timer = setTimeout(() => { timer = null; flush(); }, timing.every);
+  }
+
   /* Everything answered goes into its note: one save per note. */
   function flush() {
     clearTimeout(timer);
@@ -537,12 +546,30 @@ V.review = (() => {
   const SHAPES = {  // (line icons on the same 24 grid as util.js's)
     again: '<path d="M4.5 12a7.5 7.5 0 1 0 2.3-5.4L4.5 8.8"/><path d="M4.5 4.5v4.3h4.3"/>',
     skip: '<path d="M5 12h13.5"/><path d="m13 6.5 5.5 5.5-5.5 5.5"/>',
+    back: '<path d="M19 12H5.5"/><path d="m11 6.5-5.5 5.5 5.5 5.5"/>',
+    skipTopic: '<path d="m5 6.5 5.5 5.5L5 17.5"/><path d="m12 6.5 5.5 5.5-5.5 5.5"/>',
   };
   const shape = (name) => { const span = V.icon(''); span.firstChild.innerHTML = SHAPES[name]; return span; };
   const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
   const fineMouse = () => !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
 
   let shown = null;  // the study screen open now (one at a time)
+
+  /* What a card is about (1.19.7): its note's title and the folder it's in, for the study screen's topic line. */
+  function topicOf(card) {
+    const row = V.data.notes.get(card.note);
+    const folder = row ? liveFolder(row.folder_id) : null;
+    return { note: card.note, title: row ? V.noteTitle(row) : 'This note', folder: folder ? folder.name : '' };
+  }
+
+  /* A toast with Undo; returns a function that takes it away (once something else has happened, Undo would undo the
+     wrong thing). */
+  function undoToast(text, onUndo) {
+    V.toast(text, { action: 'Undo', onAction: onUndo, ms: 6000 });
+    const all = document.querySelectorAll('#toasts > .toast');
+    const el = all[all.length - 1];
+    return () => { if (el && el.isConnected && !el.classList.contains('leaving')) { el.classList.add('leaving'); setTimeout(() => el.remove(), 200); } };
+  }
 
   /* The study screen, for a mode to draw in (the cards below, or Learn: js/learn.js). Returns { el, setTitle,
      progress(text, part, aside), stage, foot, say, ended(on), use(mode), close, closed }. A mode is { name, keys(event), menu()
@@ -562,7 +589,16 @@ V.review = (() => {
       stage: V.h('div.study-stage'),
       foot: V.h('div.study-foot'),
       say: V.h('p.sr-only', { 'aria-live': 'polite' }),
+      // (1.19.7) What the card showing is about: its note's folder and title, said when it changes
+      topicFolder: V.h('span.study-topic-folder'),
+      topicTitle: V.h('span.study-topic-title'),
     };
+    ui.topicName = V.h('p.study-topic-name', { 'aria-live': 'polite', 'aria-atomic': 'true' },
+      V.h('span.sr-only', { text: 'Topic: ' }), ui.topicFolder, ui.topicTitle);
+    ui.skip = V.h('button.btn.quiet.study-skip', { type: 'button', 'aria-keyshortcuts': 'S',
+      onclick: () => { if (mode && mode.skipTopic) mode.skipTopic(); } },
+    shape('skipTopic'), V.h('span.study-skip-label', { text: 'Skip topic' }), V.h('kbd.study-skip-key', { text: 'S', 'aria-hidden': 'true' }));
+    ui.topic = V.h('div.study-topic', { hidden: true }, ui.topicName, ui.skip);
     ui.more = V.iconButton('more', 'More', () => openMenu(), 'study-more');
     ui.more.setAttribute('aria-haspopup', 'menu');
     // (1.19.1: a card that's wrong, often one the AI made, is fixed right where it shows: editCard below)
@@ -571,7 +607,7 @@ V.review = (() => {
     ui.done = V.h('button.btn.quiet.study-done', { type: 'button', text: 'Done', title: 'Done for now', onclick: () => api.close() });
     ui.panel = V.h('div.study', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
       V.h('header.study-head', {}, ui.title, ui.edit, ui.more, ui.done),
-      V.h('div.study-where', {}, V.h('div.study-line', {}, ui.progress, ui.aside), V.h('span.bar.study-bar', {}, ui.fill)),
+      V.h('div.study-where', {}, ui.topic, V.h('div.study-line', {}, ui.progress, ui.aside), V.h('span.bar.study-bar', {}, ui.fill)),
       ui.stage, ui.foot, ui.say);
     // (a .layer too, so what waits for sheets to close waits for it: Ctrl+N, an update's reload, picking's keys)
     ui.layer = V.h('div.layer.study-layer', {}, ui.panel);
@@ -609,6 +645,21 @@ V.review = (() => {
       },
       stage: ui.stage,
       foot: ui.foot,
+      /* The topic line (1.19.7, the owner: "could it at the top name the topic and let you skip the topic?"): `info` =
+         { folder, title, skip } from topicOf (null hides it). Only a change is written, so a screen reader hears it
+         once, when the cards move on to another note. `skip`: Skip topic shows (the session has cards from other
+         notes too). */
+      topic(info) {
+        ui.topic.hidden = !info;
+        if (!info) return;
+        const folder = info.folder ? `${info.folder} · ` : '';
+        if (ui.topicFolder.textContent !== folder) ui.topicFolder.textContent = folder;
+        if (ui.topicTitle.textContent !== info.title) ui.topicTitle.textContent = info.title;
+        ui.topicName.title = folder + info.title;
+        ui.skip.hidden = !info.skip;
+        ui.skip.setAttribute('aria-label', `Skip topic: the rest of ${info.title}`);
+        ui.skip.title = `Skip the rest of ${info.title} (S)`;
+      },
       /* Words for a screen reader, said once (the flipped card's answer). */
       say(text) { ui.say.textContent = ''; setTimeout(() => { ui.say.textContent = text; }, 30); },
       /* The end of a go (or Learn's stop between sets): its own buttons only, none at the top. */
@@ -625,6 +676,7 @@ V.review = (() => {
         V.clear(ui.foot);
         ui.more.hidden = !items().length;
         ui.edit.hidden = true;
+        api.topic(null);
       },
       /* Done, Esc, Back (`fromHistory`), or another study screen taking its place (`keepStep`: its step in the history
          is the new one's). */
@@ -738,16 +790,26 @@ V.review = (() => {
           line('Still learning:', ' it comes round once more now, and again tomorrow.'),
           line('I know it:', ' it comes back in a few days, and a little later each time you know it.'),
           line('Next:', ' skip it for now. It comes round once more at the end; skip it again and it waits for next time.'),
+          line('Back:', ' the card before. Answered already? Answer again and the new answer counts instead.'),
+          line('Skip topic', ' (at the top, by the note\'s name): skip the rest of that note\'s cards for now. They wait for next time.'),
           line('Done:', ' stop whenever you like. Your answers are kept.'),
           line('Edit card', ' (the pencil at the top): fix a card that\'s wrong, or delete it.'),
-          fineMouse() ? line('Keys:', ' Space flips. 1 or ← Still learning, 2 or ↓ Next, 3 or → I know it.') : null),
+          fineMouse() ? line('Keys:', ' Space flips. 1 Still learning, 2 or ↓ Next, 3 or → I know it, ← Back, S skips the topic.') : null),
         V.h('p.hint.study-how-make', { text: 'Make cards in any note: a line like "mitosis :: cell division", or a blank like "The {{mitochondria}} makes ATP".' }),
       ],
       actions: [{ label: 'Got it', kind: 'primary' }],
     });
   }
 
-  /* Cards, one at a time, on the study screen (`view`: one already open, to draw in rather than opening one). */
+  /* Cards, one at a time, on the study screen (`view`: one already open, to draw in rather than opening one).
+
+     1.19.7 (the owner: "could it at the top name the topic and let you skip the topic? Also for cards can u go back
+     too in correlation to next?"): the topic line over the count names the note the card showing comes from (its
+     folder · its title), and its Skip topic (or S) passes over the rest of that note's cards in this go, graded or
+     not (their FSRS state untouched: still due), with an Undo. Back (beside the answers, or ←) goes to the card
+     before, through the whole go: each answer (and each skip) keeps how the go stood before it (`trail`), and the
+     card's progress from before its answer, so going back puts both back, shows what was said ("You said: I know
+     it") and a new answer replaces that one, never adds to it. */
   function session({ title, list, practice = false, deck = 'all', many = false, view = null, skip: before = null }) {
     const scr = view && !view.closed() ? view : screen(title);
     scr.setTitle(title);
@@ -758,9 +820,18 @@ V.review = (() => {
     let aside = [];                // set aside in the first round (Still learning, or Next): they come round once more
     let flipped = false;
     let over = false;
-    const first = new Map();       // card id -> its first answer (AGAIN or GOOD)
-    const passed = new Set();      // card ids passed over with Next and not answered since
+    let first = new Map();         // card id -> its first answer (AGAIN or GOOD)
+    let passed = new Set();        // card ids passed over with Next and not answered since
+    let skipped = new Set();       // note ids whose cards were skipped (Skip topic)
+    let trail = [];                // { kind: still|next|know|skip, card, snap, state? } newest last
+    let was = null;                // the answer the card showing had, when Back brought it here
+    // What Back went back over, newest first: each answer still stands (its card's progress untouched) until a new
+    // answer replaces it; Next on that card (or leaving) keeps it, as if Back was never pressed.
+    let ahead = [];                // trail entries, each with `after`: how the go stood just after it
+    let dropUndo = () => {};
+    const notes = new Set(list.map((c) => c.note)).size;
     const fine = fineMouse();
+    const LABELS = { still: 'Still learning', next: 'Next', know: 'I know it' };
     const card = V.h('button.flash-card', { type: 'button', onclick: () => flip() });
     // Its menu (1.19.1: a right-click, a long press, the menu key): the answers, its note (to change the card), then
     // the study screen's ⋯.
@@ -773,6 +844,8 @@ V.review = (() => {
         { label: 'Still learning', icon: shape('again'), onClick: () => answer('still') },
         { label: 'Next', icon: shape('skip'), onClick: () => answer('next') },
         { label: 'I know it', icon: 'check', onClick: () => answer('know') },
+        trail.length ? { label: 'Back', icon: shape('back'), onClick: () => back() } : null,
+        notes > 1 ? { label: `Skip ${topicOf(c).title}`, icon: shape('skipTopic'), onClick: () => skipTopic() } : null,
         { sep: true },
         row && !row.deleted ? { label: 'Change it in its note', icon: 'edit', onClick: () => {
           // (the screen's step back in a phone's history is taken first: the note opened before it would be closed by it)
@@ -790,7 +863,7 @@ V.review = (() => {
         } } : null,
         { sep: true },
         ...menu(),
-      ];
+      ].filter(Boolean);
     }, { label: 'This card: options' });
     const button = (cls, icon, label, key, kind) => V.h('button.btn.study-btn.' + cls, {
       type: 'button', dataset: { answer: kind }, 'aria-keyshortcuts': key, onclick: () => answer(kind),
@@ -800,18 +873,24 @@ V.review = (() => {
       next: button('skip', shape('skip'), 'Next', '2', 'next'),
       know: button('know.primary', V.icon('check'), 'I know it', '3', 'know'),
     };
-    const actions = V.h('div.study-actions', { role: 'group', 'aria-label': 'Your answer' }, buttons.still, buttons.next, buttons.know);
+    // Back (1.19.7): beside the answers, the same height, never moving; off on the first card.
+    const backButton = V.h('button.btn.study-back', { type: 'button', 'aria-keyshortcuts': 'ArrowLeft', title: 'Back to the card before (←)',
+      onclick: () => back() }, shape('back'), V.h('span.study-back-label', { text: 'Back' }));
+    const actions = V.h('div.study-actions', { role: 'group', 'aria-label': 'Your answer' }, backButton, buttons.still, buttons.next, buttons.know);
+    const snap = () => ({ queue: [...queue], aside: [...aside], round, roundSize, first: new Map(first),
+      passed: new Set(passed), skipped: new Set(skipped) });
 
     function drawCard(c) {
-      const row = V.data.notes.get(c.note);
       const shownWords = flipped ? (c.kind === 'blank' ? c.term.replace(V.study.GAP, c.answer) : c.answer) : c.term;
       card.dataset.size = sizeOf(shownWords);
       card.classList.toggle('flipped', flipped);
       card.classList.toggle('blank-card', c.kind === 'blank');
       card.setAttribute('aria-label', flipped ? `Answer: ${c.answer}. Tap to see the question again`
         : `${c.kind === 'blank' ? c.term.replace(V.study.GAP, 'blank') : c.term}. Tap to see the answer`);
+      // (the note it's from is the topic line's now; the card's top says what was answered when Back brought it here)
+      const side = flipped ? (was ? `Answer · You said: ${LABELS[was]}` : 'Answer') : was ? `You said: ${LABELS[was]}` : '';
       V.clear(card,
-        V.h('span.flash-side', { text: flipped ? 'Answer' : many && row ? V.noteTitle(row) : '' }),
+        V.h('span.flash-side' + (was ? '.flash-was' : ''), { text: side }),
         V.h('span.flash-face', {},
           // (reading text: Quick read's pieces go in when it's on, js/reading.js)
           flipped && c.kind !== 'blank' ? V.reading.area(V.h('span.flash-q', { text: plainWords(c.term) })) : null,
@@ -827,6 +906,8 @@ V.review = (() => {
       const c = queue[0];
       if (!c) { end(); return; }
       scr.editable(true);
+      const t = topicOf(c);
+      scr.topic({ folder: t.folder, title: t.title, skip: notes > 1 });
       const at = roundSize - queue.length + 1;
       scr.progress(`${round === 2 ? 'Once more · ' : practice ? 'Practice · ' : ''}${at} of ${roundSize}`, (at - 1) / roundSize);
       drawCard(c);
@@ -834,6 +915,12 @@ V.review = (() => {
       buttons.still.title = `Still learning: it comes back ${comes.again}`;
       buttons.know.title = `I know it: it comes back ${comes.good}`;
       buttons.next.title = round === 1 ? 'Next: skip it for now, it comes round again at the end' : 'Next: leave it for next time';
+      for (const [kind, b] of Object.entries(buttons)) {
+        b.classList.toggle('was', kind === was);
+        if (kind === was) b.title += ' (what you said before)';
+      }
+      backButton.disabled = !trail.length;
+      backButton.setAttribute('aria-label', trail.length ? 'Back to the card before' : 'Back: this is the first card');
     }
 
     function flip() {
@@ -846,25 +933,115 @@ V.review = (() => {
 
     function answer(kind) {
       if (over) return;
-      const c = queue.shift();
+      const c = queue[0];
       if (!c) return;
-      if (V.streak) V.streak.studied(c, { graded: kind !== 'next' });  // (a day studied: js/streak.js)
+      dropUndo();
+      const redo = ahead.length && ahead[ahead.length - 1].card === c ? ahead[ahead.length - 1] : null;
+      // Next (or the same answer) on a card Back brought back: the answer it had stands, and the go goes on as it was.
+      if (redo && redo.kind !== 'skip' && (kind === 'next' || kind === redo.kind)) { replay(); return; }
+      // A new answer: what Back went back over is undone for good (the cards' progress put back first).
+      undoAhead();
+      const entry = { kind, card: c, snap: snap() };
+      queue.shift();
+      // (a day studied: js/streak.js; a card answered again after Back counts once)
+      const counted = redo && redo.kind !== 'next' && redo.kind !== 'skip';
+      if (V.streak) V.streak.studied(c, { graded: kind !== 'next' && !counted });
       if (kind === 'next') {
         if (!first.has(c.id)) passed.add(c.id);
         if (round === 1) aside.push(c);
       } else {
         const rating = kind === 'know' ? GOOD : AGAIN;
+        entry.state = current(c);  // (put back by Back, so a new answer replaces this one)
         grade(c, rating);
         if (!first.has(c.id)) first.set(c.id, rating);
         passed.delete(c.id);
         if (rating === AGAIN && round === 1) aside.push(c);
       }
+      trail.push(entry);
+      was = null;
       flipped = false;
       onward();
       if (!over) {
         turn();
         card.focus({ preventScroll: true });  // (so Space flips the next card, not the button just pressed)
       }
+    }
+
+    /* What Back went back over is undone: its cards' progress put back (newest first, so each ends as before it). */
+    function undoAhead() {
+      for (const entry of ahead) if ('state' in entry) setState(entry.card, entry.state);
+      ahead = [];
+    }
+    /* The answer Back brought back stands after all: the go as it was just after it. */
+    function replay() {
+      const entry = ahead.pop();
+      ({ queue, aside, round, roundSize, first, passed, skipped } = entry.after);
+      trail.push(entry);
+      flipped = false;
+      showWas();
+      if (!queue.length) { draw(); return; }  // (the end)
+      draw();
+      turn();
+      card.focus({ preventScroll: true });
+    }
+    /* Leaving: every answer Back went back over stands, so what's told counts them. */
+    function replayAll() {
+      while (ahead.length) {
+        const entry = ahead.pop();
+        ({ queue, aside, round, roundSize, first, passed, skipped } = entry.after);
+        trail.push(entry);
+      }
+    }
+    const showWas = () => {
+      const top = ahead[ahead.length - 1];
+      was = top && top.card === queue[0] && top.kind !== 'skip' ? top.kind : null;
+    };
+
+    /* Back: the go as it stood before the last answer (or skip), its card showing again with what was said. The
+       answer itself stands until a new one replaces it (Next keeps it). */
+    function back() {
+      const entry = trail.pop();
+      if (!entry) return;
+      dropUndo();
+      entry.after = snap();
+      ahead.push(entry);
+      ({ queue, aside, round, roundSize, first, passed, skipped } = entry.snap);
+      showWas();
+      flipped = false;
+      if (over) {
+        over = false;
+        scr.ended(false);
+        V.clear(scr.stage, card);
+        V.clear(scr.foot, actions);
+      }
+      draw();
+      turn();
+      card.focus({ preventScroll: true });
+      const c = queue[0];
+      if (c) scr.say(was ? `Back to ${c.term}. You said ${LABELS[was]}: answer again to change it.` : `Back to ${c.term}.`);
+    }
+
+    /* Skip topic: the rest of this note's cards are passed over in this go (never graded: still due), with Undo. */
+    function skipTopic() {
+      if (over || notes < 2) return;
+      const c = queue[0];
+      if (!c) return;
+      dropUndo();
+      undoAhead();
+      const entry = { kind: 'skip', card: c, snap: snap() };
+      trail.push(entry);
+      const mine = (x) => x.note === c.note;
+      const gone = queue.filter(mine).length;
+      queue = queue.filter((x) => !mine(x));
+      aside = aside.filter((x) => !mine(x));
+      roundSize -= gone;  // (so the count stays where it was: "4 of 31" goes on as "4 of 27")
+      skipped.add(c.note);
+      was = null;
+      flipped = false;
+      const name = topicOf(c).title;
+      onward();
+      if (!over) { turn(); card.focus({ preventScroll: true }); }
+      dropUndo = undoToast(`Skipped ${name}.`, () => { if (!scr.closed() && trail[trail.length - 1] === entry) back(); });
     }
 
     /* The next card: once more round the ones set aside when the first go is through, else the end. */
@@ -885,8 +1062,13 @@ V.review = (() => {
       editCard(c, { onDone: (fresh) => {
         if (over || queue[0] !== c) return;
         aside = aside.flatMap((x) => (x !== c ? [x] : fresh ? [fresh] : []));
+        // (what came before holds the card as it was: Back starts again from here)
+        undoAhead();
+        trail = [];
+        was = null;
+        dropUndo();
         if (fresh) queue[0] = fresh;
-        else { queue.shift(); roundSize = Math.max(0, roundSize - 1); flipped = false; }
+        else { queue.shift(); roundSize = Math.max(0, roundSize - 1); flipped = false; was = null; }
         onward();
         if (!over) card.focus({ preventScroll: true });
       } });
@@ -899,6 +1081,7 @@ V.review = (() => {
       const [top, ...rest] = queue;
       queue = untouched ? (shuffled ? shuffle(queue) : order(queue)) : top ? [top, ...(shuffled ? shuffle(rest) : order(rest))] : queue;
       flipped = false;
+      showWas();
       draw();
       V.toast(shuffled ? 'Shuffled' : 'Back in order', { ms: 1600 });
     }
@@ -928,18 +1111,22 @@ V.review = (() => {
       const grades = [...first.values()];
       const knew = grades.filter((r) => r === GOOD).length;
       const learning = grades.length - knew;
-      const left = passed.size;
+      const left = [...passed].filter((id) => !skipped.has(id.split('|')[0])).length;
       const at = now();
       // (other cards due: never the ones skipped (here, or in the go before that led here), which wait for next time,
       // or any of this go's own)
       const skip = new Set([...(before || []), ...passed, ...list.map((c) => c.id)]);
       const more = at.list.filter((c) => isDue(c, at) && !skip.has(c.id)).length;
-      const sum = !grades.length ? 'You skipped every card.'
+      const sum = !grades.length ? (skipped.size ? 'Nothing answered this time.' : 'You skipped every card.')
         : knew === grades.length ? (knew === 1 ? 'You knew it. Nice work!' : `You knew all ${knew}. Nice work!`)
           : `You knew ${knew} of ${grades.length}.`;
       const lines = [];
       if (learning) lines.push(learning === 1 ? 'The one you\'re still learning comes back tomorrow.' : `The ${learning} you're still learning come back tomorrow.`);
       if (left) lines.push(left === 1 ? 'The one you skipped waits for next time.' : `The ${left} you skipped wait for next time.`);
+      if (skipped.size) {
+        const names = [...skipped].map((id) => topicOf({ note: id }).title);
+        lines.push(`Skipped ${names.length === 1 ? names[0] : `${names.length} topics`}: ${names.length === 1 ? 'its' : 'their'} cards wait for next time.`);
+      }
       if (!lines.length) lines.push(nextLine(at, more));
       const go = [];
       if (more) go.push(V.button(`Study ${more} more`, { icon: 'cards', onClick: () => start('all', { view: scr, skip }) }));
@@ -951,24 +1138,29 @@ V.review = (() => {
         V.h('h3', { text: 'Done for now' }),
         V.h('p.study-end-sum', { text: sum }),
         V.streak ? V.streak.endLine() : null,  // ("🔥 6 days in a row", when the streak is on: js/streak.js)
-        lines.map((text) => V.h('p.study-end-next', { text }))));
+        lines.map((text) => V.h('p.study-end-next', { text })),
+        // (1.19.7: a slip on the last card is put right from here too)
+        trail.length ? V.h('button.btn.quiet.study-end-back', { type: 'button', 'aria-keyshortcuts': 'ArrowLeft', onclick: () => back() },
+          shape('back'), V.h('span', { text: 'Back to the last card' })) : null));
       V.clear(scr.foot, V.h('div.study-end-go' + (go.length === 1 ? '.one' : ''), {}, go));
       requestAnimationFrame(() => { if (done.isConnected) done.focus({ preventScroll: true }); });
     }
 
     const keys = (event) => {
-      if (over) return;
       const key = event.key;
       const on = event.target && event.target.closest ? event.target : document.body;
       if (on.closest('input, textarea, select, [contenteditable]')) return;
+      if (key === 'ArrowLeft') { if (trail.length) { event.preventDefault(); back(); } return; }
+      if (over) return;
       if (on === card && (key === ' ' || key === 'Enter')) return;  // (the card's own click flips it)
       if (key === ' ' || key === 'ArrowUp') {
         if (key === ' ' && on.closest('button')) return;  // (a button the keyboard is on: Space presses it)
         event.preventDefault();
         flip();
-      } else if (key === '1' || key === 'ArrowLeft') { event.preventDefault(); answer('still'); }
+      } else if (key === '1') { event.preventDefault(); answer('still'); }
       else if (key === '2' || key === 'ArrowDown') { event.preventDefault(); answer('next'); }
       else if (key === '3' || key === 'ArrowRight') { event.preventDefault(); answer('know'); }
+      else if ((key === 's' || key === 'S') && notes > 1) { event.preventDefault(); skipTopic(); }
     };
 
     const menu = () => {
@@ -989,7 +1181,10 @@ V.review = (() => {
       keys,
       menu,
       edit: () => editNow(),
+      skipTopic: () => skipTopic(),
       leave: ({ closing }) => {
+        dropUndo();
+        replayAll();
         if (closing && !over && first.size && queue.length) V.toast('Saved. The rest wait for next time.');
         if (closing) tellStudied();
       },
@@ -1161,5 +1356,6 @@ V.review = (() => {
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
     dueByFolder, nextDue, ahead,
-    start, study, session, screen, question, answerOf, shuffle, cardsOf, editCard, pending: () => pending, shown: () => shown };
+    start, study, session, screen, question, answerOf, shuffle, cardsOf, editCard, pending: () => pending, shown: () => shown,
+    setState, topicOf, undoToast, shape };
 })();

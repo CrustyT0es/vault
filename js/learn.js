@@ -660,14 +660,32 @@ V.learn = (() => {
     let answered = null; // after an answer: { right, typo, picked, written, first, last }
     let steps = 0;      // answers done in this set so far (each card counts once a round)
     let total = 0;
-    let learned = 0;
     let after = null;    // what Continue does
     let wait = null;     // the timer that moves on after a right answer
     let live = true;     // (false once the screen has gone on to something else)
-    const missed = new Set();
-    const tries = new Map();   // card id -> misses in this round
-    const many = new Set(cards.map((c) => c.note)).size > 1;  // cards from several notes say which one
+    let missed = new Set();
+    let tries = new Map();     // card id -> misses in this round
+    const notes = new Set(cards.map((c) => c.note)).size;
+    const many = notes > 1;
+    // 1.19.7: Skip topic (the rest of a note's cards, never graded) and Back (the question before, shown with the
+    // answer given; a new answer replaces it). Each answer and skip keeps how the session stood before it.
+    let skipped = new Set();   // note ids skipped
+    let trail = [];            // { kind: 'answer' | 'skip', snap, gave?, states: [[card, its progress before]] }
+    let prev = null;           // the answer given before, on a question Back brought back: { picked, text }
+    // What Back went back over, newest first: its grades stand (the cards' progress untouched) until a new answer (or
+    // a skip, or an edit) replaces them, so Back and then Done keeps what was answered.
+    let ahead = [];
+    let dropUndo = () => {};
     const ui = { body: V.h('div.learn-body') };
+    ui.back = V.h('button.btn.quiet.learn-back', { type: 'button', 'aria-keyshortcuts': 'ArrowLeft', title: 'The question before (←)',
+      onclick: () => back() }, RV.shape('back'), V.h('span', { text: 'Back' }));
+    ui.nav = V.h('div.learn-nav', {}, ui.back);
+    /* The question and its nav where they belong (after a stop between sets, or Back from the end). */
+    const mount = () => {
+      if (!ui.body.isConnected) V.clear(scr.stage, ui.body);
+      if (!ui.nav.isConnected) V.clear(scr.foot, ui.nav);
+    };
+    const notSkipped = (c) => !skipped.has(c.note);
     const deckAnswers = (card) => cards.filter((c) => c.id !== card.id).map((c) => c.answer);
     const gradeAll = (card, rating) => { for (const twin of twins.get(card.id) || [card]) RV.grade(twin, rating); };
 
@@ -677,23 +695,23 @@ V.learn = (() => {
       total = set.reduce((n, c) => n + planOf(c).length, 0);
     }
 
-    function begin() {
+    function begin(keep = false) {
       if (!live) return;
-      if (round === 0) { plan(); steps = 0; }
+      if (round === 0 && !keep) { plan(); steps = 0; }
       const kind = rounds[round];
       queue = RV.shuffle(groups[group].filter((c) => planOf(c).includes(kind)));
       tries.clear();
       scr.ended(false);
-      if (!ui.body.isConnected) { V.clear(scr.stage, ui.body); V.clear(scr.foot); }
+      mount();
       ask();
     }
 
     function ask() {
       clearTimeout(wait);
       answered = null;
+      prev = null;
       if (!queue.length) {
         if (round < rounds.length - 1) { round++; return begin(); }
-        learned += groups[group].length;
         group++;
         round = 0;
         if (group < groups.length) return pause();
@@ -741,22 +759,24 @@ V.learn = (() => {
       where();
       scr.editable(true);
       const { card, kind } = asked;
-      const row = V.data.notes.get(card.note);
-      const from = many && row ? V.noteTitle(row) : '';
+      // (the note it's from is on the topic line now, 1.19.7)
+      const t = RV.topicOf(card);
+      scr.topic({ folder: t.folder, title: t.title, skip: many });
+      ui.back.disabled = !trail.length || !!checking;
       const showing = kind === 'recall' && (answered || asked.shown);
-      const head = V.h('div.learn-card', { dataset: { card: card.id, kind } }, from ? V.h('span.flash-side', { text: from }) : null,
+      const head = V.h('div.learn-card', { dataset: { card: card.id, kind } },
         prompt(card, kind === 'truth' ? asked.claim : null),
         showing ? V.h('span.learn-claim.learn-reveal', {}, V.h('span.learn-claim-label', { text: 'Answer' }),
           V.reading.area(V.h('span', { text: plain(card.answer) }))) : null);
       let answer = null;
       if (kind === 'choice') {
         answer = V.h('div.learn-options', { role: 'group', 'aria-label': 'Choices' }, asked.options.map((option, i) => {
-          const state = !answered ? '' : option.right ? '.right' : i === answered.picked ? '.wrong' : '.faded';
+          const state = !answered ? (prev && prev.picked === i ? '.was' : '') : option.right ? '.right' : i === answered.picked ? '.wrong' : '.faded';
           return V.h('button.learn-option' + state, { type: 'button', disabled: !!answered, onclick: () => pick(i) },
             V.h('span.learn-key', { text: String(i + 1) }), V.reading.area(V.h('span.learn-option-text', { text: option.text })));
         }));
       } else if (kind === 'truth') {
-        const mark = (value) => (!answered ? '' : value === asked.truth ? '.right' : value === answered.picked ? '.wrong' : '.faded');
+        const mark = (value) => (!answered ? (prev && prev.picked === value ? '.was' : '') : value === asked.truth ? '.right' : value === answered.picked ? '.wrong' : '.faded');
         answer = V.h('div.learn-options.two', { role: 'group', 'aria-label': 'True or false' },
           V.h('button.learn-option' + mark(true), { type: 'button', disabled: !!answered, onclick: () => pick(true) },
             V.h('span.learn-key', { text: 'T' }), V.h('span.learn-option-text', { text: 'True' })),
@@ -766,14 +786,14 @@ V.learn = (() => {
         answer = answered ? null : !asked.shown
           ? V.h('div.learn-options.one', {}, V.button('Show the answer', { kind: 'primary', onClick: () => reveal() }))
           : V.h('div.learn-options.two', { role: 'group', 'aria-label': 'Did you know it?' },
-            V.h('button.learn-option', { type: 'button', onclick: () => recalled(false) },
+            V.h('button.learn-option' + (prev && prev.picked === false ? '.was' : ''), { type: 'button', onclick: () => recalled(false) },
               V.h('span.learn-key', { text: '1' }), V.h('span.learn-option-text', { text: 'Not yet' })),
-            V.h('button.learn-option', { type: 'button', onclick: () => recalled(true) },
+            V.h('button.learn-option' + (prev && prev.picked === true ? '.was' : ''), { type: 'button', onclick: () => recalled(true) },
               V.h('span.learn-key', { text: '2' }), V.h('span.learn-option-text', { text: 'I knew it' })));
       } else {
         const input = V.h('input.field.learn-input', { type: 'text', placeholder: 'Type the answer', 'aria-label': 'Your answer',
           autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done', disabled: !!answered,
-          readOnly: !!checking, value: answered ? answered.picked : checking ? checking.text : '' });
+          readOnly: !!checking, value: answered ? answered.picked : checking ? checking.text : prev ? prev.text : '' });
         if (answered) input.classList.add(answered.right ? 'right' : 'wrong');
         // (while the AI looks at it: "Checking…", the words kept; Done, Esc and Back still work)
         answer = V.h('form.learn-type', { onsubmit: (event) => { event.preventDefault(); if (!answered) typed(input.value); } },
@@ -781,7 +801,9 @@ V.learn = (() => {
             : V.button('Check', { kind: 'primary', onClick: () => typed(input.value) }));
         if (!answered && !checking) requestAnimationFrame(() => { if (input.isConnected) input.focus({ preventScroll: true }); });
       }
-      V.clear(ui.body, head, answer, feedback());
+      // (Back brought it here: what was answered, and that a new answer counts instead)
+      const before = prev && !answered ? V.h('p.learn-was', { text: `You answered "${prev.text}" before. Answer again: your new answer counts instead.` }) : null;
+      V.clear(ui.body, head, before, answer, feedback());
       const go = ui.body.querySelector('.learn-feedback .btn.primary, .learn-options .btn.primary');
       if (go) requestAnimationFrame(() => { if (go.isConnected) go.focus({ preventScroll: true }); });
     }
@@ -846,9 +868,115 @@ V.learn = (() => {
       draw();
     }
 
+    /* How the session stands now (kept with each answer and skip, for Back). */
+    const snap = () => ({ groups: groups.map((g) => [...g]), group, rounds: [...rounds], round, queue: [...queue], total,
+      steps, tries: new Map(tries), missed: new Set(missed), skipped: new Set(skipped), asked: asked && { ...asked } });
+    /* What Back went back over is undone: its cards' progress put back (newest first, so each ends as before it). */
+    function undoAhead() {
+      for (const entry of ahead) for (const [twin, value] of entry.states) RV.setState(twin, value);
+      ahead = [];
+    }
+    /* An answer about to be given (`text`: it in words): the session before it, and its card's progress (and its
+       twins'). True when it answers again a question Back brought back (counted once: js/streak.js). */
+    function record(picked, text) {
+      dropUndo();
+      const again = ahead.length > 0 && ahead[ahead.length - 1].kind === 'answer';
+      undoAhead();
+      const card = asked.card;
+      trail.push({ kind: 'answer', snap: snap(), gave: { picked, text },
+        states: (twins.get(card.id) || [card]).map((twin) => [twin, RV.current(twin)]) });
+      return again;
+    }
+
+    /* Back (1.19.7): the session as it was before the last answer (or skip), that question asked again with the answer
+       given shown; a new answer replaces it (its card's progress is put back then, so nothing counts twice; leaving
+       without one keeps it). */
+    function back() {
+      if (checking) return;
+      const entry = trail.pop();
+      if (!entry) return;
+      dropUndo();
+      clearTimeout(wait);
+      // (a typed miss showing, Continue not pressed yet: it's graded now, as it stands until a new answer replaces it)
+      if (entry.kind === 'answer' && answered && !answered.right && asked && asked.kind === 'type') gradeAll(asked.card, RV.AGAIN);
+      const was = entry.snap;
+      groups.splice(0, groups.length, ...was.groups);
+      ({ group, rounds, round, queue, total, steps, tries, missed, skipped } = was);
+      ahead.push(entry);
+      answered = null;
+      checking = null;
+      after = null;
+      asked = was.asked;
+      scr.ended(false);
+      mount();
+      if (!asked) { ask(); return; }
+      prev = entry.kind === 'answer' ? entry.gave : null;
+      draw();
+      scr.say(prev ? `Back to the question before. You answered ${prev.text}: answer again to change it.` : 'Back.');
+    }
+
+    /* Skip topic (1.19.7): the rest of this note's cards leave the session (this set's rounds and the sets after it),
+       never graded, so they're still due; Undo (or Back) brings them back. */
+    function skipTopic() {
+      if (!asked || checking || !many || !live) return;
+      const card = asked.card;
+      const note = card.note;
+      dropUndo();
+      undoAhead();
+      clearTimeout(wait);
+      // An answer showing is settled first, as Continue would.
+      if (answered) {
+        if (!answered.right) {
+          if (asked.kind === 'type') gradeAll(card, RV.AGAIN);
+          queue.shift();
+          if ((tries.get(card.id) || 0) < TRIES) queue.push(card); else steps++;
+        }
+        answered = null;
+        asked = null;
+      }
+      const entry = { kind: 'skip', snap: snap(), states: [] };
+      trail.push(entry);
+      skipped.add(note);
+      const mine = (c) => c.note === note;
+      const kind = rounds[round];
+      const order_ = (k) => KINDS.indexOf(k);
+      // (its cards' answers in this set so far come off the count, as their rounds do)
+      for (const c of groups[group].filter(mine)) {
+        const kinds = planOf(c);
+        steps -= kinds.filter((k) => order_(k) < order_(kind)).length + (kinds.includes(kind) && !queue.includes(c) ? 1 : 0);
+      }
+      steps = Math.max(0, steps);
+      groups[group] = groups[group].filter((c) => !mine(c));
+      queue = queue.filter((c) => !mine(c));
+      const later = groups.slice(group + 1).flat().filter((c) => !mine(c));
+      groups.splice(group + 1, groups.length);
+      for (let i = 0; i < later.length; i += GROUP) groups.push(later.slice(i, i + GROUP));
+      asked = null;
+      prev = null;
+      const name = RV.topicOf(card).title;
+      dropUndo = RV.undoToast(`Skipped ${name}.`, () => { if (live && trail[trail.length - 1] === entry) back(); });
+      if (!groups[group].length) {  // nothing else in this set: on to the next, or the end
+        groups.splice(group, 1);
+        round = 0;
+        return group < groups.length ? begin() : finish();
+      }
+      const set = groups[group];
+      rounds = KINDS.filter((k) => set.some((c) => planOf(c).includes(k)));
+      total = set.reduce((n, c) => n + planOf(c).length, 0);
+      steps = Math.min(steps, total);
+      if (rounds.includes(kind)) { round = rounds.indexOf(kind); return ask(); }
+      // (no card left has this kind of round: on to the next kind)
+      const earlier = rounds.filter((k) => order_(k) < order_(kind)).length;
+      queue = [];
+      if (earlier) { round = earlier - 1; return ask(); }
+      round = 0;
+      return begin(true);
+    }
+
     function pick(option) {
       if (answered || !asked) return;
-      if (V.streak) V.streak.studied(asked.card);  // (a day studied: js/streak.js)
+      const again = record(option, asked.kind === 'truth' ? (option ? 'True' : 'False') : (asked.options[option] || {}).text || '');
+      if (V.streak) V.streak.studied(asked.card, { graded: !again });  // (a day studied: js/streak.js)
       const correct = asked.kind === 'truth' ? option === asked.truth : !!(asked.options[option] || {}).right;
       if (correct) right(false, option);
       else wrong(option);
@@ -856,7 +984,8 @@ V.learn = (() => {
 
     function typed(text) {
       if (answered || !asked || checking || !String(text || '').trim()) return;
-      if (V.streak) V.streak.studied(asked.card);
+      const again = record(text, String(text).trim());
+      if (V.streak) V.streak.studied(asked.card, { graded: !again });
       const result = check(text, asked.card.answer, { question: plain(asked.card.term), others: deckAnswers(asked.card) });
       if (result.right) return right(result.typo, text, result.written);
       // Turned down here: the AI has a look (the right idea in other words counts), CHECK_MS at most.
@@ -883,7 +1012,8 @@ V.learn = (() => {
 
     function recalled(knew) {
       if (answered || !asked || !asked.shown) return;
-      if (V.streak) V.streak.studied(asked.card);
+      const again = record(knew, knew ? 'I knew it' : 'Not yet');
+      if (V.streak) V.streak.studied(asked.card, { graded: !again });
       if (knew) right(false, true);
       else wrong(false);
     }
@@ -911,6 +1041,11 @@ V.learn = (() => {
         changed = true;
         if (!live || !asked || asked.card !== card) return;
         clearTimeout(wait);
+        // (what came before holds the card as it was: Back starts again from here)
+        undoAhead();
+        trail = [];
+        prev = null;
+        dropUndo();
         const wasRight = !!(answered && answered.right);
         if (!wasRight && answered && answered.first) missed.delete(card.id);
         tries.delete(card.id);
@@ -943,18 +1078,26 @@ V.learn = (() => {
       if (sheet) clearTimeout(wait);  // (a right pick waits while the card is being fixed; closing the sheet moves on)
     }
 
+    /* "Back to the last question" on a stop or the end (1.19.7: a slip on the last one is put right from there too). */
+    const backToLast = () => (trail.length ? V.h('button.btn.quiet.study-end-back', { type: 'button', 'aria-keyshortcuts': 'ArrowLeft',
+      onclick: () => back() }, RV.shape('back'), V.h('span', { text: 'Back to the last question' })) : null);
+
     /* A set done, more to go: a stop, so a long deck never feels endless. */
     function pause() {
       asked = null;
       scr.editable(false);
-      const left = cards.length - learned;
+      const all = cards.filter(notSkipped).length;
+      // (the sets done, less any topic skipped since: its cards there were never graded)
+      const learned = groups.slice(0, group).flat().filter(notSkipped).length;
+      const left = all - learned;
       scr.progress('', 1, '');
       scr.ended(true);
       V.clear(scr.stage, V.h('div.study-end.learn-pause', { role: 'status' },
         V.h('span.study-end-mark', {}, V.icon('check')),
         V.h('h3', { text: `Set ${group} done` }),
-        V.h('p.study-end-sum', { text: `${learned} of ${cards.length} learned so far.` }),
-        V.h('p.study-end-next', { text: `${left} more to go, ${Math.min(GROUP, left)} at a time.` })));
+        V.h('p.study-end-sum', { text: `${learned} of ${all} learned so far.` }),
+        V.h('p.study-end-next', { text: `${left} more to go, ${Math.min(GROUP, left)} at a time.` }),
+        backToLast()));
       const go = V.button('Next set', { kind: 'primary', onClick: () => begin() });
       V.clear(scr.foot, V.h('div.study-end-go', {}, V.button('Done for now', { onClick: () => scr.close() }), go));
       requestAnimationFrame(() => { if (go.isConnected) go.focus({ preventScroll: true }); });
@@ -966,14 +1109,18 @@ V.learn = (() => {
       scr.progress('', 1, '');
       scr.ended(true);
       const done = V.button('Done', { kind: 'primary', onClick: () => scr.close() });
-      const n = cards.length;
+      const n = cards.filter(notSkipped).length;
+      const names = [...skipped].map((id) => RV.topicOf({ note: id }).title);
+      const missedLeft = [...missed].filter((id) => !skipped.has(id.split('|')[0])).length;
       V.clear(scr.stage, V.h('div.study-end.learn-end', { role: 'status' },
         V.h('span.study-end-mark', {}, V.icon('check')),
         V.h('h3', { text: 'Done for now' }),
         V.h('p.study-end-sum', { text: n ? `You learned all ${n} card${n === 1 ? '' : 's'}.` : 'No cards left to learn.' }),
         V.streak ? V.streak.endLine() : null,
-        V.h('p.study-end-next', { text: missed.size ? `${missed.size} needed another go: they come back for review tomorrow.`
-          : 'Every one right the first time. Nice work!' })));
+        n ? V.h('p.study-end-next', { text: missedLeft ? `${missedLeft} needed another go: they come back for review tomorrow.`
+          : 'Every one right the first time. Nice work!' }) : null,
+        names.length ? V.h('p.study-end-next', { text: `Skipped ${names.length === 1 ? names[0] : `${names.length} topics`}: ${names.length === 1 ? 'its' : 'their'} cards wait for next time.` }) : null,
+        backToLast()));
       V.clear(scr.foot, V.h('div.study-end-go' + (n ? '' : '.one'), {},
         n ? V.button('Learn again', { icon: 'learn', onClick: () => start({ title, list: cards.flatMap((c) => twins.get(c.id) || [c]), deck, view: scr }) }) : null,
         done));
@@ -987,7 +1134,11 @@ V.learn = (() => {
         after();
         return;
       }
-      if (target.closest('input, textarea, select') || answered || !asked) return;
+      if (target.closest('input, textarea, select, [contenteditable]')) return;
+      // (1.19.7: ← the question before, S skips the topic; never while a box has the keyboard)
+      if (event.key === 'ArrowLeft') { if (trail.length && !checking) { event.preventDefault(); back(); } return; }
+      if ((event.key === 's' || event.key === 'S') && asked && many && !checking) { event.preventDefault(); skipTopic(); return; }
+      if (answered || !asked) return;
       if (asked.kind === 'choice' && /^[1-4]$/.test(event.key) && asked.options[Number(event.key) - 1] !== undefined) {
         event.preventDefault();
         pick(Number(event.key) - 1);
@@ -1013,8 +1164,10 @@ V.learn = (() => {
       keys,
       edit: () => edit(),
       menu: () => [{ label: 'Flip cards instead', icon: 'cards', onClick: flipInstead }],
+      skipTopic: () => skipTopic(),
       leave: () => {
         live = false;
+        dropUndo();
         clearTimeout(wait);
         // A typed miss left without Continue (or "I was right") still counts, and so does one the AI was still
         // looking at (turned down here: the late verdict is never heard).
@@ -1025,6 +1178,8 @@ V.learn = (() => {
       },
     });
     scr.stage.append(ui.body);
+    scr.foot.append(ui.nav);
+    ui.back.disabled = true;
     // The AI's wrong answers for the cards that have none yet: one request. The first question waits for them
     // FIRST_WAIT at most (then the deck's own stand in, and later questions take them as they come).
     const making = useAi ? makeWrongs(cards, answerKeys) : Promise.resolve(0);
