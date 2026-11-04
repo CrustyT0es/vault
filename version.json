@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.3",
+ "version": "1.19.4",
  "min_shell": 1,
  "notes": [
+  "Small fixes to Today on small phones: a test's Test me and Study sit under its numbers when there isn't room beside them, so Today stays short.",
   "Test me is easy to find: tap Test me on Today, beside each deck in Flash cards, in a note's tools or \u22ef, or on a folder or test. With AI on, the wrong answers to pick from are trickier, and a typed answer with the right idea counts (Settings > AI to turn it off).",
   "Today is calmer: the week is just the strip at the top. Tap a day to see its reminders and to-dos right there, and tick, move or change them from the same spot.",
   "Picking words works: drag across lines, Shift+click, Shift+arrows or Ctrl+A to pick text in a note, and the picked words now show up clearly.",
@@ -10,7 +11,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.3-9ba65a27bd37",
+ "build": "1.19.4-4cdfaf8dca69",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -309,15 +310,15 @@
    "size": 3935
   },
   "js/today.js": {
-   "sha256": "14544621c26cf84488229c9d250d2361844aba2e5fbb0ee42318585fe05e12fb",
-   "size": 98417
+   "sha256": "9f069d7d1d67456ea53f71e1fa5f710a4540621f3c721e7e6f4fd622b8ae71b5",
+   "size": 98463
   },
   "js/update.js": {
    "sha256": "158adfcd16731bb83097fe6f2c6d03cda20e1fc290698b52c33a8ae1269e07b3",
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "5b290153a3ff04f207cbe48c48f839fc409b051c9bafcb911a62bb7f597d67a0",
+   "sha256": "8a280d5b849e161b7951eef329036e0490bafae4505c9c8ea0049f33c087fc6d",
    "size": 71282
   },
   "js/week.js": {
@@ -333,11 +334,11 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "6ba5bb437c9eb1760d1a825d19bd0274c544e21e578a200c4f5c105d43e75537",
-   "size": 311131
+   "sha256": "c15d638636eb42a3ee54d9fa63e27ea7bb9990846d4ff5a072ec3123ad295e6d",
+   "size": 311795
   },
   "sw.js": {
-   "sha256": "d66cae5cbf708d246dde2f99e5cb56130be567b81afbea3362f4e582e7f4b320",
+   "sha256": "cab98665c589a8079548298177db39bdc9b72305b0e4872871d715e8d8f95c87",
    "size": 12430
   },
   "vendor/LICENSE-supabase-js.txt": {

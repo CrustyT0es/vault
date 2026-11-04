@@ -1122,7 +1122,7 @@
       plan.count && V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('test:' + note.id) } : null,
       V.exams ? { label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(note.id) } : null,
     ];
-    return noteMenu(V.h('div.today-box.today-test', { dataset: { id: note.id } },
+    return noteMenu(V.h('div.today-box.today-test' + (plan.count && V.learn ? '.with-quiz' : ''), { dataset: { id: note.id } },
       V.h('div.test-top', {}, daysTile(days),
         V.h('button.test-text', { type: 'button', title: 'Open the test note', onclick: () => open(note.id), dataset: { key: `o:${note.id}` } },
           V.h('strong', { text: plan.name }), V.h('span', { text: covers ? `${when} · ${covers}` : when }))),

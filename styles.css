@@ -3043,6 +3043,17 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-cards.done .fc-go { justify-content: flex-start; padding-top: 8px; }
 .deck-row.with-quiz { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; padding-right: 8px; }
 .review-go .btn.review-quiz { min-height: 44px; }
+/* (1.19.4: a test card too narrow for its numbers beside Test me and Study, a small phone with bigger text, puts the
+   buttons on a row of their own under the numbers, now one line, instead of squeezing "18 of 52 known" into four lines
+   beside them: Today stays about two screens) */
+.today-tests { container-type: inline-size; }
+@media (max-width: 899px) {
+  @container (max-width: 340px) {
+    .today-test.with-quiz { grid-template-areas: "top top" "bar bar" "nums nums" "go go"; }
+    .today-test.with-quiz .test-nums { display: flex; flex-wrap: wrap; column-gap: 4px; }
+    .today-test.with-quiz .test-nums > span + .pace::before { content: "· "; }
+  }
+}
 @media (max-width: 380px) {
   /* (the smallest phones: the icon alone, its name still said by aria-label, so Today stays about two screens) */
   /* (only the word: the icon is a span too, and hiding every span left an empty 22 px pill) */
