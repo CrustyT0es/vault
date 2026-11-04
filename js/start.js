@@ -262,7 +262,10 @@
   /* Settings on a phone is a page of its own, over the tabs: Back (Android's, or an iPhone's swipe) and its arrow take
      you to where you were. Wide, the rail stays and simply switches. */
   const settingsState = (state) => !!state && /^settings(-page)?$/.test(state.vault || '') && state.boot === BOOT;
+  // (the tour, js/tour.js, opening and leaving Settings touches neither: Back after it goes where it went before)
+  const tourHolds = () => { try { return !!(V.tour && V.tour.holds && V.tour.holds()); } catch (error) { return false; } };
   function openedSettings(from) {
+    if (tourHolds()) return;
     settingsFrom = from;
     if (V.wide()) return;
     try {
@@ -273,7 +276,7 @@
   /* Settings left another way (a toast's Open, a note opened from it, the rail): its step is made a dead one, never
      gone back over (a step back now could close a note that has just opened). */
   function leftSettings() {
-    if (!settingsStep) return;
+    if (!settingsStep || tourHolds()) return;
     settingsStep = false;
     if (settingsState(history.state)) history.replaceState({ vault: 'settings-left', boot: BOOT }, '');
   }
@@ -1541,12 +1544,15 @@
       // (js/welcome.js: their free AI key, Vault on the home screen), picked up where they were if Vault was closed.
       // One who joined with a join code picked theirs already: straight to the steps.
       if ((await mustChoose()) || (joined && V.data.user && V.data.user.id)) V.welcome.remember(V.data.user.id);
+      let welcomed = false;  // (the welcome steps finished just now: the tour, js/tour.js, starts by itself after them)
       if (V.welcome.pending(V.data.user && V.data.user.id)) {
         hello();  // (a gate screen like the others: this version started, whether or not the steps get finished now)
         await V.welcome.run({ screen, user: V.data.user, name: (invite && invite.name) || V.data.user.name || '' });
+        welcomed = true;
       }
       await main();
       hello();
+      if (V.tour) V.tour.begin({ welcomed });  // (someone new: the tour; anyone else: offered once, at a calm moment)
       if (passed === 'in' && V.data.user) V.toast(PASS_WORDS.in, { ms: 8000 });  // (in by the old Vault icon's sign-in)
     } catch (error) {
       console.error(error);

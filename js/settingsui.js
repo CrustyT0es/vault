@@ -154,6 +154,8 @@
       words: ['invite', 'turn off', 'stop', 'off'] },
     { page: 'about', key: 'wefty-version', name: 'Updates', hint: 'Wefty updates itself. Check now, or see what\'s new.',
       words: ['update', 'version', 'what\'s new', 'new', 'check'] },
+    { page: 'about', key: 'take-the-tour', name: 'Take the tour', hint: 'Two minutes: where everything is in Wefty, and what the switches do.',
+      words: ['tour', 'tutorial', 'walkthrough', 'walk through', 'guide', 'help', 'how to', 'learn', 'start', 'new'], shown: () => !!V.tour },
     { page: 'about', key: 'send-feedback', name: 'Send feedback', hint: 'Found a bug, or have an idea?', words: ['feedback', 'bug', 'idea', 'problem', 'report', 'help'] },
     { page: 'about', key: 'announcements', name: 'Announcements', hint: 'Read the updates you were sent again.', words: ['announcement', 'poll', 'news'],
       shown: () => !isOwner() },
@@ -391,7 +393,7 @@
     page = id;
     if (V.wide()) {
       store(id);
-    } else if (!was && !pageStep) {
+    } else if (!was && !pageStep && !(V.tour && V.tour.holds && V.tour.holds())) {  // (the tour adds no step: js/tour.js)
       try {
         history.pushState({ vault: 'settings-page', boot: V.pageLife }, '');
         pageStep = true;

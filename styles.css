@@ -4550,3 +4550,51 @@ textarea.field.cap-words { min-height: 200px; max-height: 50vh; resize: vertical
 @media (max-width: 699px) {
   .sheet:has(.cap-share) .sheet-actions > .btn { flex: 1 1 40%; min-height: 48px; }
 }
+
+/* The tour (1.19.6, js/tour.js): the screen dimmed round the real thing lit up (a hole whose shadow is the dim), a
+   small card beside it that never covers it, and a calm one-time offer above the tabs. The app under it can't be
+   tapped (the veil) while it shows. */
+.tour { position: fixed; inset: 0; z-index: 97; }
+.tour-safe {
+  position: fixed; pointer-events: none; visibility: hidden;
+  top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px);
+  bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px);
+}
+.tour-veil { position: fixed; inset: 0; }
+.tour-hole {
+  position: fixed; top: 50%; left: 50%; width: 0; height: 0; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 200vmax light-dark(rgba(13, 14, 17, .58), rgba(0, 0, 0, .7));
+}
+.tour-card {
+  position: fixed; top: 0; left: 0; box-sizing: border-box; width: min(360px, calc(100vw - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 16px 16px 12px; border: 1px solid light-dark(var(--line), var(--line-strong)); border-radius: 14px;
+  background: var(--raised); color: var(--text); box-shadow: var(--shadow-3);
+}
+.tour-card:focus { outline: none; }
+.tour-count { margin: 0 0 4px; color: var(--muted); font: 500 12px/16px var(--font); letter-spacing: .02em; }
+.tour-title { margin: 0; font: 600 17px/24px var(--font); overflow-wrap: anywhere; }
+.tour-text { margin: 6px 0 0; color: var(--text-2); font: 400 15px/22px var(--font); overflow-wrap: anywhere; }
+.tour-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tour-gap { flex: 1; }
+.tour-foot .btn { min-height: 44px; min-width: 72px; }
+.tour-skip { padding: 10px 4px; min-height: 44px; color: var(--text-2); }
+@media (prefers-reduced-motion: no-preference) {
+  .tour-hole { transition: top .25s var(--ease-out), left .25s var(--ease-out), width .25s var(--ease-out), height .25s var(--ease-out); }
+  .tour-card { transition: top .25s var(--ease-out), left .25s var(--ease-out); }
+  .tour { animation: tour-in .2s var(--ease-out); }
+  .tour-offer { animation: tour-in var(--d-3) var(--ease-out); }
+}
+@keyframes tour-in { from { opacity: 0; } }
+@media (forced-colors: active) { .tour-hole { outline: 3px solid Highlight; } }
+.tour-offer {
+  position: fixed; z-index: 52; left: 16px; right: 16px; margin: 0 auto; max-width: 440px; bottom: calc(84px + var(--safe-bottom));
+  box-sizing: border-box; display: grid; grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center; gap: 4px 12px; padding: 12px 12px 12px 14px; border: 1px solid light-dark(var(--line), var(--line-strong));
+  border-radius: 14px; background: var(--raised); color: var(--text); box-shadow: var(--shadow-3);
+}
+.tour-offer-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); }
+.tour-offer p { margin: 0; font: 400 15px/21px var(--font); overflow-wrap: anywhere; }
+.tour-offer-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.tour-offer-buttons .btn { min-height: 44px; }
+@media (min-width: 900px) { .tour-offer { left: auto; right: 24px; width: 400px; margin: 0; bottom: calc(24px + var(--safe-bottom)); } }

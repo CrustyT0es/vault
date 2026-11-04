@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.5",
+ "version": "1.19.6",
  "min_shell": 1,
  "notes": [
+  "New: a 2-minute tour of Wefty. It shows where everything is and what the switches in Settings do. Take it any time: tap your picture, then Take the tour.",
   "The note-taker hears a noisy class much better: with the free Gemini set up, AI listening records the room and writes down what the teacher says about every half minute, ignoring the groups chatting around you (switch it off on the note-taker's start screen or in Settings > AI). Without it, fewer words get dropped.",
   "Small fixes to Today on small phones: a test's Test me and Study sit under its numbers when there isn't room beside them, so Today stays short.",
   "Test me is easy to find: tap Test me on Today, beside each deck in Flash cards, in a note's tools or \u22ef, or on a folder or test. With AI on, the wrong answers to pick from are trickier, and a typed answer with the right idea counts (Settings > AI to turn it off).",
@@ -12,7 +13,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.5-8d51615034c6",
+ "build": "1.19.6-db38ec712fca",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -127,8 +128,8 @@
    "size": 7943
   },
   "index.html": {
-   "sha256": "a167e69173b1d86c27d382dc3929dd62ca996a3f5b0488bca91cb689017ea754",
-   "size": 6245
+   "sha256": "8708fe3ba4a539641bb9ac64101cb50790429970f010f597d77c9e58bd6e8e0d",
+   "size": 6282
   },
   "js/access.js": {
    "sha256": "75ec8cc3f10c000d6d00ab8d98240d1f596710f149c09905a48caeeca6be6118",
@@ -251,8 +252,8 @@
    "size": 52861
   },
   "js/profile.js": {
-   "sha256": "39df092399b399b270333b682b7d92d2ff1ca305658d1b5bd490328235b785d9",
-   "size": 14368
+   "sha256": "f4438a792c130e546873b75c382f4c9835789bb8a7dfcdd502eea3368e1b6644",
+   "size": 14622
   },
   "js/push.js": {
    "sha256": "fa291e1b0b086d3c8b023cbb0fa6daa37ae4f6164b1d6f3560cd494b4622d7a7",
@@ -271,24 +272,24 @@
    "size": 63702
   },
   "js/send.js": {
-   "sha256": "2e21512ad73e2d11264068c284730d475c8fdcd5d1bc785ef317a5881831e2b3",
-   "size": 62815
+   "sha256": "9300bbf8d3ae50d46dcaf89d5c19993a05f778a1d7ce121105033a3b2e9c73de",
+   "size": 62955
   },
   "js/settings.js": {
-   "sha256": "d7182a8b15e868a10eafe317fb6238e2545767fbb4ac16b3dd40daf86cf98da2",
-   "size": 39635
+   "sha256": "1431ca6f1ea53f5bde6706dff781a6bab8103f910a2eef0c6faf909ebc5b6417",
+   "size": 39713
   },
   "js/settingsui.js": {
-   "sha256": "86411acac15f5cf80d6bb5c3b9cb762487f54b4c751a7c71573dc8740058fbbf",
-   "size": 33535
+   "sha256": "9571ab6e4a141ff5c8e0228fff01b0481e14b8ea9ed2cac93ca834dbb6a48203",
+   "size": 33909
   },
   "js/share.js": {
    "sha256": "dc8807a199e637fba7b9ebf5a3782bc7e053d4e0308a146ba121932c0a1e7661",
    "size": 9199
   },
   "js/start.js": {
-   "sha256": "4277f0d60abc84a95e8df5bda199797cc1ef112dd8db674780476a1b564ad74f",
-   "size": 94904
+   "sha256": "b04908b9f97d0a499e91b255b9dea06f2a0dff2c851e66428f9742143d59ff2b",
+   "size": 95452
   },
   "js/starthere.js": {
    "sha256": "f34eeec9b28d8d37cd049bf4bdb55bfef488def75535692cc62176ce9a64a5fb",
@@ -314,12 +315,16 @@
    "sha256": "9f069d7d1d67456ea53f71e1fa5f710a4540621f3c721e7e6f4fd622b8ae71b5",
    "size": 98463
   },
+  "js/tour.js": {
+   "sha256": "bd472a7d9a3536cddd0020dcf5179ade81dacd7a14f20dde775979f7a2209e56",
+   "size": 32930
+  },
   "js/update.js": {
    "sha256": "158adfcd16731bb83097fe6f2c6d03cda20e1fc290698b52c33a8ae1269e07b3",
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "b64e4f3b50e56351bb2aa443e42fe1db0dff54259eaca8dd354f7b8b640be5ec",
+   "sha256": "3dced30990aa6add9d2363f86d1d5de5a7bd6da7b2e31857c53d4758d795ec1c",
    "size": 71282
   },
   "js/week.js": {
@@ -335,11 +340,11 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "c15d638636eb42a3ee54d9fa63e27ea7bb9990846d4ff5a072ec3123ad295e6d",
-   "size": 311795
+   "sha256": "77079098832f8df08d9597026e344e89138898a693f6f53068fba3257a18fee2",
+   "size": 315218
   },
   "sw.js": {
-   "sha256": "5cecde00daf043b93203a0d5d5a511d77f00bb013b407c95967bdf5472dcd522",
+   "sha256": "85b6bf069d4bbee40f190f83491e96b8f1e4d4d77c3da3edfd2711abe56d5898",
    "size": 12430
   },
   "vendor/LICENSE-supabase-js.txt": {

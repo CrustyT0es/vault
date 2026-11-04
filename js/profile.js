@@ -188,6 +188,8 @@ V.profile = (() => {
       { label: 'Settings', icon: 'settings', onClick: () => V.go('settings') },
       canInvite() ? { label: 'Invite people', icon: 'user-plus', onClick: () => V.go('settings', { page: 'friends' }) } : null,
       V.feedback ? { label: 'Feedback', icon: 'feedback', onClick: () => V.feedback.sheet() } : null,
+      // (1.19.6, js/tour.js: the walk through Wefty, any time; after the menu has gone, so the keyboard comes back here)
+      V.tour ? { label: 'Take the tour', icon: 'spark', onClick: () => setTimeout(() => V.tour.start({ why: 'menu' }), 0) } : null,
       { sep: true },
       { label: 'Sign out', icon: 'sign-out', danger: true, onClick: () => V.settings.signOut().catch(V.problem) },
     ];  // (no first line while all is well: statusLine gives none, and the menu leaves it out)

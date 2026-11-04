@@ -1123,7 +1123,7 @@ V.send = (() => {
     for (const t of old.length ? old : sent) await remove(t);
   }
 
-  function render(container) {
+  function render(container, opts = {}) {
     root = container;
     const area = V.h('textarea.field.send-text', { rows: 1, 'aria-label': 'Text to send', value: draft });
     area.addEventListener('input', () => { draft = area.value; });
@@ -1165,8 +1165,9 @@ V.send = (() => {
       parts.space));
     drawTray();
     draw();
-    // Looking at the list counts as having seen what came in (files wait to be opened).
-    for (const t of incoming()) if (!t.received_at && t.kind !== 'file') received(t);
+    // Looking at the list counts as having seen what came in (files wait to be opened); the tour's look
+    // (`opts.peek`, js/tour.js) doesn't: it only showed Share dimmed behind its card.
+    if (!(opts && opts.peek)) for (const t of incoming()) if (!t.received_at && t.kind !== 'file') received(t);
   }
 
   /* Settings' line saying which device this is (and a way to put a wrong guess right). */

@@ -504,6 +504,7 @@ V.settings = (() => {
           V.pc.howToUpdate(), null, 'pc-part') : null,
         V.h('div.setting-buttons', {}, V.button('What\'s new', { onClick: () => V.update.whatsNew() }))),
       V.feedback ? V.feedback.card(ui) : null,  // js/access.js
+      V.tour ? V.tour.card(ui) : null,  // js/tour.js: Take the tour (1.19.6)
       V.news && !owner() ? V.news.card(ui) : null,  // js/news.js: a friend's announcements (the owner's are in Friends)
       now.downloaded ? ui.more('Use the built-in copy', [ui.line('Use the built-in copy', 'Go back to the version installed '
         + 'on this PC and skip this update.', V.button('Go back', { kind: 'danger-quiet', onClick: async () => {
