@@ -427,7 +427,7 @@ V.review = (() => {
     const live = row.folder && V.data.folders.get(row.folder.id);
     return [
       { label: row.due ? `Study ${row.due} now` : `Practise all ${row.count}`, icon: 'cards', onClick: () => start(row.deck) },
-      V.learn && cards.length ? { label: 'Learn: quiz me', icon: 'learn', onClick: () => V.learn.start({ title: row.name, list: cards, deck: row.deck }) } : null,
+      V.learn && cards.length ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe(row.deck) } : null,
       { sep: true },
       live ? { label: `Open ${live.name}`, icon: 'open', onClick: () => V.notes.setFilter(live.id) }
         : row.tag ? { label: `Show notes with ${row.name}`, icon: 'open', onClick: () => V.notes.setFilter('tag:' + row.tag.key) } : null,
@@ -435,22 +435,30 @@ V.review = (() => {
     ];
   }
 
-  /* A deck: one button (its cards due today, else all of them as practice). Learn is in the study screen's ⋯. */
+  /* A deck: its button (its cards due today, else all of them as practice), and Test me beside it (1.19.3: Learn's
+     quiz on its cards, straight away). */
   function deckRow(row) {
     const what = `${row.count} card${row.count === 1 ? '' : 's'}${row.due ? '' : ' · all done today'}`;
-    return V.contextMenu(V.h('div.deck-row' + (row.due ? '' : '.idle'), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
+    return V.contextMenu(V.h('div.deck-row' + (row.due ? '' : '.idle') + (V.learn ? '.with-quiz' : ''), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
       V.h('button.deck-main', { type: 'button', title: row.due ? `Study ${row.name}` : `Practise ${row.name}`,
         'aria-label': row.due ? `Study ${row.name}: ${row.due} today` : `Practise ${row.name}`, onclick: () => start(row.deck) },
       badge(row), V.h('span.deck-text', {}, V.h('span.deck-name', { text: row.name }), V.h('span.deck-meta', { text: what })),
       row.due ? V.h('span.deck-due', { text: String(row.due), 'aria-hidden': 'true' }) : null,
-      V.icon('chevron', 'deck-chev'))), () => deckItems(row), { label: `${row.name}: options` });
+      V.icon('chevron', 'deck-chev')),
+      V.learn ? quizButton(row.deck, row.name) : null), () => deckItems(row), { label: `${row.name}: options` });
   }
+
+  /* "Test me" (js/learn.js testMe): a small button beside a deck's Study (`name` for its label to a screen reader). */
+  const quizButton = (deck, name) => V.h('button.deck-go.deck-quiz', { type: 'button', title: `Test me on ${name}`,
+    'aria-label': `Test me on ${name}`, dataset: { quiz: deck }, onclick: () => V.learn.testMe(deck) },
+  V.icon('learn'), V.h('span.quiz-label', { text: 'Test me' }));
 
   function testRow(plan) {
     // (its menu: Study or Make cards, what's on it, then the note's own: js/notes.js)
     const lead = [
       plan.count ? { label: `Study for ${plan.name}`, icon: 'cards', onClick: () => start('test:' + plan.note.id) }
         : V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.forTest(plan.note.id) } : null,
+      plan.count && V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('test:' + plan.note.id) } : null,
       V.exams ? { label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(plan.note.id) } : null,
     ];
     return V.contextMenu(V.h('div.test-row' + (plan.days <= 1 ? '.soon' : ''), { dataset: { id: plan.note.id } },
@@ -491,7 +499,9 @@ V.review = (() => {
         due ? null : V.h('p.hint.review-later', { text: nextDue(at) }),
         V.h('div.review-go', {},
           // ('tonal': the screen's main iris button is the new-note one beside it; in light it looks the same)
-          V.button(due ? `Study ${due}` : `Practise all ${at.list.length}`, { kind: 'tonal', icon: 'cards', onClick: () => start('all') })),
+          V.button(due ? `Study ${due}` : `Practise all ${at.list.length}`, { kind: 'tonal', icon: 'cards', onClick: () => start('all') }),
+          // (1.19.3: Learn's quiz on every card, straight away)
+          V.learn ? Object.assign(V.button('Test me', { icon: 'learn', onClick: () => V.learn.testMe('all') }), { className: 'btn review-quiz' }) : null),
         V.h('div.review-make', {}, makeButton())),
       tests.length ? [V.h('h2.list-section', {}, V.h('span', { text: 'Tests coming up' }), V.h('span.count', { text: String(tests.length) })),
         tests.map(testRow)] : null,
@@ -933,7 +943,7 @@ V.review = (() => {
       if (!lines.length) lines.push(nextLine(at, more));
       const go = [];
       if (more) go.push(V.button(`Study ${more} more`, { icon: 'cards', onClick: () => start('all', { view: scr, skip }) }));
-      else if (list.length > 1 && V.learn) go.push(V.button('Quiz me on these', { icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) }));
+      else if (list.length > 1 && V.learn) go.push(V.button('Test me on these', { icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) }));
       const done = V.button('Done', { kind: 'primary', onClick: () => scr.close() });
       go.push(done);
       V.clear(scr.stage, V.h('div.study-end', { role: 'status' },
@@ -964,7 +974,7 @@ V.review = (() => {
     const menu = () => {
       const whole = now().list.filter(inDeck(deck));
       return [
-        V.learn ? { label: 'Learn: quiz me', icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) } : null,
+        V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.start({ title, list, deck, view: scr }) } : null,
         !practice && whole.length > list.length ? { label: `Practise all ${whole.length} cards`, icon: 'cards',
           onClick: () => session({ title, list: whole, practice: true, deck, many: new Set(whole.map((c) => c.note)).size > 1, view: scr }) } : null,
         { node: (done) => V.h('button.menu-item.menu-switch', { type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(shuffled),

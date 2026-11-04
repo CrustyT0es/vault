@@ -653,6 +653,7 @@ V.notes = (() => {
       R && dated && !template ? { label: note.done ? 'Not done' : 'Mark done', icon: 'check', onClick: () => R.toggleDone(id) } : null,
       { sep: true },
       cards ? { label: 'Study its flash cards', icon: 'cards', onClick: () => V.review.study(id) } : null,
+      cards && V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('note:' + id) } : null,
       V.aiCards && words && !template ? { label: cards ? 'Make more flash cards' : 'Make flash cards', icon: 'spark',
         onClick: () => V.aiCards.forNote(id) } : null,
       V.exporter && !note.locked ? { label: 'Export...', icon: 'download', onClick: () => V.exporter.picked([id]).catch(V.problem) } : null,

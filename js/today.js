@@ -698,6 +698,7 @@
     return [
       { label: 'Open', icon: 'open', onClick: () => open(id) },
       plan && plan.count ? { label: `Study for ${plan.name}`, icon: 'cards', onClick: () => RV().start('test:' + id) } : null,
+      plan && plan.count && V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('test:' + id) } : null,
       { sep: true },
       soon ? { label: `Later today, ${R().clock(soon)}`, icon: 'clock', onClick: () => moveTo(id, today, soon) } : null,
       !later && !rule && R().dayOf(note) !== tomorrow ? { label: 'Tomorrow', icon: 'calendar', onClick: () => moveTo(id, tomorrow) } : null,
@@ -798,8 +799,8 @@
       // (1.19, js/capture.js: a photo of a page, read into a note; the camera on a phone)
       V.capture ? tile('snap', 'camera', 'Snap', 'A page to notes', () => V.capture.snap(), { big: true }) : null,
       canDictate() ? tile('dictate', 'dictate', 'Dictate', 'Talk to type', dictate) : null,
-      V.review ? tile('cards', 'cards', 'Flash cards', due ? `Study ${due}` : 'All done today',
-        () => (cardsDue() ? RV().start('all') : toNotes('review')), { count: due, said: `${due} due today` }) : null));
+      V.review ? cardsMenu(tile('cards', 'cards', 'Flash cards', due ? `Study ${due}` : 'All done today',
+        () => (cardsDue() ? RV().start('all') : toNotes('review')), { count: due, said: `${due} due today` }), due) : null));
   }
 
   /* -- the picked day (1.19.2)
@@ -837,6 +838,11 @@
      of a note's to-dos. Today's rows are dueRows(); a coming day's notes come through noteRow(). The chip (its time,
      "3 days late") is in with the words since 1.18: at the row's end when wide, under the title on a phone, beside the
      folder (styles.css), so a long title is never cut to "Test..." by it. */
+  /* Whether a test covers any cards (its row's Test me). */
+  function testHasCards(note) {
+    try { const plan = RV().planFor ? RV().planFor(note) : null; return !!(plan && plan.count); } catch (error) { return false; }
+  }
+
   function todoRow(row, test = false) {
     const note = row.note;
     if (row.kind === 'more') {
@@ -845,12 +851,14 @@
     }
     const onTick = row.kind === 'item' ? () => tickItem(note.id, row.item.index, row.item.raw) : () => tickNote(note.id);
     const ticks = row.kind === 'item' ? (row.done ? 'Untick it' : 'Tick it off') : row.done ? 'Not done' : 'Mark done';
-    const li = V.h('li.today-row' + (row.done ? '.done' : '') + (row.late ? '.late' : '') + (test ? '.test' : ''), { dataset: { id: note.id } },
+    const quiz = test && !row.done && V.learn && testHasCards(note);
+    const li = V.h('li.today-row' + (row.done ? '.done' : '') + (row.late ? '.late' : '') + (test ? '.test' : '') + (quiz ? '.with-quiz' : ''), { dataset: { id: note.id } },
       tick(row.done, `${test ? 'Test: ' : ''}${row.text}: ${row.done ? 'not done' : 'done'}`, onTick, `t:${row.key}`),
       V.h('button.today-row-text.dg-open', { type: 'button', title: 'Open the note', onclick: () => open(note.id), dataset: { key: `o:${row.key}` } },
         V.h('strong', {}, test ? [V.icon('target', 'dg-test'), V.h('span.sr-only', { text: 'Test: ' })] : null, row.text),
         row.kind === 'item' ? whereLine(note) : noteSub(note),
         chip(row.chip)),
+      quiz ? quizButton('test:' + note.id, row.text) : null,
       moreButton(row.key, row.text, () => noteActions(note, { key: `m:${row.key}` })));
     return withMenu(li, () => [{ label: ticks, icon: 'check', onClick: onTick }, { sep: true }, ...noteActions(note, { key: `m:${row.key}` })],
       `${row.text}: options`);
@@ -1101,14 +1109,17 @@
     const known = plan.count - plan.left;
     const pace = !plan.count ? 'No flash cards in it yet' : !plan.left ? 'All gone over' : plan.days <= 1 ? 'all today' : `about ${plan.perDay} a day`;
     // No cards in what it covers yet: AI makes some from those notes (js/aicards.js); the test's name still opens it.
+    // (1.19.3: Test me beside Study, Learn's quiz on what it covers)
     const go = plan.count
-      ? V.button('Study', { kind: first ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('test:' + note.id) })
+      ? [V.learn ? quizButton('test:' + note.id, plan.name) : null,
+        V.button('Study', { kind: first ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('test:' + note.id) })]
       : V.aiCards ? V.button('Make cards', { kind: first ? 'primary' : 'tonal', icon: 'spark', onClick: () => V.aiCards.forTest(note.id) })
         : V.button('Open', { onClick: () => open(note.id) });
     // (its menu: Study or Make cards, what's on it, then the note's own)
     const lead = () => [
       plan.count ? { label: `Study for ${plan.name}`, icon: 'cards', onClick: () => RV().start('test:' + note.id) }
         : V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.forTest(note.id) } : null,
+      plan.count && V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('test:' + note.id) } : null,
       V.exams ? { label: 'What\'s on the test?', icon: 'target', onClick: () => V.exams.picker(note.id) } : null,
     ];
     return noteMenu(V.h('div.today-box.today-test', { dataset: { id: note.id } },
@@ -1130,16 +1141,23 @@
       rest > 0 ? { label: `${rest} more`, onClick: () => toNotes('review') } : null);
   }
 
+  /* "Test me" (1.19.3, js/learn.js testMe): Learn's quiz on a deck's cards, straight away. */
+  const quizButton = (deck, name) => V.h('button.btn.today-quiz', { type: 'button', title: `Test me on ${name}`,
+    'aria-label': `Test me on ${name}`, dataset: { quiz: deck, key: `quiz:${deck}` }, onclick: () => V.learn.testMe(deck) },
+  V.icon('learn'), V.h('span.quiz-label', { text: 'Test me' }));
+
   /* The flash cards' menu (1.19.1): study, the Flash cards page, cards made with AI. */
   const cardsMenu = (el, due) => V.contextMenu(el, () => [
     due ? { label: `Study ${due} now`, icon: 'cards', onClick: () => RV().start('all') }
       : { label: 'Practise anyway', icon: 'cards', onClick: () => RV().start('all') },
+    V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('all') } : null,
     { label: 'Open Flash cards', icon: 'open', onClick: () => toNotes('review') },
     V.aiCards ? { label: 'Make cards with AI', icon: 'spark', onClick: () => V.aiCards.pickFolder() } : null,
   ], { label: 'Flash cards: options' });
   /* A deck's (a folder of cards due today): study it, open the folder, more cards for it. */
   const deckMenu = (el, d) => V.contextMenu(el, () => [
     { label: `Study ${d.name}`, icon: 'cards', onClick: () => RV().start(d.deck) },
+    V.learn ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe(d.deck) } : null,
     d.folder ? { label: `Open ${d.folder.name}`, icon: 'open', onClick: () => toNotes(d.folder.id) } : null,
     d.folder && V.aiCards ? { label: 'Make more cards with AI', icon: 'spark', onClick: () => V.aiCards.forFolder(d.folder.id) } : null,
   ], { label: `${d.name}: options` });
@@ -1152,7 +1170,8 @@
     const total = at.list.filter((c) => RV().isDue(c, at)).length;
     if (!total) {
       return part('cards', 'Flash cards', cardsMenu(V.h('div.today-box.today-cards.done', {},
-        V.h('strong', { text: 'All done for today' }), V.h('p.hint', { text: RV().nextDue(at) })), 0));
+        V.h('strong', { text: 'All done for today' }), V.h('p.hint', { text: RV().nextDue(at) }),
+        V.learn ? V.h('div.fc-go', {}, quizButton('all', 'all your cards')) : null), 0));
     }
     const plan = at.plans.find((p) => p.days <= 6);
     const forTest = plan ? at.list.filter((c) => RV().isDue(c, at) && plan.covers(c)).length : 0;
@@ -1167,7 +1186,8 @@
       V.h('div.fc-top', {}, V.h('p.fc-n', {}, V.h('b', { text: String(total) }),
         V.h('span', { text: (total === 1 ? 'card to study today' : 'cards to study today') + (one ? ` in ${one.name}` : '') })),
         // (beside a test's Study, the screen's second strong button since 1.18: plain, it didn't look like the way in)
-        V.button('Study', { kind: primary ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('all') })),
+        V.h('div.fc-go', {}, V.learn ? quizButton('all', 'all your cards') : null,
+          V.button('Study', { kind: primary ? 'primary' : 'tonal', icon: 'cards', onClick: () => RV().start('all') }))),
       forTest && forTest < total ? V.h('p.fc-note', {}, V.icon('target'), V.h('span', { text: `Includes ${forTest} for ${which} test` })) : null,
       decks.length ? V.h('div.today-decks', {}, shown.map((d) => deckMenu(V.h('button.today-deck', { type: 'button', onclick: () => RV().start(d.deck),
         title: `Study ${d.name}`, dataset: { deck: d.deck, key: `d:${d.deck}` } },

@@ -3302,6 +3302,9 @@ V.editor = (() => {
       (!note.locked || revealed) && V.chat ? { label: V.chat.ASK_LABEL, icon: 'spark', onClick: () => V.chat.askAbout() } : null,
       // (js/aicards.js: never a locked note, even one unlocked now, nor a template)
       !note.locked && !template && V.aiCards ? { label: 'Make flash cards', icon: 'cards', onClick: () => V.aiCards.forNote(note.id) } : null,
+      // (1.19.3: Learn's quiz on its cards as they're written now; never a locked note's)
+      !note.locked && !template && V.learn && V.study && V.study.cards(serialize()).length
+        ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe('note:' + note.id) } : null,
       !note.locked && !template ? { label: 'Save as template', icon: 'notes', onClick: () => V.organise.saveTemplate({
         title: note.title, body: serialize(), folder_id: note.folder_id }).catch(V.problem) } : null,
       template ? { label: 'Make it a normal note', icon: 'notes', onClick: async () => {

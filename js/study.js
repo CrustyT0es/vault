@@ -476,7 +476,9 @@ V.study = (() => {
   const hasCards = (note, text) => !note.locked && cards(text).length > 0;
   V.editor.addTool({ name: 'study', label: 'Study', icon: () => icon('cards'), keepCaret: false, onClick: studySheet,
     shown: hasCards, strip: true });
-  // (1.18: no Learn button beside it any more: Learn is in the study screen's ⋯, with the cards it quizzes.)
+  // (1.19.3, the owner: "make the test me more visible": Test me beside it, Learn's quiz on the note's cards.)
+  V.editor.addTool({ name: 'testme', label: 'Test me', icon: () => icon('learn'), keepCaret: false, strip: true, shown: hasCards,
+    onClick: () => { const id = V.editor.openId(); if (id && V.learn) V.learn.testMe('note:' + id); } });
   V.editor.addTool({ name: 'focus', label: 'Focus timer', icon: () => icon('timer'), keepCaret: false, onClick: focusSheet });
   V.editor.addTool({ name: 'repeat', label: 'Repeat', icon: () => icon('repeat'), keepCaret: false, onClick: repeatSheet,
     shown: (note, text) => HAS_ITEMS.test(text || '') || !!(note.extra && note.extra.reset) });

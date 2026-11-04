@@ -725,6 +725,8 @@ V.organise = (() => {
       } } : null,
       // (js/aicards.js: cards made with AI from everything in it, into a "Study cards" note there)
       V.aiCards ? { label: 'Make flash cards', icon: 'cards', onClick: () => V.aiCards.forFolder(folder.id) } : null,
+      // (1.19.3: Learn's quiz on its cards, the folders inside it too)
+      V.learn && V.learn.hasCards(folder.id) ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe(folder.id) } : null,
       home ? null : { label: 'Move folder to...', icon: 'folder-move', onClick: async () => {
         const to = await chooseFolder({ title: `Move ${folder.name} to`, moving: folder });
         if (to) await moveFolder(folder, to.id);

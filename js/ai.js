@@ -30,6 +30,7 @@ V.ai = (() => {
   const API_VERSION = '2026-10-21';
   const MODEL = 'claude-haiku-5-5';
   const MAX_TOKENS = 16000;
+  const QUICK_TOKENS = 4096;  // (`ask`'s quick answers: Test me's wrong choices and its checks of typed answers)
   // Dollars a million tokens, as jarvis/costs.py PRICES has them: input, output, cache write (5 minutes), cache read.
   // Claude Haiku 5.5 costs more once a prompt is over 100K tokens. The last three are the models the API may answer
   // with instead when one declines (a server-side fallback), priced as themselves.
@@ -265,6 +266,12 @@ V.ai = (() => {
   /* "Write notes with Claude" switched on or off for every device, the same way. */
   async function setNotesClaude(on) {
     await writeAi((ai) => ({ ...ai, notes_claude: !!on }));
+  }
+
+  /* "AI helps with Test me" (1.19.3, Settings > AI, every device): on unless switched off (extra.ai.testme false). */
+  const testMeOn = () => (((((V.data.settings || {}).extra || {}).ai || {}).testme) !== false);
+  async function setTestMe(on) {
+    await writeAi((ai) => ({ ...ai, testme: !!on }));
   }
 
   /* "Smarter Gemini notes" switched on (Gemini Smart writes them) or off (Gemini Fast), for every device, the same way. */
@@ -1735,10 +1742,12 @@ V.ai = (() => {
   /* The note-taker's request to the free Gemini (its key fetched in time, or it's "your cloud is taking too long"), by
      Gemini Fast unless "Smarter Gemini notes" is on (notesTier). `onProgress` gets the words written so far; an answer
      that stopped coming part-way is 'busy' (made again later). */
-  async function geminiNotes(system, text, signal = null, onProgress = null, images = []) {
+  async function geminiNotes(system, text, signal = null, onProgress = null, images = [], quick = false) {
     await within(getGeminiKey(), waits.look, cloudSlow());
-    const answer = await callGemini({ system, contents: [{ role: 'user', parts: geminiParts(text, images) }], use: 'notes', signal,
-      tier: notesTier(), onText: onProgress ? (so) => onProgress(countWords(so)) : null });
+    // (`quick`, 1.19.3's Test me: a short answer wanted now, so Gemini Fast with a chat's little thinking)
+    const answer = await callGemini({ system, contents: [{ role: 'user', parts: geminiParts(text, images) }],
+      use: quick ? 'chat' : 'notes', signal, tier: quick ? 'fast' : notesTier(), ...(quick ? { maxTokens: QUICK_TOKENS } : {}),
+      onText: onProgress ? (so) => onProgress(countWords(so)) : null });
     if (answer.stopReason === 'cut_off') throw Object.assign(new AiError('busy', WORDS.geminiBusy), { why: 'busy' });
     return answer;
   }
@@ -1974,7 +1983,8 @@ V.ai = (() => {
      from the cloud on a device that hasn't yet (modeReady). With Claude on, Gemini still writes them when its key is
      set up, unless "Write notes with Claude" is on (brain, pick). `tallyFree` false (the flash cards made with AI,
      js/aicards.js): a free Gemini answer isn't counted as a request in this month's tally at all; Claude's always is. */
-  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null, tallyFree = true, images = [] }) {
+  async function ask({ system, text, signal = null, use = '', onBrain = null, onProgress = null, tallyFree = true, images = [],
+    quick = false }) {
     await modeReady(waits.look);  // ("Use Claude too" as the cloud has it: a new device reads it with its first sync)
     if (!known || known.failed) { try { await check(); } catch (e) { /* carry on and let the request say what's wrong */ } }
     const off = !claudeOn();
@@ -1991,7 +2001,7 @@ V.ai = (() => {
     const unstoppable = !useGemini && V.desktop && !V.pc.can('makeNotesStop');  // (Jarvis 1.8.2's Python)
     let answer;
     try {
-      answer = await bounded((inner, progress) => (useGemini ? geminiNotes(system, text, inner, progress, images)
+      answer = await bounded((inner, progress) => (useGemini ? geminiNotes(system, text, inner, progress, images, quick)
         : V.desktop ? viaPc(system, text, inner, progress, images)
         : direct(system, text, inner, progress, images)),
       { signal, who: useGemini ? 'gemini' : 'claude', ms: unstoppable ? null : waits.ask, onProgress });
@@ -2185,6 +2195,14 @@ V.ai = (() => {
             : 'Claude is on: pick it in Chat. It writes your notes too until the free Gemini is set up.') });
   }
 
+  /* "AI helps with Test me" (js/learn.js): the AI's trickier wrong answers, and its look at a typed answer the
+     app's own check turned down. */
+  function testMeSwitch(ui) {
+    return accountSwitch(ui, { name: 'AI helps with Test me', cls: 'ai-testme-switch', on: testMeOn(), set: setTestMe,
+      hint: 'Trickier wrong answers to pick from, and a typed answer with the right idea counts. Uses the same AI as your notes.',
+      said: (want) => (want ? 'The AI helps with Test me now.' : 'Test me works on its own now, without the AI.') });
+  }
+
   /* "Notes written by: Fast | Smart | Claude" (Claude only while "Use Claude too" is on): one row for the account's two
      settings, extra.ai.notes_gemini ('smart' or 'fast') and extra.ai.notes_claude. */
   let notesBusy = false;
@@ -2332,6 +2350,7 @@ V.ai = (() => {
         tag(ui.card('Gemini', geminiKeyLine(ui)), 'free'),
         tag(ui.card('Claude', claudeSwitch(ui), on ? month : null, on && !keySet ? claudeKey : null), 'paid'),
         ui.card('Note-taker', notesLine(ui)),
+        ui.card('Test me', testMeSwitch(ui)),
         V.h('p.hint.set-foot.ai-privacy', { text: on
           ? 'Gemini (by Google) and Claude (by Anthropic) only read what you send them: your messages in Chat, and a '
             + 'transcript when you make notes. Neither hears the sound itself. Gemini is free, so it isn\'t counted here.'
@@ -2368,7 +2387,7 @@ V.ai = (() => {
       slow: (model, use = 'chat') => isSlow(model, use), forget: forgetSpeed,
       record: () => JSON.parse(JSON.stringify(record())), forgetList },
     state: () => known, ready: () => has(brain()),  // (the brain the note-taker would use is set up here)
-    has, brain, claudeOn, notesClaude, notesTier, modeKnown, modeReady, setClaude, setNotesClaude, setNotesGemini, setUp,
+    has, brain, claudeOn, notesClaude, notesTier, testMeOn, setTestMe, modeKnown, modeReady, setClaude, setNotesClaude, setNotesGemini, setUp,
     recheck, lacksGemini, geminiKnown, keysSettled, hiddenSince,
     MODEL, API, API_VERSION, GEMINI_MODEL, GEMINI_MODELS, waits };  // (waits: tests shorten them)
 })();

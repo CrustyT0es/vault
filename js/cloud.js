@@ -218,7 +218,8 @@ V.cloud = (() => {
      cloud's again as soon as the note really changes, wherever that was. History (js/history.js) only ever looks at
      the title and the words, so cards moving on never make a copy either. */
   // (checkin: after a test, how it went, js/checkin.js: asked and answered quietly, never an edit)
-  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print', 'checkin']);
+  // (quiz: Test me's wrong choices made by the AI, js/learn.js: kept quietly, never an edit)
+  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print', 'checkin', 'quiz']);
   const prints = new WeakMap();
   function notePrint(row) {
     if (prints.has(row)) return prints.get(row);
@@ -276,14 +277,14 @@ V.cloud = (() => {
   }
 
   /* Each setting kept in `extra` as this device changed it, else as theirs. Flash cards (extra.cards) one card at a
-     time, so cards studied on both devices at once all keep their progress. */
+     time, so cards studied on both devices at once all keep their progress (and Test me's wrong choices, extra.quiz). */
   function mergeExtra(start, mine, theirs, top = true) {
     const was = start || {};
     const now = mine || {};
     const out = { ...(theirs || {}) };
     for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
       if (stable(was[key]) === stable(now[key])) continue;
-      if (top && key === 'cards' && isObject(now.cards) && isObject(out.cards)) out.cards = mergeExtra(was.cards, now.cards, out.cards, false);
+      if (top && (key === 'cards' || key === 'quiz') && isObject(now[key]) && isObject(out[key])) out[key] = mergeExtra(was[key], now[key], out[key], false);
       // (after a test, js/checkin.js: an answer given on the other device beats "asked" from this one)
       else if (top && key === 'checkin' && isObject(out.checkin) && out.checkin.mood && !(isObject(now.checkin) && now.checkin.mood)) continue;
       else if (key in now) out[key] = now[key];
