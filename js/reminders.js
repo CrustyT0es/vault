@@ -742,20 +742,31 @@ V.reminders = (() => {
       + `&details=${encodeURIComponent(details(note))}`;
   }
 
-  /* The same event as an .ics file, with an alarm 10 minutes before. Lines folded at 75 bytes, as the format says. */
+  /* The same event as an .ics file, with an alarm 10 minutes before and one at the time itself (1.19.10: Chat calls
+     these alarms, and an alarm at 6:45 should go off at 6:45). Lines folded at 75 bytes, as the format says. */
   function ics(note, at = remindAt(note), now = new Date()) {
+    return icsAll([{ note, at }], now);
+  }
+
+  /* Several reminders in one .ics file (1.19.10: Chat's "Add all 2 to Calendar"), each its own event with its own
+     alarm, so one tap on an iPhone adds them all. `items`: [{ note, at }]. */
+  function icsAll(items, now = new Date()) {
     const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-    const end = new Date(at.getTime() + 30 * 60000);
-    const title = V.noteTitle(note);
-    // A repeating one: its rule, and its times as the clock on the wall (floating, so the rule follows this device's
-    // time zone and its clock changes, the way a calendar app's own repeating event does).
-    const rule = repeatOf(note);
+    const event = ({ note, at = remindAt(note) }) => {
+      const end = new Date(at.getTime() + 30 * 60000);
+      const title = V.noteTitle(note);
+      // A repeating one: its rule, and its times as the clock on the wall (floating, so the rule follows this device's
+      // time zone and its clock changes, the way a calendar app's own repeating event does).
+      const rule = repeatOf(note);
+      return ['BEGIN:VEVENT', `UID:${note.id}-${stamp(at)}@vault`, `DTSTAMP:${stamp(now)}`,
+        ...(rule ? [`DTSTART:${wall(at)}`, `DTEND:${wall(end)}`, `RRULE:${rrule(rule)}`] : [`DTSTART:${stamp(at)}`, `DTEND:${stamp(end)}`]),
+        `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(details(note))}`, `URL:${noteLink(note.id)}`,
+        'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:-PT10M', 'END:VALARM',
+        'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:PT0M', 'END:VALARM',
+        'END:VEVENT'];
+    };
     const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Wefty//Reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
-      'BEGIN:VEVENT', `UID:${note.id}-${stamp(at)}@vault`, `DTSTAMP:${stamp(now)}`,
-      ...(rule ? [`DTSTART:${wall(at)}`, `DTEND:${wall(end)}`, `RRULE:${rrule(rule)}`] : [`DTSTART:${stamp(at)}`, `DTEND:${stamp(end)}`]),
-      `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(details(note))}`, `URL:${noteLink(note.id)}`,
-      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(title)}`, 'TRIGGER:-PT10M', 'END:VALARM',
-      'END:VEVENT', 'END:VCALENDAR'];
+      ...items.flatMap(event), 'END:VCALENDAR'];
     const encoder = new TextEncoder();
     const fold = (line) => {
       const out = [];
@@ -778,15 +789,38 @@ V.reminders = (() => {
     return !!window.open(url, '_blank', 'noopener');
   }
 
-  function downloadIcs(note, at = remindAt(note)) {
-    const name = ((V.noteTitle(note) || 'Reminder').replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Reminder') + '.ics';
-    const url = URL.createObjectURL(new Blob([ics(note, at)], { type: 'text/calendar' }));
-    const link = V.h('a', { href: url, download: name, hidden: true });
+  const fileName = (words) => ((words || 'Reminder').replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Reminder') + '.ics';
+
+  /* Where an .ics file is opened rather than downloaded: only a Safari tab on an iPhone or iPad, which shows a calendar
+     file it's taken to in Calendar's "Add" sheet (where a download would only go to Files). Not the home-screen app,
+     another browser on iOS or an app's own browser: taken to a file there, Wefty's only window may show the file's raw
+     text with no way back, or nothing at all, so they download it as before. Never tried on a real iPhone. */
+  function icsOpensCalendar() {
+    const kind = V.deviceKind || {};
+    return !V.desktop && !!kind.ios && kind.iosBrowser === 'safari' && !kind.standalone && !kind.inApp;
+  }
+
+  /* An .ics file handed over: downloaded (the PC app saves it in Downloads), or in a Safari tab on an iPhone or iPad
+     opened (icsOpensCalendar). */
+  function saveIcs(text, name) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }));
+    const opens = icsOpensCalendar();
+    const link = V.h('a', { href: url, ...(opens ? {} : { download: name }), hidden: true });
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    V.toast(V.desktop ? `Saved ${name} in Downloads\\Vault` : `Downloaded ${name}: open it to add it to your calendar`);
+    V.toast(V.desktop ? `Saved ${name} in Downloads\\Vault` : opens ? 'Opening it in Calendar: tap Add there.'
+      : `Downloaded ${name}: open it to add it to your calendar`);
+  }
+
+  function downloadIcs(note, at = remindAt(note)) {
+    saveIcs(ics(note, at), fileName(V.noteTitle(note)));
+  }
+
+  /* Several reminders as one .ics file (each its own event). */
+  function downloadIcsAll(items, name = 'Wefty reminders') {
+    saveIcs(icsAll(items), fileName(name));
   }
 
   /* -- the question, as the words are typed */
@@ -1309,6 +1343,8 @@ V.reminders = (() => {
   }
 
   const api = { parse, label, dayLabel, clock, remindAt, remindLabel, dayOf, calendarLink, ics, noteLink, consider, edit,
+    // Chat's calendar ask (1.19.10)
+    icsAll, openOutside, downloadIcs, downloadIcsAll, icsOpensCalendar,
     cardChip, inUpcoming, pending, group, groupOf, toggleDone, upcoming, schedule, notify, icon, change, latest, openNote,
     // repeating (1.16.1)
     set, setRepeat, snooze, repeatOf, cleanRule, repeatText, repeatLine, nextWords, occurrence, upNext, hasPassed, moveOn, putBack,

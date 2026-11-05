@@ -233,6 +233,7 @@ V.chatTools = (() => {
     'Act like an agent: when they ask for something in Wefty, do all of it yourself with your tools, step by step, over as many rounds as it takes. Look first when you need ids (list_folders, find_notes), then make the changes. Never say you can\'t do something your tools can do, never tell them to do it themselves, and never say you did something no tool did.',
     'Plan a request with several parts and carry out every part. For example "make a folder called Badminton, put which teacher is on each day, and set an alarm every day at 6:45 and 10:30" is: create_folder Badminton; create_note in Badminton for each day, titled with the day and saying that day\'s teacher; then set_reminder twice with repeat "every day", once for 6:45 and once for 10:30 (a note holds one reminder, so each time gets its own reminder note in that folder).',
     'If something you need is missing and you can\'t sensibly guess it (like which teacher is on which day), ask one short question and do the rest when they answer. Otherwise make a sensible choice yourself (a fitting emoji, a clear title).',
+    'Reminders and alarms: when they ask for one, set it at once (set_reminder, or a remind_time) without asking first; if they gave a day but no time, pick a sensible one and say which. Then end by telling them to tap the calendar button under your answer (Add to Calendar or Google Calendar) so their calendar reminds them even when Wefty is closed.',
     'Days go to the tools as YYYY-MM-DD or as words like "tomorrow" or "next friday": Wefty reads the words on their own calendar (today_summary says today\'s date). Times go like "6:45" or "7pm".',
     subs ? 'When they share a picture (a class post, a schedule, a receipt, a subscription page) and ask you to remember it, add it, or remind them, read it and make the note, reminder or subscription from what it says. When they share a screenshot of a subscription or billing page and ask to add it, call add_subscription with the name, plan, price, currency and next renewal from the picture.'
       : 'When they share a picture (a class post, a schedule, a receipt) and ask you to remember it, add it, or remind them, read it and make the note or reminder from what it says.',
@@ -667,7 +668,7 @@ V.chatTools = (() => {
       }
       const now = V.data.notes.get(note.id) || note;
       return { result: { made: noteInfo(now), ...(repeat || time ? { reminder: whenSaid(now) } : {}) },
-        action: { kind: 'note', type: 'note_create', target: note.id, title, body,
+        action: { kind: 'note', type: 'note_create', target: note.id, title, body, ...(time || repeat ? { reminder: true } : {}),
           label: `Made "${V.noteTitle(note)}"${folder ? ` in ${folder.name}` : ''}${repeat ? `: ${whenSaid(now)}` : ''}` } };
     },
 
@@ -716,7 +717,7 @@ V.chatTools = (() => {
         : `"${title}" due ${V.reminders.dayLabel(now.due)}${time ? `, reminder ${V.reminders.clock(time)}` : ''}`;
       return { result: { note: noteInfo(now), ...(time ? { reminder: `${now.due} ${time}` } : {}),
         ...(rule ? { repeats: V.reminders.repeatText(rule) } : {}) },
-        action: { kind: 'note', type: 'note_due', target: note.id, before, label } };
+        action: { kind: 'note', type: 'note_due', target: note.id, before, ...(time || repeating ? { reminder: true } : {}), label } };
     },
 
     async add_flash_cards(args) {
@@ -885,10 +886,10 @@ V.chatTools = (() => {
         ...(V.reminders.repeatOf(now) ? { repeats: V.reminders.repeatText(V.reminders.repeatOf(now)) } : {}) };
       if (made) {
         return { result: { ...result, made: true },
-          action: { kind: 'note', type: 'note_create', target: made.id, title: made.title, body: made.body,
+          action: { kind: 'note', type: 'note_create', target: made.id, title: made.title, body: made.body, reminder: true,
             label: `Reminder "${V.noteTitle(now)}": ${when}` } };
       }
-      return { result, action: { kind: 'note', type: 'note_due', target: note.id, before, label: `"${V.noteTitle(now)}": ${when}` } };
+      return { result, action: { kind: 'note', type: 'note_due', target: note.id, before, reminder: true, label: `"${V.noteTitle(now)}": ${when}` } };
     },
 
     /* -- folders (1.18): js/organise.js's rules, never its sheets */
@@ -1537,6 +1538,117 @@ V.chatTools = (() => {
       ask && state === 'asked' && action.about ? V.h('span.chat-action-about', { text: action.about }) : null);
   }
 
+  /* ---------------------------------------------------------------- the calendar ask (1.19.10)
+
+     The owner: "For chat mode for setting a reminder or alarm, have it auto set one and ask to put in calendar
+     immediately ... it doesn't ask 'go to calendar' for my friend." Wefty only reminds while it's open, so under an
+     answer that set a reminder at a time the list asks at once to add it to the calendar (a browser opens a tab or a
+     file only from a tap, so the ask is the "immediately"): in a Safari tab on an iPhone or iPad "Add to Calendar" (the
+     .ics, which Safari hands to Calendar) then "Google Calendar"; elsewhere (the home-screen app too) Google Calendar
+     first, then the .ics, downloaded. The .ics rings at the time itself (and 10 minutes before); Google Calendar uses
+     the account's own usual notification, so the card says "it reminds you", not "rings". Several: a row
+     each with its own Google Calendar button, and one .ics with them all. Each note's reminder as it is now (a time
+     changed since is what goes), never one undone, deleted, locked, a due date with no time or a one-off gone by. A
+     tap is kept on the action (`calendar`: how, and which reminder it was), so a reload and the other devices show
+     it; the buttons stay, for another go. */
+  const REMINDS = new Set(['set_reminder', 'create_note', 'set_due_date']);
+
+  /* Did this action set a reminder? Each tool says so when it runs (`reminder`: create_note and set_due_date only with
+     a time or a repeat, set_reminder always), so a note made, or a due date set, with no reminder never asks later when
+     a reminder is put on that note some other way, and one that took the reminder off never does. An action from
+     before that (no `reminder` either way) counts only from set_reminder. */
+  const setsReminder = (a) => (a.reminder === undefined ? a.tool === 'set_reminder' : a.reminder === true);
+
+  /* What makes a reminder the same one in the calendar: a one-off's moment; a repeating one's rule and time of day
+     (its next time moves on each time it rings, the calendar's own event repeats by itself). */
+  function calendarKey(at, rule) {
+    if (!rule) return at.toISOString();
+    return `${V.reminders.ruleKey ? V.reminders.ruleKey(rule) : JSON.stringify(rule)}@${at.getHours()}:${at.getMinutes()}`;
+  }
+
+  /* The reminders `actions` set that the calendar should get: [{ id, note, at, rule, key, action (the last one, where
+     a tap is kept), mark (a tap kept for this very reminder, or null) }], one a note, in the order they were set. */
+  function calendarItems(actions, now = new Date()) {
+    if (!V.reminders || !V.reminders.remindAt) return [];
+    const byNote = new Map();
+    for (const a of actions || []) {
+      if (!a || !a.id || a.undone || a.kind !== 'note' || !REMINDS.has(a.tool) || (a.type !== 'note_due' && a.type !== 'note_create')
+        || !setsReminder(a)) continue;
+      if (!byNote.has(a.target)) byNote.set(a.target, []);
+      byNote.get(a.target).push(a);
+    }
+    const out = [];
+    for (const [id, set] of byNote) {
+      const note = V.reminders.latest ? V.reminders.latest(id) : V.data.notes.get(id);
+      if (!liveNote(note) || note.locked) continue;
+      const at = V.reminders.remindAt(note);
+      if (!at) continue;
+      const rule = V.reminders.repeatOf(note);
+      if (!rule && at <= now) continue;
+      const key = calendarKey(at, rule);
+      const mark = [...set].reverse().map((a) => a.calendar).find((c) => c && c.key === key) || null;
+      out.push({ id, note, at, rule, key, action: set[set.length - 1], mark });
+    }
+    return out;
+  }
+
+  /* A moment's day on this device's calendar, as 'YYYY-MM-DD'. */
+  const dayOfAt = (at) => `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+
+  const MARKS = { google: 'Opened in Google Calendar: save it there', ics: 'Calendar file made: add it there' };
+
+  /* The ask itself, or null. `kept(changed)`: the actions with a tap marked, to keep in the chat; `redraw`. */
+  function calendarAsk(actions, { kept, redraw } = {}) {
+    const items = calendarItems(actions);
+    if (!items.length) return null;
+    const R = V.reminders;
+    // (Add to Calendar first only where the file opens straight in Calendar: a Safari tab on an iPhone or iPad. The
+    // home-screen app, other iOS browsers and apps' own browsers download it, so Google Calendar leads there.)
+    const ios = !!(R.icsOpensCalendar && R.icsOpensCalendar());
+    const many = items.length > 1;
+    const all = items.every((i) => i.mark);
+    const mark = async (list, how) => {
+      const at = new Date().toISOString();
+      for (const item of list) item.action.calendar = { how, key: item.key, at };
+      if (redraw) redraw();
+      if (kept) await kept(list.map((i) => i.action));
+    };
+    // (each opens what it opens first, inside the tap: a tab or a file opened later is blocked as a pop-up)
+    const google = (item, main) => V.h('button.btn.chat-cal-btn' + (main && !all ? '.tonal' : ''), {
+      type: 'button', dataset: { cal: 'google' },
+      'aria-label': `Google Calendar: ${V.noteTitle(item.note)}`,
+      onclick: () => {
+        const link = R.calendarLink(item.note, item.at);
+        mark([item], 'google').catch(V.problem);  // (kept first: the page may be left for what opens)
+        R.openOutside(link);
+      } }, V.icon('calendar'), V.h('span', { text: 'Google Calendar' }));
+    const file = (list, main, words) => V.h('button.btn.chat-cal-btn' + (main && !all ? '.tonal' : ''), {
+      type: 'button', dataset: { cal: 'ics' },
+      onclick: () => {
+        const notes = list.map((i) => ({ note: i.note, at: i.at }));
+        mark(list, 'ics').catch(V.problem);  // (kept first: a Safari tab may leave the page for Calendar)
+        if (notes.length === 1) R.downloadIcs(notes[0].note, notes[0].at);
+        else R.downloadIcsAll(notes);
+      } }, V.icon(ios ? 'calendar' : 'download'), V.h('span', { text: words }));
+    const when = (item) => (item.rule ? R.repeatLine(item.note) : `${R.dayLabel(dayOfAt(item.at))} ${R.clock(item.at)}`);
+    const row = (item, buttons) => V.h('div.chat-cal-item', { role: 'listitem', dataset: { note: item.id, marked: item.mark ? item.mark.how : '' } },
+      V.h('span.chat-cal-what', {}, V.h('strong', { text: V.noteTitle(item.note) }), V.h('span', { text: ` · ${when(item)}` })),
+      item.mark ? V.h('span.chat-cal-mark', {}, V.icon('check'), V.h('span', { text: MARKS[item.mark.how] || MARKS.google })) : null,
+      buttons ? V.h('div.chat-cal-btns', {}, buttons) : null);
+    const top = all ? (many ? 'Sent to your calendar. Tap again if one didn\'t save there.' : 'Sent to your calendar. Tap again if it didn\'t save there.')
+      : `Add ${many ? 'them' : 'it'} to your calendar so it reminds you, even when Wefty is closed.`;
+    const one = items[0];
+    const body = many
+      ? [V.h('div.chat-cal-list', { role: 'list', 'aria-label': 'Reminders' }, items.map((i) => row(i, [google(i, false)]))),
+        V.h('div.chat-cal-btns.chat-cal-all', {}, file(items, ios, ios ? `Add all ${items.length} to Calendar` : `All ${items.length} as one .ics file`))]
+      : [V.h('div.chat-cal-list', { role: 'list', 'aria-label': 'Reminder' }, row(one, null)),
+        V.h('div.chat-cal-btns', {}, ios ? [file([one], true, 'Add to Calendar'), google(one, false)]
+          : [google(one, true), file([one], false, '.ics file')])];
+    return V.h('div.chat-cal' + (all ? '.added' : ''), { role: 'group', 'aria-label': 'Add to your calendar' },
+      V.h('div.chat-cal-top', {}, V.icon('calendar', 'chat-cal-icon'), V.h('p.chat-cal-text', { text: top })),
+      ...body);
+  }
+
   /* The whole list for one answer's `actions`, or null. `key` names it (the turn), for "Show N more". Asks still
      waiting for Delete or Cancel come first, on their own, never folded away; then one card of the rest. */
   function list(actions, { onChange, key = '', fresh = null } = {}) {
@@ -1580,19 +1692,21 @@ V.chatTools = (() => {
         } }) : null;
       // (an ask waiting above says itself what it wants: the count is of what's done)
       const count = !can.length && !done && rest.some((a) => a.undone) ? 'All undone' : done ? `${plural(done, 'change')} in Wefty` : 'In Wefty';
+      const calendar = calendarAsk(shown, { redraw: () => draw(), kept: onChange ? (changed) => onChange(changed) : null });
       V.clear(box,
         asks.length ? V.h('div.chat-actions-card.asks', { role: 'list', 'aria-label': 'Asks to delete' }, asks.map(row)) : null,
         rest.length ? V.h('div.chat-actions-card', {},
           shown.length > 1 ? V.h('div.chat-actions-head', {}, V.h('span.chat-actions-count', { text: count }), undoAll) : null,
           V.h('div.chat-actions-list', { role: 'list', 'aria-label': 'Done in Wefty' }, rows.map(row)),
           folded ? V.h('button.chat-actions-more', { type: 'button', text: `Show ${rest.length - SHOW_FIRST} more`,
-            onclick: () => { opened.add(key); draw(); } }, V.icon('down')) : null) : null);
+            onclick: () => { opened.add(key); draw(); } }, V.icon('down')) : null) : null,
+        calendar);
     };
     draw();
     return box;
   }
 
   return { VERSION, TOOLS, WRITES, PROMPT, PROMPT_OFF, prompt, key, aboutSubs, subsOn, offered, MOST_WRITES, forClaude, forGemini, run, undo, open, chip, list, dayFrom, timeFrom,
-    confirm, decline, saysYes, isAsk, isOpenAsk, undoable, stateOf, saveFile,
+    confirm, decline, saysYes, isAsk, isOpenAsk, undoable, stateOf, saveFile, calendarItems, calendarAsk,
     isWrite: (name) => WRITES.has(name) };
 })();

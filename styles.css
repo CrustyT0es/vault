@@ -3954,6 +3954,39 @@ html:has(#app.gate) .nt-strip { display: none; }
 .chat-actions-more .icon { width: 15px; height: 15px; }
 .chat-actions-more:hover { background: var(--accent-soft); }
 @media (pointer: coarse) { .chat-action-btn { min-height: 36px; } .chat-action, .chat-actions-head, .chat-actions-more { min-height: 44px; } }
+/* The calendar ask under an answer that set a reminder (1.19.10, js/chattools.js calendarAsk): a soft accent card
+   ("Add it to your calendar so your phone rings, even when Wefty is closed."), the reminder (or a row each with its
+   own Google Calendar button), and the buttons, which wrap on a narrow phone. Once every one was tapped it goes
+   calm (.added): the plain card colour, no solid button, a check line per reminder. */
+.chat-cal {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border: 1px solid var(--accent-line);
+  border-radius: 14px; background: var(--accent-soft); color: var(--text);
+}
+:where(:root[data-theme="dark"]) .chat-cal { box-shadow: inset 0 1px 0 var(--edge-hi); }
+.chat-cal.added { border-color: var(--line); background: var(--surface-2); }
+.chat-cal-top { display: flex; align-items: flex-start; gap: 8px; }
+.chat-cal-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--accent-ink); }
+.chat-cal-text { flex: 1; min-width: 0; margin: 0; font: 600 13.5px/19px var(--font); overflow-wrap: anywhere; }
+.chat-cal.added .chat-cal-text { color: var(--text-2); font-weight: 500; }
+.chat-cal-list { display: flex; flex-direction: column; }
+.chat-cal-item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; padding: 6px 0;
+  color: var(--text-2); font: 500 13px/18px var(--font);
+}
+.chat-cal-item + .chat-cal-item { border-top: 1px solid var(--line); }
+.chat-cal-what { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.chat-cal-what strong { color: var(--text); font-weight: 600; }
+.chat-cal-mark { display: flex; align-items: center; gap: 4px; flex-basis: 100%; min-width: 0; color: var(--accent-ink); font: 500 12.5px/17px var(--font); overflow-wrap: anywhere; }
+.chat-cal-mark .icon { width: 14px; height: 14px; }
+.chat-cal-btns { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.chat-cal-btn { min-height: 38px; max-width: 100%; padding: 0 14px; font-size: 13.5px; white-space: normal; text-align: start; }
+.chat-cal-btn .icon { width: 16px; height: 16px; }
+@media (pointer: coarse) { .chat-cal-btn { min-height: 44px; } }
+/* In dark (and Pure black) .btn.tonal's soft purple is the card's own fill: the ask's main button is solid iris there,
+   so it stands out from the card it sits on (it's the card's one main action; the calm .added card has none). */
+:where(:root[data-theme="dark"]) .chat-cal .btn.tonal { background: var(--primary); color: var(--on-primary); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16); }
+:where(:root[data-theme="dark"]) .chat-cal .btn.tonal:hover:not(:disabled) { background: var(--primary-hover); }
+:where(:root[data-theme="dark"]) .chat-cal .btn.tonal:active:not(:disabled) { background: var(--primary-press); }
 .chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: -10px; }
 .chat-actions .btn { min-height: 34px; padding: 0 10px; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
 .chat-actions .btn:hover { color: var(--text); }

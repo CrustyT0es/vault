@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.9",
+ "version": "1.19.10",
  "min_shell": 1,
  "notes": [
+  "Ask Chat to remind you (or set an alarm) and it sets it right away, then asks to add it to your calendar so it reminds you, even when Wefty is closed. The calendar file rings at the time itself (and 10 minutes before); Google Calendar uses your usual notification. In Safari on an iPhone it goes straight into the Calendar app.",
   "Chat stays where you're reading: scroll up to read an answer while it's still being written, and it no longer jumps you to the bottom when it finishes.",
   "Holding your finger down now always does the same thing: on a note, a row, a day or a button it opens its menu (or picks the note) and never selects words; in a note, a chat message or the note-taker's words it selects words to copy. A chat message's menu is its \u22ef button.",
   "Flash cards show their topic at the top, and Skip topic (or S) skips the rest of it for now. Back (or \u2190) goes to the card before: answer again and the new answer counts instead. Test me has Back too.",
@@ -16,7 +17,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.9-8e30c9614094",
+ "build": "1.19.10-d55300da54e6",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -167,8 +168,8 @@
    "size": 153299
   },
   "js/chattools.js": {
-   "sha256": "ed05ae5852837a1c59823fdfd2c2e931a48adfa8aab2577c39256ab88b2dbac3",
-   "size": 105822
+   "sha256": "00fed62d819143e54c483df8bd811d791216e356b00265f6f9bd0ece8dc3f497",
+   "size": 114184
   },
   "js/checkin.js": {
    "sha256": "3dcb095622179626fa7743d48a285033f91c08adac078620e93f63fc75f49cbb",
@@ -267,8 +268,8 @@
    "size": 14354
   },
   "js/reminders.js": {
-   "sha256": "144976e4a19123a4c666d7a034b83de3a2833bb9d3cf1645d6f6467623b25b6b",
-   "size": 72151
+   "sha256": "7c4dea52f0a6d71fb20303f7dccd7c9f1e69e8ead8b79e8dcf9311923ea5d115",
+   "size": 74057
   },
   "js/review.js": {
    "sha256": "cb9cea89ba9322783372762909e2374886b57a022c652115127bc42b52ad7f77",
@@ -327,8 +328,8 @@
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "617030e492130e0b2349f02d25aa425d4747d0c97c696a38c93af33c3e20e97f",
-   "size": 74343
+   "sha256": "02e690c4b017af6c5a76f32b552e9a9b393cb913e184aee8972f029210f8e78c",
+   "size": 74344
   },
   "js/week.js": {
    "sha256": "fc7876e2759528ccc85183afdb8286c4b25cef84418187deb68130d16d8e3c6f",
@@ -343,12 +344,12 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "29ca7f6e11723f8c464261aa8bb2910fa878cd2b7ef901af96c1f3519f7178ac",
-   "size": 321490
+   "sha256": "c76865dc0e6d2830030ae5538dee93c0754258d8ae58ede24304ac8fa49ca04a",
+   "size": 324260
   },
   "sw.js": {
-   "sha256": "8f402a6f6a11aa02c435fc3f35571d0787775cc0cc3420c89c1c0ff290c52c58",
-   "size": 12430
+   "sha256": "ac80f95935cb60b4ed07ac5c8ab6e6e7504f89ee2ddd3f7292c68f8275a39278",
+   "size": 12431
   },
   "vendor/LICENSE-supabase-js.txt": {
    "sha256": "334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936",
