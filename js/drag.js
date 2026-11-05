@@ -14,7 +14,7 @@
 'use strict';
 
 V.drag = (() => {
-  const HOLD = 450;          // ms a finger or the S Pen stays down before it can drag (as long as a long press picks)
+  const HOLD = V.LONG_PRESS || 450;  // ms a finger or the S Pen stays down before it can drag (js/util.js: a long press)
   const SLOP = 10;           // px a finger may wander during that (more is a scroll)
   const START_MOUSE = 5;     // px a mouse moves before it's a drag (less is a click)
   const START_HELD = 6;      // px a held finger moves before it's a drag (less: it was only held, then let go)
@@ -41,6 +41,11 @@ V.drag = (() => {
                      still scrolls it, 88 px unless said)
      mouse           false: a mouse never drags it
      handle          a selector inside `el` where a finger drags at once, without holding */
+  // While a finger is held on something that can be dragged, nothing starts picking words.
+  document.addEventListener('selectstart', (event) => {
+    if ((pending && pending.touchy) || (active && active.touchy)) event.preventDefault();
+  }, true);
+
   function source(el, opts) {
     el.addEventListener('pointerdown', (event) => down(event, el, opts));
     // A held finger mustn't scroll the list instead (a listener on the element itself is never passive, and it's
@@ -50,13 +55,28 @@ V.drag = (() => {
         if (event.cancelable) event.preventDefault();
       }
     });
-    // Android's own long press: it's this hold (early, or again), never the right-click menu or text selection.
+    // Android's own long press (a contextmenu from the finger): never the right-click menu or text selection, and
+    // never the hold itself (1.19.8: HOLD's timer is the one source, so a phone set to a short touch-and-hold can't
+    // pick a note at one moment and open a menu at another). A finger's contextmenu with no press seen (the list drawn
+    // again under it) is cancelled too: nothing but the timer picks.
+    // The S Pen's side button (or a Chromebook stylus's) is a right-click, not the browser's long press: it holds at
+    // once, as before 1.19.8 (its tap is shorter than HOLD).
     el.addEventListener('contextmenu', (event) => {
-      const mine = (active && active.el === el) || (pending && pending.el === el && pending.touchy);
+      const pen = event.pointerType === 'pen';
+      const finger = !pen && (event.pointerType === 'touch'
+        || !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents));
+      const pressed = pending && pending.el === el && pending.touchy;
+      const mine = (active && active.el === el) || pressed || finger || (pen && !!opts.onHold);
       if (!mine) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (pending && !pending.held) hold();
+      if (!pen || active) return;
+      if (pressed) {
+        if (!pending.held) hold();
+      } else {
+        buzz();
+        try { opts.onHold(); } catch (error) { console.error(error); }
+      }
     }, true);
     el.addEventListener('dragstart', (event) => event.preventDefault());  // (a picture or link's own drag)
     return el;

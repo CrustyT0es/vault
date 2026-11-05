@@ -708,8 +708,8 @@ V.notes = (() => {
   function cardMenu(el, note) {
     return V.contextMenu(el, () => (picking && picked.has(note.id) && picked.size > 1 ? pickedItems() : noteItems(note.id, { pick: true })), {
       label: `${V.noteTitle(note)}: options`,
-      // (a finger held on a card picks it, js/drag.js: one held there before it saw the press begin picks too)
-      touch: () => { if (!picked.has(note.id)) toggle(note.id); },
+      // (a finger held on a card picks it: js/drag.js's hold, the one source of a finger's long press there)
+      touch: false,
       // A double click opens it while picking, where a click picks (else the click itself opened it).
       open: () => { if (!picking) return; stopPicking(); open(note.id); },
     });

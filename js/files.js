@@ -747,6 +747,10 @@ V.files = (() => {
     for (const type of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(type, stop);
     el.addEventListener('contextmenu', (event) => {
       event.preventDefault();
+      // (a finger's: the browser's long press, never a second source; the hold's timer opens it. 1.19.8. The S Pen's
+      // side button is a right-click: at once, as before)
+      if (event.pointerType !== 'pen' && (event.pointerType === 'touch'
+        || (event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents))) return;
       if (Date.now() - fired < 900) return;  // the hold already opened it
       fired = Date.now();
       stop();

@@ -574,13 +574,27 @@ textarea.field { resize: vertical; min-height: 48px; }
 .menu-item:disabled { opacity: .45; cursor: default; }
 .menu:focus { outline: none; }  /* (a menu opened by a pointer has the keyboard itself, nothing lit: V.menu `pointer`) */
 
-/* "More options" (1.19.1, V.contextMenu): what's acted on shows it while its menu is open; a finger held on it opens
-   the menu, never the phone's word picking or its link preview (until Select text says otherwise); a finger's menu
-   has rows a finger can hit. */
+/* "More options" (1.19.1, V.contextMenu): what's acted on shows it while its menu is open; a finger's menu has rows a
+   finger can hit.
+   A finger's long press, one rule (1.19.8; the owner: "sometimes it selects text, or sometimes vice versa"): on a touch
+   screen nothing picks words but the words people read or write (V.WORDS in js/util.js, the same list: a note's words,
+   its title and Read view, Chat's messages, the note-taker's transcript, an announcement) and the boxes typed in. So a
+   long press on a thing (a card, a row, a chip, a day, a button, a setting) is only ever Wefty's (its menu, picking or
+   dragging) and never the phone's word picking or callout, even an inch off the thing; on words it's only ever the
+   phone's (handles, Copy). Buttons inside words stay things. Only where a finger is the pointer (a phone, a tablet):
+   a touch-screen Chromebook or PC with a trackpad or mouse picks any words with it, as ever. */
 .ctx-open { outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent); outline-offset: -2px; }
 @media (pointer: coarse) {
-  .ctx:not(.ctx-text) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  .ctx :is(input, textarea, [contenteditable]) { -webkit-user-select: text; user-select: text; }
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  :is(.ctx-words, .blocks, .note-title, .read-view, .chat-reply-body, .chat-you-text, .chat-note, .nt-words, .news-text, .news-note-body,
+    .ai-check, .ai-gemini-net, .ai-gemini-times, .ai-gemini-first, textarea, select, [contenteditable]:not([contenteditable="false"]),
+    input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=reset]):not([type=range]):not([type=color]):not([type=file])) {
+    -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+  }
+  :is(.ctx-words, .blocks, .read-view, .chat-reply-body, .chat-you-text, .chat-note, .nt-words, .news-text, .news-note-body,
+    .ai-check, .ai-gemini-net, .ai-gemini-times, .ai-gemini-first) :is(button, [role=button], label, summary, img, input[type=checkbox], input[type=radio]) {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
   .ctx-menu .menu-item { min-height: 44px; }
 }
 
@@ -3835,6 +3849,17 @@ html:has(#app.gate) .nt-strip { display: none; }
   padding: 10px 14px; border-radius: 18px 18px 6px 18px; background: var(--accent-soft); color: var(--text);
   font: 400 15px/22px var(--font); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* (1.19.8) A message's ⋯: its menu, as a finger's long press on its words picks them. */
+.chat-you-line { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.chat-more {
+  flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
+  background: none; color: var(--muted); cursor: pointer;
+}
+.chat-more .icon { width: 18px; height: 18px; }
+.chat-more:hover, .chat-more[aria-expanded=true] { background: var(--surface-2); color: var(--text); }
+.chat-you .chat-more { opacity: .7; }
+.chat-you:is(:hover, :focus-within) .chat-more { opacity: 1; }
+@media (pointer: coarse) { .chat-more { width: 44px; height: 44px; } .chat-you .chat-more { opacity: 1; } }
 .chat-claude { display: grid; gap: 10px; min-width: 0; }
 .chat-reply-body { min-width: 0; }
 .chat-md { font-size: 15.5px; line-height: 25px; }

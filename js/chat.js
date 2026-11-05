@@ -1884,7 +1884,7 @@ V.chat = (() => {
         (turn.files || []).filter((f) => f.kind === 'image').map((f) => V.h('div.chat-sent-pic', {}, pictureEl(f))),
         (turn.files || []).filter((f) => f.kind !== 'image').map((f) => fileChip(f)),
         (turn.notes || []).map((n) => noteChip(n))) : null,
-      turn.text ? V.h('div.chat-you-text', { text: turn.text }) : null));
+      turn.text ? V.h('div.chat-you-line', {}, moreButton('Your message: options'), V.h('div.chat-you-text', { text: turn.text })) : null));
     // What an answer cut off at this end had said (1.18): shown while it's finished, until the new words pass it.
     const before = turn.partial && (turn.state === 'waiting' || turn.state === 'answering')
       ? textOf({ ...turn, replies: turn.partial }) : '';
@@ -1937,6 +1937,7 @@ V.chat = (() => {
       last && !busy ? V.button(turn.state === 'done' || turn.state === 'cut' ? 'Retry' : turn.cutHere ? 'Finish it' : 'Try again', {
         kind: 'quiet', icon: 'restore', onClick: () => retry(chat, turn),
         title: turn.cutHere ? 'Asks Claude again: that costs about as much as a new answer' : undefined }) : null,
+      text && turn.state !== 'refused' ? moreButton('Answer: options') : null,
       V.h('span.chat-meta', { text: meta }));
     return V.h('div.chat-turn', { dataset: { turn: turn.id, state: turn.state } }, you,
       answerMenu(chat, turn, last, V.h('div.chat-claude', {}, body,
@@ -1948,15 +1949,22 @@ V.chat = (() => {
         actions)));
   }
 
-  /* -- "more options" on a message (1.19.1: a right-click, a long press, the keyboard's menu key; V.contextMenu). Words
-     picked in it with the mouse keep the browser's own menu (its Copy copies just them). */
+  /* -- "more options" on a message (1.19.1: a right-click, the keyboard's menu key; V.contextMenu). Words picked in it
+     with the mouse keep the browser's own menu (its Copy copies just them). A finger's long press on a message's
+     words picks words, as anywhere people read (1.19.8, V.WORDS; it was 1.19.1's menu with a "Select text" item): its
+     menu is the ⋯ beside your message and in an answer's row of buttons (a long press on those buttons opens it too). */
+  const moreButton = (label) => V.h('button.chat-more', { type: 'button', title: 'More', 'aria-label': label.replace(': options', ': more options'),
+    'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (event) => {
+      const button = event.currentTarget;
+      const message = button.closest('[data-ctx="on"]');
+      if (message) V.contextMenu.openFrom(message, button, event);
+    } }, V.icon('more'));
 
   /* Your own message: copy it, or put it back in the box to change and send again. */
   function youMenu(chat, turn, el) {
     if (!turn.text) return el;
-    return V.contextMenu(el, (event) => [
+    return V.contextMenu(el, () => [
       { label: 'Copy', icon: 'copy', onClick: async () => { await V.copy(turn.text).catch(V.problem); V.toast('Copied'); } },
-      V.contextMenu.byTouch(event) ? V.contextMenu.selectText(el) : null,
       busy ? null : { label: 'Edit in the box', icon: 'edit', onClick: () => {
         if (!parts || !parts.input || openId !== chat.id) return;
         parts.input.value = turn.text;
@@ -1968,13 +1976,12 @@ V.chat = (() => {
 
   /* An answer: Copy, Save as note (the Inbox, or a folder), Send to each of your devices, Retry (the last one). */
   function answerMenu(chat, turn, last, el) {
-    return V.contextMenu(el, (event) => {
+    return V.contextMenu(el, () => {
       const text = textOf(turn);
       if (!text || turn.state === 'refused' || turn.state === 'answering' || turn.state === 'waiting') return [];
       return [
         { label: 'Copy', icon: 'copy', onClick: async () => { await V.copy(text).catch(V.problem); V.toast('Copied'); } },
-        V.contextMenu.byTouch(event) ? V.contextMenu.selectText(el) : null,
-        { label: 'Save to Inbox', icon: 'notes', onClick: () => saveNote(chat, turn, V.notes.inbox()) },
+          { label: 'Save to Inbox', icon: 'notes', onClick: () => saveNote(chat, turn, V.notes.inbox()) },
         { label: 'Save to a folder...', icon: 'folder', onClick: async () => {
           const folder = await V.organise.chooseFolder({ title: 'Save to' });
           if (folder) saveNote(chat, turn, folder);

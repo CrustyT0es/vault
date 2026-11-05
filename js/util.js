@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.19.7';
+V.VERSION = '1.19.8';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -615,30 +615,48 @@ V.menu = function menu(anchor, items, { align = '', at = null, cls = '', label =
    `items` (V.menu's; or a function given the event that makes them as it opens, so they say what's true then; none:
    the browser's own menu), opened
    - by a right-click, which a Chromebook's or a Mac's two-finger tap on the touchpad also is, at the pointer;
-   - by a finger or the S Pen held still for a moment (a long press; moving first is a scroll, left to the browser,
-     and Android's own long press is this one), above the finger;
+   - by a finger or the S Pen held still for LONG ms (a long press; moving first is a scroll, left to the browser),
+     above the finger. One rule for a finger (1.19.8; the owner: "sometimes it selects text, or sometimes vice versa"):
+     on a thing (a card, a row, a chip, a button) the hold's own timer is the only thing that opens the menu, on every
+     phone, iPhone and touchscreen alike; the browser's long press (Chrome's contextmenu from a finger, at the phone's
+     own touch-and-hold time, which iOS never sends) is always cancelled there and opens nothing, so the two can't both
+     fire or race, and the phone never picks a thing's words (styles.css: nothing is selectable on a touch screen but
+     WORDS). In WORDS (the text people read or write: a note's words and its Read view, Chat's messages, the
+     note-taker's transcript, an announcement) a finger's long press is always the browser's: picking words, Copy; the
+     menu there is a right-click (or a visible ⋯: `attach.openFrom`);
    - by the keyboard's menu key or Shift+F10, at the thing itself;
    and closed by Esc, a press beside it or scrolling, the keyboard going back to where it was.
    In a box typed into (a text box, the editor's words) and over words picked (selected) in `el`, the browser's own
    menu stays (copy, paste, spelling). Something inside `el` with a menu of its own has it, not `el`'s. Options:
-     touch: false     a long press there is someone else's (js/drag.js: it picks a note, or lifts a folder); a function:
-                      what a long press does instead of the menu
+     touch: false     a long press there is someone else's (js/drag.js: it picks a note, or lifts a folder)
      open             what a double click with a mouse does (the desktop habit: opening the thing)
      skip(target)     true where `el`'s menu isn't wanted (the browser's own then): the editor's words
      label            the menu's name for a screen reader
    Returns el. */
+/* A finger's long press: how long it's held still (js/drag.js's hold uses the same), and the words people read or write,
+   where a finger's long press is always the browser's own (1.19.8: styles.css keeps exactly these selectable on a touch
+   screen; everything else there, the things, never picks words). */
+V.LONG_PRESS = 450;
+V.WORDS = '.ctx-words, .blocks, .note-title, .read-view, .chat-reply-body, .chat-you-text, .chat-note, .nt-words, .news-text, .news-note-body, .ai-check, .ai-gemini-net, .ai-gemini-times, .ai-gemini-first';
+
 V.contextMenu = (() => {
-  const LONG = 500;   // ms a finger stays still for a long press (as Android's own)
+  const LONG = V.LONG_PRESS;  // ms a finger stays still for a long press
   const SLOP = 10;    // px it may wander meanwhile (more is a scroll)
   const TEXT = 'textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type=checkbox]):not([type=radio])'
     + ':not([type=button]):not([type=submit]):not([type=reset]):not([type=range]):not([type=color]):not([type=file]):not([type=image])';
   const FOCUSABLE = 'button, a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  // The words people read or write, where a finger's long press is the browser's (styles.css keeps them selectable on
+  // a touch screen, the one list: test_wefty_1198_longpress checks the two agree). Buttons inside them are things.
+  const WORDS = V.WORDS;
+  const THING_IN_WORDS = 'button, [role=button], [role=menuitem], label, summary, input[type=checkbox], input[type=radio]';
   let held = null;      // a finger down on something with a menu: { el, id, x, y, target, timer }
   let open = null;      // the menu open now: { el, menu }
   let rightDown = null; // the last right press: { el, at, picked } (words picked before it: a Mac picks the word pressed)
+  const menus = new WeakMap();  // el -> { make, opts }: for attach.openFrom
 
   const element = (node) => (node && node.nodeType === 1 ? node : node && node.parentElement) || null;
   const typing = (node) => { const el = element(node); return !!(el && el.closest(TEXT)); };
+  const inWords = (node) => { const el = element(node); return !!(el && el.closest(WORDS) && !el.closest(THING_IN_WORDS)); };
   const touchy = (event) => event.pointerType === 'touch' || event.pointerType === 'pen'
     || !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents);
   function wordsPicked(el) {
@@ -668,7 +686,7 @@ V.contextMenu = (() => {
     return active && active !== document.body ? active : null;
   }
 
-  function show(el, make, opts, how, x, y, target, event) {
+  function show(el, make, opts, how, x, y, target, event, anchor = null) {
     let items;
     try { items = tidy(typeof make === 'function' ? make(event) : make); } catch (error) { console.error(error); items = []; }
     if (!items.some((item) => !item.sep)) return false;
@@ -680,16 +698,33 @@ V.contextMenu = (() => {
       const top = Math.max(8, Math.min(box.top, window.innerHeight - 8));
       at = { x: box.left + Math.min(24, box.width / 2), y: Math.min(top + Math.min(box.height, 40), window.innerHeight - 8) };
     }
+    if (how === 'button') at = null;  // (under the ⋯ pressed)
+    if (how === 'touch') unpick();
     el.classList.add('ctx-open');
-    const menu = V.menu(el, items, { at, cls: 'ctx-menu', label: opts.label || '', scrollCloses: true, pointer: how !== 'key',
+    if (anchor) anchor.setAttribute('aria-expanded', 'true');  // (a ⋯: its popup open, for a screen reader and its look)
+    const menu = V.menu(anchor || el, items, { at, cls: 'ctx-menu', label: opts.label || '', scrollCloses: true, pointer: how !== 'key',
       onClose: () => {
         el.classList.remove('ctx-open');
+        if (anchor) anchor.setAttribute('aria-expanded', 'false');
         if (open && open.menu === menu) open = null;
         if (back && back.isConnected) back.focus({ preventScroll: true });
       } });
     open = { el, menu };
     return true;
   }
+
+  /* Words a phone picked under the finger anyway (one that ignores user-select): gone as a finger's menu opens. A
+     box being typed in keeps its own. */
+  function unpick() {
+    const sel = window.getSelection ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || typing(document.activeElement)) return;
+    try { sel.removeAllRanges(); } catch (error) { /* nothing picked, no matter */ }
+  }
+
+  /* While a finger is held on a thing, nothing starts picking its words (a belt to styles.css's braces). */
+  document.addEventListener('selectstart', (event) => {
+    if (held && !inWords(event.target) && !typing(event.target)) event.preventDefault();
+  }, true);
 
   function stopHold() {
     if (!held) return;
@@ -737,7 +772,6 @@ V.contextMenu = (() => {
     const h = held;
     stopHold();
     if (!h || !h.el.isConnected) return;
-    if (typeof opts.touch === 'function') { buzz(); opts.touch(); swallowLift(h.id); return; }
     if (show(el, make, opts, 'touch', h.x, h.y, h.target, { type: 'longpress', target: h.target, clientX: h.x, clientY: h.y })) {
       buzz();
       swallowLift(h.id);
@@ -748,16 +782,16 @@ V.contextMenu = (() => {
     if (!el || el.dataset.ctx === 'on') return el;
     el.dataset.ctx = 'on';
     if (opts.touch !== false) el.classList.add('ctx');
+    menus.set(el, { make, opts });
     const mine = (event) => !event.defaultPrevented && !typing(event.target) && !(opts.skip && opts.skip(element(event.target)))
-      && !(touchy(event) && el.classList.contains('ctx-text'));  // (Select text was chosen: a long press picks words again)
+      && !(touchy(event) && inWords(event.target));  // (a finger on words: the browser's own picking)
     el.addEventListener('pointerdown', (event) => {
       if (!touchy(event)) {
         if (event.button === 2) rightDown = { el, at: Date.now(), picked: wordsPicked(el) };
         return;
       }
-      // (a long press that's someone else's, js/drag.js's: theirs alone; `touch` as a function only answers the
-      // browser's own long press, Android's contextmenu, that they didn't see begin)
-      if (!event.isPrimary || opts.touch === false || typeof opts.touch === 'function' || !mine(event) || held) return;
+      // (a long press that's someone else's, js/drag.js's: theirs alone)
+      if (!event.isPrimary || opts.touch === false || !mine(event) || held) return;
       if (event.target.closest('[data-ctx="on"]') !== el) return;  // (something inside with a menu of its own)
       held = { el, id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target,
         timer: setTimeout(() => longPress(el, make, opts), LONG) };
@@ -768,23 +802,27 @@ V.contextMenu = (() => {
     });
     el.addEventListener('contextmenu', (event) => {
       if (event.defaultPrevented) return;  // (something inside had its own)
-      if (open && open.el === el) { event.preventDefault(); return; }  // (Android's long press after ours)
-      if (!mine(event)) return;  // the browser's own: copy, paste, spelling
       if (touchy(event)) {
+        // A finger: in words, the browser's own (picking them, Copy); on a thing, never the browser's (its menu, its
+        // word picking) and never a menu by itself: the hold's timer opens ours (see above), whether this came
+        // before it (a phone set to a short touch-and-hold), after it, or with no hold at all.
+        if (event.defaultPrevented || typing(event.target) || inWords(event.target)) return;
+        if (opts.skip && opts.skip(element(event.target))) return;
         event.preventDefault();
-        if (opts.touch === false) return;
-        if (held && held.el === el) {
-          // Android's own long press came first: it's this one.
+        // The S Pen's side button (js/ink.js) or a Chromebook stylus's: a right-click, so its menu at once, as before
+        // 1.19.8 (a tap with it is shorter than a hold, so no timer would). A hold running is this one; one open stays.
+        if (event.pointerType === 'pen' && opts.touch !== false && !(open && open.el === el)) {
           const h = held;
           stopHold();
-          if (typeof opts.touch === 'function') { opts.touch(); swallowLift(h.id); return; }
-          if (show(el, make, opts, 'touch', h.x, h.y, h.target, event)) { buzz(); swallowLift(h.id); }
-          return;
+          if (show(el, make, opts, 'touch', event.clientX, event.clientY, event.target, event)) {
+            buzz();
+            if (h) swallowLift(h.id);
+          }
         }
-        if (typeof opts.touch === 'function') { opts.touch(); return; }
-        show(el, make, opts, 'touch', event.clientX, event.clientY, event.target, event);
         return;
       }
+      if (open && open.el === el) { event.preventDefault(); return; }
+      if (!mine(event)) return;  // the browser's own: copy, paste, spelling
       const recent = rightDown && rightDown.el === el && Date.now() - rightDown.at < 1500 ? rightDown : null;
       if (recent ? recent.picked : wordsPicked(el)) return;  // words picked: the browser's Copy
       const keyed = !event.clientX && !event.clientY;  // (a menu key the browser turned into a contextmenu)
@@ -811,15 +849,16 @@ V.contextMenu = (() => {
     return el;
   }
 
+  /* `el`'s menu under `button` (a visible ⋯ where a finger's long press picks words instead: a Chat message). */
+  attach.openFrom = (el, button, event = null) => {
+    const known = menus.get(el);
+    if (!known) return false;
+    return show(el, known.make, known.opts, 'button', 0, 0, button, event || { type: 'button', target: button }, button);
+  };
+  attach.WORDS = WORDS;
   attach.close = () => { if (open) open.menu.close('escape'); };
   /* Whether the menu was opened by a finger (or the S Pen): `make`'s event. */
   attach.byTouch = (event) => !!event && (event.type === 'longpress' || touchy(event));
-  /* An item for a finger's menu on words (a chat message): "Select text", after which a long press on `el` picks
-     words as the phone does (until it's drawn again), with a line saying so. */
-  attach.selectText = (el) => ({ label: 'Select text', icon: 'text', onClick: () => {
-    el.classList.add('ctx-text');
-    V.toast('Now hold the words to pick some.');
-  } });
   attach.isOpen = () => !!open;
   /* Menu items made from the buttons in `box` (a row's own Open, Save, Copy...): what they say (or are named), their
      icon, and what they do (pressing the button itself). */

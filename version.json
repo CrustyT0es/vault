@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.7",
+ "version": "1.19.8",
  "min_shell": 1,
  "notes": [
+  "Holding your finger down now always does the same thing: on a note, a row, a day or a button it opens its menu (or picks the note) and never selects words; in a note, a chat message or the note-taker's words it selects words to copy. A chat message's menu is its \u22ef button.",
   "Flash cards show their topic at the top, and Skip topic (or S) skips the rest of it for now. Back (or \u2190) goes to the card before: answer again and the new answer counts instead. Test me has Back too.",
   "New: a 2-minute tour of Wefty. It shows where everything is and what the switches in Settings do. Take it any time: tap your picture, then Take the tour.",
   "The note-taker hears a noisy class much better: with the free Gemini set up, AI listening records the room and writes down what the teacher says about every half minute, ignoring the groups chatting around you (switch it off on the note-taker's start screen or in Settings > AI). Without it, fewer words get dropped.",
@@ -14,7 +15,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.7-79c72d5e2b41",
+ "build": "1.19.8-1edc3e9ff8c4",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -161,8 +162,8 @@
    "size": 49949
   },
   "js/chat.js": {
-   "sha256": "ab40422712c127b4c0baaac437a34ac97760b9b0a9bd851de0bedf6d72a5aca7",
-   "size": 152301
+   "sha256": "db153dc71b0e7c88f374b6abc5c768f71b50976a1b9bd12f429d44d2d323efb1",
+   "size": 152970
   },
   "js/chattools.js": {
    "sha256": "ed05ae5852837a1c59823fdfd2c2e931a48adfa8aab2577c39256ab88b2dbac3",
@@ -193,8 +194,8 @@
    "size": 19528
   },
   "js/drag.js": {
-   "sha256": "5594c5d84048e713ddb74acb2ca9e6f5fecbfb81f9011d0c62ba57f52d69222e",
-   "size": 16042
+   "sha256": "369727aa52e147825d6cd368193f710703a3f70c3dac18894afeffbd3a1896ae",
+   "size": 17200
   },
   "js/editor.js": {
    "sha256": "7fcf186f1e0128e7645ce819fadf5b7922a6599fb58f56f8fea86b7d432c4a4f",
@@ -209,8 +210,8 @@
    "size": 24497
   },
   "js/files.js": {
-   "sha256": "9e6f0b7945c597900f91c197e2b0ffbd06d59d689cc38adbbba2d99c7bc3a12d",
-   "size": 65816
+   "sha256": "d2316afe603fa71b9d9cd91a449002f756c151b6178ee630aec55d9cfa3c310d",
+   "size": 66158
   },
   "js/format.js": {
    "sha256": "4f7f43ae032a3cdc503b466e55426f667cf9fd3f07f9747c1b1521799ed059b6",
@@ -241,8 +242,8 @@
    "size": 36803
   },
   "js/notes.js": {
-   "sha256": "a570db380944bcb255e657dec764eaeabc1f872449d1d3fc13145abf025930d2",
-   "size": 84033
+   "sha256": "b30ed03e672ca615b355953314c1495976bd96e0f17e556c04126ad8ed1214db",
+   "size": 83984
   },
   "js/notetaker.js": {
    "sha256": "7fdc2c9572fb8d9590c3d279e3bf48b062101cd9f85654ad32b16ab2e5e2c54c",
@@ -325,8 +326,8 @@
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "9824745b276d0da7048c1ab4bcc93f1bcf51288c50332317e56c08792987a699",
-   "size": 71282
+   "sha256": "dd4515374bae5d7e4f44da9fb766e682c675d6d4c1e055862cc0880a1fdd1410",
+   "size": 74343
   },
   "js/week.js": {
    "sha256": "fc7876e2759528ccc85183afdb8286c4b25cef84418187deb68130d16d8e3c6f",
@@ -341,11 +342,11 @@
    "size": 1858
   },
   "styles.css": {
-   "sha256": "31bc106a651abab6defb2ab494d3007c9d7dc8b53acb95c0846a4195c7f7b5ec",
-   "size": 319285
+   "sha256": "29ca7f6e11723f8c464261aa8bb2910fa878cd2b7ef901af96c1f3519f7178ac",
+   "size": 321490
   },
   "sw.js": {
-   "sha256": "e872452b03189056d27f0d51a8c2cb6104ca25a42fa9eec9aecd675f43e0ab08",
+   "sha256": "7404f8b64c68ff98cc00d0cf76c1da282639e40e76092d96fe2fc8414b31b8f5",
    "size": 12430
   },
   "vendor/LICENSE-supabase-js.txt": {
