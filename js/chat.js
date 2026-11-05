@@ -206,7 +206,7 @@ V.chat = (() => {
   const pictures = new Map(); // path -> object URL of a picture shown
   const listeners = new Map(); // the PC's answers: request id -> its events
   const sentNotes = new WeakMap(); // a message being sent -> its notes with their words (back in the box if it can't go)
-  let shown = '';              // the chat drawn last, and how far it had got (a new answer scrolls to the end)
+  let shown = '';              // the chat drawn last and its number of turns (a message sent scrolls to the end)
   const live = new Set();      // turns this page is answering now (answer() going, start to end)
   const unread = new Set();    // chats whose answer ended while they weren't on screen (the Chat tab's badge counts them)
   const resumed = new Map();   // turn id -> times in a row it was finished by itself after a cut in sight
@@ -2096,13 +2096,17 @@ V.chat = (() => {
       V.iconButton('back', 'Back to chats', () => { showingChat = false; draw(); }, 'chat-back'),
       V.h('button.chat-title', { type: 'button', title: 'Rename', onclick: () => rename(chat), text: shownTitle(chat.title) || 'New chat' }),
       V.iconButton('more', 'More', (event) => chatMenu(event.currentTarget, chat)));
-    const last = chat.turns[chat.turns.length - 1];
-    const where = `${chat.id}:${chat.turns.length}:${last ? last.state : ''}`;
+    // Another chat, or a message sent (one more turn): to the newest message. An answer finishing (or Retry, Stop, a
+    // sync) is the same chat drawn again: it stays where it's being read (1.19.9, the owner: "once it's done the
+    // message it teleports my screen to the bottom"), following the end only when it was already there.
+    const where = `${chat.id}:${chat.turns.length}`;
     parts.scroll.dataset.place = `chat:${chat.id}`;  // (js/start.js puts a chat's scroll back only on that chat)
-    const top = parts.scroll.scrollTop;
+    const scroller = parts.scroll;
+    const top = scroller.scrollTop;
+    const atEnd = scroller.scrollHeight - top - scroller.clientHeight < 80;
     V.clear(parts.thread, chat.turns.length ? chat.turns.map((t, i) => turnEl(chat, t, i === chat.turns.length - 1)) : emptyChat());
     if (where !== shown) requestAnimationFrame(() => { if (parts) parts.scroll.scrollTop = parts.scroll.scrollHeight; });
-    else parts.scroll.scrollTop = top;  // the same chat drawn again (a sync): it stays where it was read
+    else scroller.scrollTop = atEnd ? scroller.scrollHeight : top;
     shown = where;
     drawBox();
   }

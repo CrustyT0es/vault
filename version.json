@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.19.8",
+ "version": "1.19.9",
  "min_shell": 1,
  "notes": [
+  "Chat stays where you're reading: scroll up to read an answer while it's still being written, and it no longer jumps you to the bottom when it finishes.",
   "Holding your finger down now always does the same thing: on a note, a row, a day or a button it opens its menu (or picks the note) and never selects words; in a note, a chat message or the note-taker's words it selects words to copy. A chat message's menu is its \u22ef button.",
   "Flash cards show their topic at the top, and Skip topic (or S) skips the rest of it for now. Back (or \u2190) goes to the card before: answer again and the new answer counts instead. Test me has Back too.",
   "New: a 2-minute tour of Wefty. It shows where everything is and what the switches in Settings do. Take it any time: tap your picture, then Take the tour.",
@@ -15,7 +16,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.19.8-1edc3e9ff8c4",
+ "build": "1.19.9-8e30c9614094",
  "files": {
   "fonts/Inter-Bold.woff2": {
    "sha256": "2fc67537708842a1cecebf596ce5b3aa0a790a2c92d31ac67d4915ff494c90de",
@@ -162,8 +163,8 @@
    "size": 49949
   },
   "js/chat.js": {
-   "sha256": "db153dc71b0e7c88f374b6abc5c768f71b50976a1b9bd12f429d44d2d323efb1",
-   "size": 152970
+   "sha256": "9574858f10d87f90e164775e4b28f53461418dccb94470d803dbb13dedb03709",
+   "size": 153299
   },
   "js/chattools.js": {
    "sha256": "ed05ae5852837a1c59823fdfd2c2e931a48adfa8aab2577c39256ab88b2dbac3",
@@ -326,7 +327,7 @@
    "size": 15845
   },
   "js/util.js": {
-   "sha256": "dd4515374bae5d7e4f44da9fb766e682c675d6d4c1e055862cc0880a1fdd1410",
+   "sha256": "617030e492130e0b2349f02d25aa425d4747d0c97c696a38c93af33c3e20e97f",
    "size": 74343
   },
   "js/week.js": {
@@ -346,7 +347,7 @@
    "size": 321490
   },
   "sw.js": {
-   "sha256": "7404f8b64c68ff98cc00d0cf76c1da282639e40e76092d96fe2fc8414b31b8f5",
+   "sha256": "8f402a6f6a11aa02c435fc3f35571d0787775cc0cc3420c89c1c0ff290c52c58",
    "size": 12430
   },
   "vendor/LICENSE-supabase-js.txt": {
