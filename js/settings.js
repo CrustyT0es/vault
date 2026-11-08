@@ -146,30 +146,165 @@ V.settings = (() => {
     }
   }
 
+  /* -- Your data (1.21): Export everything (the same ZIP as Notes & files' Download everything) and Delete my account. */
+
+  async function exportEverything() {
+    if (V.chat) await V.chat.refresh().catch(() => {});  // the chats from the other devices too
+    try { V.backup.download(); } catch (error) { V.problem(error); }
+  }
+
+  const NOT_DELETED = {
+    offline: 'You\'re offline, so nothing was deleted. Try again when you\'re back online.',
+    unreachable: 'Wefty couldn\'t reach your cloud, so nothing was deleted. Try again in a minute.',
+    owner: 'You run this Wefty cloud, so your account can\'t be deleted here.',
+    // (V.TEAM_EMAIL is js/profile.js's, loaded after this: asked for when it's said)
+    get helper() { return `This Wefty cloud can't delete accounts by itself yet. Ask whoever runs your Wefty cloud to delete it (${V.TEAM_EMAIL}).`; },
+    confirm: 'That isn\'t the e-mail you sign in with. Type it as it shows above.',
+    signedOut: 'Wefty here got signed out, so nothing was deleted. Sign in again, then try again.',
+  };
+
+  /* Which of NOT_DELETED an error from delete-me is ('' for one with words of its own). A helper older than 1.21's
+     doesn't know delete-me: it answers 400 "unknown" to the owner, 403 "not_owner" to anyone else, and a cloud with
+     no helper at all answers 404 (which a browser sees as a request that failed: told apart by the cloud's own health
+     check, V.pair.reaches). */
+  async function whyNotDeleted(error) {
+    const code = String((error && (error.code || error.kind)) || '');
+    const status = (error && error.status) || 0;
+    if (code === 'offline' || !navigator.onLine) return 'offline';
+    if (code === 'signed-out' || code === 'signed_out' || status === 401) return 'signedOut';
+    if (code === 'owner') return 'owner';
+    if (code === 'confirm') return 'confirm';
+    if (code === 'not_owner' || code === 'unknown' || code === 'missing' || code === 'old' || code === 'not_set_up'
+      || status === 404) return 'helper';
+    if (!status && !V.desktop) return (V.pair && await V.pair.reaches(V.config)) ? 'helper' : 'unreachable';
+    return '';
+  }
+
+  /* The person's account, everything in it and this device's copy, gone: the helper (with their own sign-in) or the
+     PC part does it, then this device forgets them and says goodbye. The owner never gets here (their row says why). */
+  function deleteSheet() {
+    const email = String((V.data.user || {}).email || '');
+    const box = V.h('input.field.delete-confirm', { type: 'email', autocomplete: 'off', spellcheck: 'false',
+      placeholder: email, 'aria-label': 'Type your e-mail to confirm' });
+    const problem = V.h('p.error-text.delete-problem', { role: 'alert' });
+    const same = () => box.value.trim().toLowerCase() === email.trim().toLowerCase() && !!email;
+    let busy = false;
+    let go = null;
+    const sheet = V.sheet({
+      title: 'Delete my account',
+      content: V.h('div.delete-account', {},
+        V.h('p.delete-what', { text: 'This deletes every note, folder, file, chat and setting, and this account, on every device, '
+          + 'for good. Nobody can bring them back.' }),
+        V.h('div.setting-buttons', {}, V.button('Export everything first', { icon: 'download', onClick: exportEverything })),
+        V.h('label.label', {}, `Type your e-mail to confirm (${email})`, box),
+        problem),
+      actions: [{ label: 'Cancel' }, { label: 'Delete my account forever', kind: 'danger', icon: 'trash', onClick: async () => {
+        if (busy || !same()) return true;
+        problem.textContent = '';
+        if (!navigator.onLine) { problem.textContent = NOT_DELETED.offline; return true; }
+        busy = true;
+        go.disabled = true;
+        go.lastChild.textContent = 'Deleting...';
+        try {
+          if (V.desktop) {
+            if (!V.pc.can('deleteMe')) throw Object.assign(new Error(V.pc.howToUpdate()), { kind: 'pc' });
+            await V.pc.call('deleteMe', { confirm: box.value.trim() });
+          } else {
+            await V.invites.helperCall('delete-me', { confirm: box.value.trim() });
+          }
+        } catch (error) {
+          const why = await whyNotDeleted(error);
+          problem.textContent = why ? NOT_DELETED[why] : (error && error.message) || String(error);
+          busy = false;
+          go.disabled = !same();
+          go.lastChild.textContent = 'Delete my account forever';
+          return true;
+        }
+        sheet.close();
+        await forgetHere();
+        goodbye();
+        return false;
+      } }],
+    });
+    go = sheet.el.querySelector('.sheet-actions .btn.danger');
+    go.disabled = true;
+    box.addEventListener('input', () => { if (!busy) go.disabled = !same(); problem.textContent = ''; });
+    return sheet;
+  }
+
+  // What stays on this device after an account is deleted: the cloud it's connected to (so the first screen shows
+  // again) and the device's own choices (its id, look and kind). Everything else of Wefty's here goes.
+  const KEEP_HERE = ['vault-config', 'vault-install', 'vault-theme', 'vault-black', 'vault-device'];
+
+  /* This device forgets the person: their copy (V.db), their sign-in and everything Wefty kept for them. Nothing may
+     sign them in again or bring the sign-in screen up over the goodbye (V.emit: the cloud's sync finding no sign-in). */
+  async function forgetHere() {
+    const emit = V.emit;
+    V.emit = (type, detail) => (type === 'signed-out' ? undefined : emit(type, detail));
+    try { V.emit('signing-out'); } catch (error) { /* (each part forgets what it can) */ }
+    for (const table of ['notes', 'folders', 'transfers']) V.data[table] = new Map();
+    V.data.clips = [];
+    V.data.settings = {};
+    try {
+      if (V.cloud.sb && !V.desktop) {
+        if (V.cloud.sb.removeAllChannels) V.cloud.sb.removeAllChannels();
+        if (V.cloud.sb.auth.stopAutoRefresh) V.cloud.sb.auth.stopAutoRefresh();
+      }
+    } catch (error) { /* (only background work) */ }
+    try { await V.db.wipe(); } catch (error) { console.warn('Wefty:', error); }
+    try { indexedDB.deleteDatabase('wefty-listening'); } catch (error) { /* (the note-taker's pieces, if any) */ }
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (/^(vault|wefty|sb)-/.test(key) && !KEEP_HERE.includes(key)) localStorage.removeItem(key);
+      }
+      sessionStorage.clear();
+    } catch (error) { /* a private window: nothing kept anyway */ }
+  }
+
+  function goodbye() {
+    V.gate.screen(V.h('h1', { text: 'Your account is deleted' }),
+      V.h('p.muted.goodbye-what', { text: 'Your notes, files, chats and settings are gone from Wefty\'s cloud and from this device. '
+        + 'Other devices sign out the next time they open Wefty.' }),
+      V.h('p.muted', { text: 'Thanks for trying Wefty.' }),
+      V.button('Back to the start', { kind: 'primary wide-btn', onClick: () => location.reload() }));
+  }
+
+  function dataCard(ui) {
+    const owner = V.who() === 'owner';
+    return ui.card('Your data',
+      ui.line('Export everything', 'Every note, folder and chat in one ZIP, to keep or to take somewhere else. Locked notes stay locked.',
+        V.button('Export', { icon: 'download', onClick: exportEverything }), 'export-everything'),
+      owner ? ui.line('Delete my account', NOT_DELETED.owner, null, 'delete-my-account')
+        : ui.line('Delete my account', 'Every note, file, chat and setting, on every device, for good.',
+          V.button('Delete', { kind: 'danger-quiet', icon: 'trash', onClick: deleteSheet }), 'delete-my-account'));
+  }
+
   function accountPage(ui) {
     const user = V.data.user || {};
     const letter = (Array.from(String(user.name || user.email || '').trim())[0] || '?').toUpperCase();
     const sync = syncing();
     const host = (V.config || {}).url ? new URL(V.config.url).host : '';
+    const whose = V.who();  // (1.21: someone who signed up at wefty.org is in Wefty's cloud, like a friend in the owner's)
     const who = ui.card('Your account',
       V.h('div.setting.account-who', { dataset: { setting: 'your-email' } },
         V.h('span.av.who-av', { text: letter, 'aria-hidden': 'true' }),
         V.h('div.setting-text', {}, V.h('strong', { text: user.email || 'Signed in' }),
-          V.h('span', { text: user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Wefty can see them.'
+          V.h('span', { text: whose !== 'owner' ? 'Your notes, files and clipboard are yours alone: nobody else using Wefty can see them.'
             : 'Your notes, files and clipboard are only in your own cloud.' }),
           // (a tap syncs now, as the Sync line's button does: 1.19.11)
           sync.short ? V.h('button.sync-chip', { type: 'button', dataset: { state: V.cloud.status }, text: sync.short,
             title: 'Sync now', 'aria-label': `${sync.short}. Sync now`, onclick: () => syncNow() }) : null)),
       // (Always here for a friend, so those who joined before the owner's Stats existed are told too.)
-      user.invited ? V.h('p.hint.account-stats', { text: `Whoever runs this Wefty's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
+      whose !== 'owner' ? V.h('p.hint.account-stats', { text: `Whoever runs this Wefty's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
       ui.line('Change password', 'For signing in on a new device. It isn\'t your locked-notes PIN (that\'s in Notes & files).',
         V.button('Change', { icon: 'key', onClick: changePassword })),
       ui.line('Sign out', 'Your notes stay safe in the cloud.', V.button('Sign out', { kind: 'danger-quiet', icon: 'sign-out', onClick: signOut })));
     const syncLine = ui.line('Sync', `${sync.said}. ${V.cloud.live ? 'Changes arrive the moment they\'re made.' : 'Checking for changes every 20 seconds.'}`,
       V.button('Sync now', { icon: 'restore', onClick: () => V.cloud.sync() }));
-    return [who, ui.more('Sync · the cloud you\'re connected to', [
+    return [who, dataCard(ui), ui.more('Sync · the cloud you\'re connected to', [
       sync.urgent ? ui.lift(syncLine) : syncLine,
-      ui.line('Connected to', host ? `${host}, ${user.invited ? 'the cloud you were invited to' : 'your own free cloud'}.` : '', null),
+      ui.line('Connected to', host ? `${host}, ${whose === 'invited' ? 'the cloud you were invited to'
+        : whose === 'self' ? 'Wefty\'s cloud' : 'your own free cloud'}.` : '', null),
     ])];
   }
 
@@ -288,6 +423,19 @@ V.settings = (() => {
       : V.button('Show code', { icon: 'qr', onClick: connectSheet }), 'add-a-phone-or-computer'));
   }
 
+  /* "Sign in another device" (1.21, js/pair.js), on every device: the code a device that isn't signed in shows, typed
+     here to sign it in (no password there). */
+  const pairLine = (ui) => (V.pair ? ui.line('Sign in another device', 'Type the code it shows on its Sign in screen, and '
+    + 'it signs in to your Wefty. Only for a device right next to you.',
+  V.button('Type its code', { icon: 'key', onClick: () => V.pair.approve() }), 'sign-in-another-device') : null);
+  // (with Add a phone or computer, on one card: both are about bringing in another device)
+  const addCard = (ui) => {
+    const card = addLine(ui);
+    const pair = pairLine(ui);
+    if (card && pair) card.append(pair);
+    return card;
+  };
+
   async function hotkey() {
     const keys = await V.ask('Quick note shortcut', { value: V.prefs.hotkey, placeholder: 'Ctrl+Alt+N', ok: 'Use it',
       hint: 'Ctrl, Alt, Shift or Win, plus a letter, number or F1-F12. It works anywhere on the PC.' });
@@ -390,14 +538,14 @@ V.settings = (() => {
         ui.card(phone ? `This ${V.deviceKind.ios ? V.deviceKind.model : 'phone'}` : V.deviceKind.chromebook ? 'This Chromebook' : 'This browser',
           V.arrive && V.arrive.rows ? V.arrive.rows(ui) : null,  // js/arrive.js: a Chromebook's copying and saving
           stepLine(ui), installLine(ui)),
-        addLine(ui),
+        addCard(ui),
         filesCard(ui),
         ui.more(`This is your ${word()} · change what this device is`, [which]),
       ];
     }
-    if (!V.prefs) return [addLine(ui), filesCard(ui)];
+    if (!V.prefs) return [addCard(ui), filesCard(ui)];
     return [
-      addLine(ui),
+      addCard(ui),
       ui.card('This PC',
         // What's sent with Send (js/send.js): on the clipboard, and a card at the corner (a PC app new enough).
         V.pc.can('copyArrival') && 'copyArrivals' in V.prefs ? ui.line('Copy what arrives',
@@ -529,7 +677,7 @@ V.settings = (() => {
 
   /* -- Friends (the owner's): invites, announcements and stats, as their cards (js/access.js, js/news.js) */
 
-  const owner = () => !(V.data.user || {}).invited;
+  const owner = () => V.who() === 'owner';
   const canInvite = () => owner() && !!V.invites
     && (!V.desktop || !!(V.pc && (V.pc.can('adminCall') || V.pc.can('invitesState'))));
 
@@ -662,7 +810,7 @@ V.settings = (() => {
 
   let page = '';
   return {
-    CATEGORIES, categories, slug, signOut, dropMark, connectSheet, shareLink,
+    CATEGORIES, categories, slug, signOut, dropMark, connectSheet, shareLink, exportEverything, deleteSheet, forgetHere, goodbye,
     render(container, opts = {}) {
       root = container;
       page = opts && typeof opts.page === 'string' ? opts.page : '';

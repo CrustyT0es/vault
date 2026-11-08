@@ -18,7 +18,6 @@
 
 V.send = (() => {
   const MAX = 50 * 1024 * 1024;
-  const FREE_SPACE = 1024 * 1024 * 1024;
   const THUMB_SIDE = 320;          // a preview's longest side, in pixels
   const THUMB_NAME = '_thumb.jpg';
   const THUMB_GUESS = 20000;       // what a preview takes when its row doesn't say
@@ -287,6 +286,12 @@ V.send = (() => {
               V.emit('outgoing');
               V.problem(error);
               continue;
+            }
+            if (error && error.full) {  // (out of room: it waits here, and goes the next time something is sent)
+              trouble.set(item.id, 'Waiting for room in your files');
+              V.problem(error);
+              stopped = true;
+              break;
             }
             trouble.set(item.id, navigator.onLine ? 'Didn\'t go through: trying again in 30 seconds' : 'Waiting for the internet');
             // A hiccup (the cloud busy, a weak signal): try again by itself rather than wait for the next send.
@@ -1108,8 +1113,8 @@ V.send = (() => {
     const used = files.reduce((sum, t) => sum + (t.size || 0) + (thumbOf(t) ? Number(t.extra.thumb_size) || THUMB_GUESS : 0), 0) +
       [...V.data.notes.values()].reduce((sum, n) => sum + (n.attachments || []).reduce((s, a) => s + (a.size || 0), 0), 0) +
       (V.chat ? V.chat.filesSize() : 0);
-    V.clear(parts.space, V.h('div.bar.space', {}, V.h('i', { style: { width: Math.min(100, 100 * used / FREE_SPACE) + '%' } })),
-      V.h('span', { text: `${V.size(used)} of 1 GB of free space used` }),
+    // (1.21: the person's own room, as the cloud counts it: V.storage; else this device's sum against the plan's 1 GB)
+    V.clear(parts.space, V.storage.meter(used),
       files.some((t) => sendable(t) && t.kind === 'file') ? V.button('Clean up', { kind: 'quiet', onClick: cleanUp }) : null);
   }
 
@@ -1186,6 +1191,7 @@ V.send = (() => {
       V.h('div.setting-text', {}, V.h('strong', { text: label }), V.h('span', { text: said })), change);
   }
 
+  V.on('storage', () => draw());  // (the cloud's count came: the meter says it)
   V.on('data', (table) => {
     if (table === 'transfers') { draw(); V.emit('badge'); }
     if (table === 'settings' || table === 'clips') drawTo();
@@ -1209,4 +1215,116 @@ V.send = (() => {
     busy: () => queueRunning || saving.size > 0 || preparing.length > 0 || tellSaved.pending() || telling > 0
       || (V.arrive ? V.arrive.busy() : false) || (staged.length > 0 && Date.now() - stagedAt < 30 * 60000),
   };
+})();
+
+/* Wefty 1.21: each person's own room for files, as the cloud counts it (wefty_doors.sql's wefty_storage(): { used,
+   limit }, in bytes; limit null = none). Share's meters (Send's and Wefty Drive's) say it ("12 MB of 100 MB used"),
+   and an upload the cloud turned down because the person is full says so in one place (`say`), with a button to
+   where files are managed. A cloud without the function (made before 1.21) keeps the old meter: everything this
+   device knows is in the cloud against the free plan's 1 GB. Asked when a meter is drawn (at most once a minute, or
+   afresh after an upload was turned down), never kept anywhere but this page's memory. */
+V.storage = (() => {
+  const OLD_LIMIT = 1024 * 1024 * 1024;  // the free plan's 1 GB (the old meter)
+  const FRESH = 60 * 1000;
+  const NEAR = 0.9;                       // the bar turns amber from here, red when full
+  let known = null;                       // { used, limit, at } once the cloud answered; { missing: true, at } without it
+  let asking = null;
+  let saidAt = 0;                         // the last time the "full" words were said (once in a while, never a pile)
+
+  /* A limit in the words people use: 100 MB, 1 GB (the cloud counts in 1024s). */
+  function limitWords(bytes) {
+    const n = Number(bytes) || 0;
+    const GB = 1024 * 1024 * 1024;
+    const MB = 1024 * 1024;
+    if (n >= GB && n % (GB / 4) === 0) return `${n / GB} GB`;
+    if (n >= MB && n % MB === 0) return `${n / MB} MB`;
+    return V.size(n);
+  }
+
+  /* The cloud's own count, asked now (null: this cloud doesn't count, or couldn't be asked). */
+  async function read() {
+    if (asking) return asking;
+    if (!V.cloud || !V.cloud.sb || !V.data.user) return null;
+    asking = Promise.resolve().then(async () => {
+      try {
+        const { data, error } = await V.cloud.sb.rpc('wefty_storage');
+        const answer = typeof data === 'string' ? JSON.parse(data) : data;
+        if (error || !answer || typeof answer !== 'object' || !Number.isFinite(Number(answer.used))) {
+          known = { missing: true, at: Date.now() };  // (PGRST202: no such function here, or any other trouble)
+          return null;
+        }
+        const limit = answer.limit === null || answer.limit === undefined ? null : Number(answer.limit);
+        known = { used: Number(answer.used), limit: Number.isFinite(limit) && limit > 0 ? limit : null, at: Date.now() };
+        return known;
+      } catch (error) {
+        known = { missing: true, at: Date.now() };
+        return null;
+      } finally {
+        asking = null;
+        V.emit('storage', known);
+      }
+    });
+    return asking;
+  }
+
+  /* What's known now (asking again in the background when it's old: the meters are drawn again on 'storage'). */
+  function now() {
+    if (!known || Date.now() - known.at > FRESH) {
+      if (!asking && navigator.onLine) read();
+    }
+    return known && !known.missing ? known : null;
+  }
+
+  /* A meter's bar and words. `local`: what this device counts as in the cloud (the old meter's own sum). */
+  function meter(local) {
+    const got = now();
+    if (got && got.limit === null) return [V.h('span.space-words', { text: `${V.size(got.used)} used` })];
+    const used = got ? got.used : local;
+    const limit = got ? got.limit : OLD_LIMIT;
+    const share = Math.min(1, used / limit);
+    const level = used >= limit ? 'full' : share >= NEAR ? 'near' : '';
+    return [V.h('div.bar.space', { dataset: level ? { level } : {}, role: 'meter', 'aria-label': 'Space used',
+      'aria-valuemin': '0', 'aria-valuemax': String(limit), 'aria-valuenow': String(Math.min(used, limit)) },
+    V.h('i', { style: { width: `${100 * share}%` } })),
+    V.h('span.space-words', { text: got ? `${V.size(used)} of ${limitWords(limit)} used` : `${V.size(used)} of 1 GB of free space used` })];
+  }
+
+  const words = (limit) => `Your ${limitWords(limit)} of files is full. Remove a few pictures or files to add more.`;
+  const fullError = (limit) => Object.assign(new Error(words(limit)), { full: true, limit, kind: 'full' });
+
+  /* Before an upload: an error when the cloud already said this person is full (one file may still take them over, as
+     the cloud's own rule allows), else null. Without a count, null (files.js keeps its own 1 GB check then). */
+  function before() {
+    const got = now();
+    return got && got.limit !== null && got.used >= got.limit ? fullError(got.limit) : null;
+  }
+
+  /* An upload the cloud turned down (Storage's "new row violates row-level security policy"): the "full" error when
+     the person is out of room, else the cloud's own error as it was. Asked afresh: it's what decides. */
+  async function refused(error) {
+    known = null;
+    const got = await read().catch(() => null);
+    return got && got.limit !== null && got.used >= got.limit ? fullError(got.limit) : error;
+  }
+  const isRefusal = (status, message) => status === 403 || /row[- ]level security/i.test(String(message || ''));
+
+  /* Where files are managed: Share's Wefty Drive when Files is on (1.19: PC files), else Share > Send (Clean up). */
+  function manage() {
+    try { if (V.editor && V.editor.covering && V.editor.covering()) V.editor.close(); } catch (error) { /* (still goes) */ }
+    const drive = !!(V.share && V.share.shows && V.share.shows('files'));
+    V.go(drive ? 'files' : 'send');
+    if (drive && V.files && V.files.show) V.files.show('drive');
+  }
+
+  /* The "full" words, with the button: the one place every upload's refusal goes through (V.problem calls it). Said once
+     in a while: a queue of files meeting the same wall says it once. */
+  function say(error) {
+    if (Date.now() - saidAt < 4000) return true;
+    saidAt = Date.now();
+    V.toast(error.message, { kind: 'err', ms: 8000, action: 'Manage files', onAction: manage });
+    return true;
+  }
+
+  V.on('signed-out', () => { known = null; });
+  return { read, now, meter, before, refused, isRefusal, say, manage, limitWords, words, OLD_LIMIT };
 })();

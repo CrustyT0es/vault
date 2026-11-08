@@ -599,7 +599,8 @@ V.chat = (() => {
         item.state = 'ready';
       } catch (error) {
         draft.files = draft.files.filter((f) => f !== item);
-        V.toast(`${item.name} didn't go up: ${error.message || 'no internet'}`, { kind: 'err', ms: 6000 });
+        if (error && error.full) V.problem(error);  // (out of room: js/send.js's V.storage says so, with a button)
+        else V.toast(`${item.name} didn't go up: ${error.message || 'no internet'}`, { kind: 'err', ms: 6000 });
       }
       if (openId === id) drawBox();
     }

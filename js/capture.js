@@ -292,6 +292,7 @@ V.capture = (() => {
           await V.cloud.upload(path, f.blob, { mime: f.type });
         } catch (error) {
           stuck = true;  // (offline again, or the cloud said no: tried again later)
+          if (error && error.full) V.problem(error);  // (out of room: said, with a button: js/send.js's V.storage)
           break;
         }
         if (f.blob.size < 6 * 1024 * 1024) await V.db.put('files', { key: path, blob: f.blob, at: Date.now() }).catch(() => {});

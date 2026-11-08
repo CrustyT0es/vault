@@ -1357,6 +1357,7 @@ V.notetaker = (() => {
     } catch (error) {
       // (offline, or the cloud turned it down for now: it stays on this device and goes up when it can)
       console.warn('Wefty note-taker: the recording waits on this device:', error);
+      if (error && error.full) V.problem(error);  // (out of room: said, with a button: js/send.js's V.storage)
     } finally {
       memoing = false;
     }

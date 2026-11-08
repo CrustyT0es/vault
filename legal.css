@@ -1,0 +1,56 @@
+/* Wefty's Terms and Privacy pages (terms.html, privacy.html): plain pages with no script, light or dark as the device
+   is. The colours are the app's own (styles.css's tokens). */
+
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/Inter-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/Inter-SemiBold.woff2") format("woff2"); }
+
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --text: #0d0e11;
+  --text-2: #494d55;
+  --muted: #5f636c;
+  --line: #dde0e4;
+  --link: #4438c2;
+  --focus: #6c6dfa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0d17;
+    --card: #212133;
+    --text: #e7e7ef;
+    --text-2: #c8c8d6;
+    --muted: #a5a5b8;
+    --line: #37374c;
+    --link: #bcbcff;
+    --focus: #a1a1fd;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 400 16px/1.65 "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "cv05", "cv08", "cv11";
+}
+main { max-width: 680px; margin: 0 auto; padding: 24px 16px 72px; overflow-wrap: break-word; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+.wordmark { display: block; height: 34px; width: auto; }
+.wordmark .wm-text { fill: var(--text); }
+.back { display: inline-block; padding: 12px 0; font-weight: 600; }
+h1 { font-size: 30px; line-height: 1.2; font-weight: 600; letter-spacing: -.02em; margin: 0 0 6px; }
+h2 { font-size: 19px; line-height: 1.35; font-weight: 600; margin: 34px 0 6px; }
+p, li { color: var(--text-2); }
+p { margin: 10px 0; }
+ul { padding-left: 22px; margin: 10px 0; }
+li { margin: 6px 0; }
+strong { color: var(--text); font-weight: 600; }
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.updated { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+.short { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 6px 18px; margin: 18px 0 8px; }
+.short p { color: var(--text); }
+footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+footer p { color: var(--muted); }

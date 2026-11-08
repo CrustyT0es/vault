@@ -386,45 +386,99 @@
     const input = V.h('input.field', attrs);
     return [V.h('label.label', {}, label, input), input];
   }
+  // (for the other parts' own gate screens: js/doors.js's sign-up and js/pair.js's code from another device)
+  V.gate = { screen, field };
+  // (js/doors.js's screens that offer Sign in: "Already on Wefty?" after a sign-up)
+  if (V.doors) V.doors.signInFrom(({ email, back, done }) => signInScreen(email, '', false, back).then(done));
 
   /* `offerPass`: a move pass that had run out was pasted just before (an iPhone's new icon): a fresh one from the old
      icon's Copy it again can go here too. Never after one the cloud turned down: the old icon has nothing better to
-     give, and its Copy it again would only copy the same one. */
-  function signInScreen(email = '', note = '', offerPass = false) {
+     give, and its Copy it again would only copy the same one.
+     `back` (1.21): opened from js/doors.js's first screen, which it goes back to. On the web the other ways in are
+     here too (js/doors.js: Forgot password?, a code by e-mail, Google, a code from another device, Create an account
+     when the cloud takes new ones); on the PC, the PC app's own (a code from another device; a reset at wefty.org). */
+  function signInScreen(email = '', note = '', offerPass = false, back = null) {
     return new Promise((resolve) => {
-      const [emailRow, emailBox] = field('E-mail', { type: 'email', value: email, autocomplete: 'username' });
-      const [passRow, passBox] = field('Wefty password', { type: 'password', autocomplete: 'current-password' });
-      const problem = V.h('p.error-text', { text: note });
-      const go = V.button('Sign in', { kind: 'primary wide-btn', onClick: async () => {
-        problem.textContent = '';
-        go.disabled = true;
-        try {
-          await V.cloud.signIn(emailBox.value, passBox.value);
-          resolve();
-        } catch (error) {
-          problem.textContent = error.message || String(error);
-        } finally {
-          go.disabled = false;
-        }
-      } });
-      passBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
-      // An iPhone's or iPad's home screen icon: a move pass pasted into a box is never shown there (catchPaste).
-      const pasting = iconHere() ? pasteButton('Paste my sign-in', 'wide-btn', problem,
-        (text) => { if (!openPasted(text)) problem.textContent = PASS_WORDS.none; },
-        () => { problem.textContent = PASS_WORDS.unread; }) : null;
-      if (pasting) for (const box of [emailBox, passBox]) catchPaste(box, pasting.mover);  // (pasted in the wrong box)
-      screen(V.h('h1', { text: 'Sign in' }),
-        V.h('p.muted', { text: V.desktop ? 'Wefty on this PC got signed out. Sign in again with your Wefty e-mail and password.'
-          : 'Use your Wefty e-mail and password.' }),
-        emailRow, passRow, problem, go,
-        pasting && offerPass ? pasting.button : null,
-        V.desktop ? null : V.h('p.hint', { text: 'Forgot your password? Change it in Wefty on a device that\'s still signed in (Settings > Account > Change password), then sign in here with the new one.' }),
-        V.desktop ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different cloud', onclick: () => {
-          localStorage.removeItem('vault-config'); location.reload();
-        } }));
-      hello();
-      requestAnimationFrame(() => (email ? passBox : emailBox).focus());
+      const web = !V.desktop && !!V.doors;
+      const draw = (typed = email, said = note) => {
+        const [emailRow, emailBox] = field('E-mail', { type: 'email', value: typed, autocomplete: 'username' });
+        const [passRow, passBox] = field('Wefty password', { type: 'password', autocomplete: 'current-password' });
+        const problem = V.h('p.error-text', { text: said });
+        const more = V.h('div.doors-more');
+        const again = () => draw(emailBox.value.trim(), '');
+        const go = V.button('Sign in', { kind: 'primary wide-btn', onClick: async () => {
+          problem.textContent = '';
+          V.clear(more);
+          go.disabled = true;
+          try {
+            await V.cloud.signIn(emailBox.value, passBox.value);
+            resolve();
+          } catch (error) {
+            if (web) V.doors.signInTrouble(error, { email: emailBox.value.trim(), problem, more, back: again, done: resolve });
+            else if (V.desktop) pcTrouble(error, problem);
+            else problem.textContent = error.message || String(error);
+          } finally {
+            go.disabled = false;
+          }
+        } });
+        passBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
+        // An iPhone's or iPad's home screen icon: a move pass pasted into a box is never shown there (catchPaste).
+        const pasting = passHere() ? pasteButton('Paste my sign-in', 'wide-btn', problem,
+          (text) => { if (!openPasted(text)) problem.textContent = PASS_WORDS.none; },
+          () => { problem.textContent = PASS_WORDS.unread; }) : null;
+        if (pasting) for (const box of [emailBox, passBox]) catchPaste(box, pasting.mover);  // (pasted in the wrong box)
+        const doors = web ? V.doors.signInWays({ email: () => emailBox.value.trim(), back: again, done: resolve }) : null;
+        screen(V.h('h1', { text: 'Sign in' }),
+          V.h('p.muted', { text: V.desktop ? 'Wefty on this PC got signed out. Sign in again with your Wefty e-mail and password.'
+            : 'Use your Wefty e-mail and password.' }),
+          emailRow, passRow, problem, more, go,
+          doors ? doors.forgot : null,
+          doors ? doors.ways : null,
+          V.desktop ? pcWays(again, resolve) : null,
+          pasting && offerPass ? pasting.button : null,
+          doors ? doors.create : null,
+          V.desktop || back ? null : V.h('button.link-btn', { type: 'button', text: 'Connect to a different cloud', onclick: () => {
+            localStorage.removeItem('vault-config'); location.reload();
+          } }),
+          back ? V.h('button.link-btn', { type: 'button', text: 'Back', onclick: () => back() }) : null);
+        hello();
+        requestAnimationFrame(() => (typed ? passBox : emailBox).focus());
+      };
+      // (A code screen this page had open before it reloaded: back to it.)
+      if (!(web && V.doors.resume({ back: () => draw(), done: resolve }))) draw();
     });
+  }
+
+  /* ---------------------------------------------------------------- the PC's sign-in (1.21)
+
+     A code from another device (js/pair.js and the PC app's pair calls, vault/desktop.py), and what to do about a
+     forgotten password: reset it at wefty.org, then sign in here. A cloud that asks for a CAPTCHA (sign-ups open to
+     everyone) can't be answered here (the PC app can't show the check): Python's sign-in says "captcha", and the code
+     from another device is the way in. */
+  const WEFTY_ORG = 'https://wefty.org/';
+  const pcCanPair = () => !!(V.desktop && V.pair && V.pc.can('pairOpen'));
+  function pcPairButton(back, done) {
+    if (!pcCanPair()) return null;
+    return V.button('Use a code from another device', { kind: 'wide-btn doors-pair', icon: 'devices', onClick: async () => {
+      let got = 'back';
+      try { got = await V.pair.signInScreen({ cloud: null }); } catch (error) { console.error(error); }
+      if (got === 'in') done();
+      else back();
+    } });
+  }
+  function pcWays(back, done) {
+    return [pcPairButton(back, done),
+      V.h('p.hint.pc-forgot', { text: 'Forgot your password? Reset it at wefty.org (Sign in > Forgot password), then sign in here with the new one.' }),
+      V.button('Open wefty.org', { kind: 'wide-btn pc-open-site', icon: 'open',
+        onClick: () => V.pc.call('openLink', { url: WEFTY_ORG }).catch(V.problem) })];
+  }
+  // (The code from another device's button is on the screen already, under Sign in.)
+  function pcTrouble(error, problem) {
+    const said = error.message || String(error);
+    if (!/captcha/i.test(said)) { problem.textContent = said; return; }
+    problem.textContent = 'This cloud asks for a quick check that the PC app can\'t show. ' + (pcCanPair()
+      ? 'Tap Use a code from another device below, then type the code on your phone or Chromebook (Settings > Devices > Sign in another device).'
+      : 'Update Jarvis, then sign in here with a code from another device.');
   }
 
   /* A Wefty link (an invite, a join code's link, #connect=) pasted on the first screen or the sign-in screen: opened
@@ -441,8 +495,9 @@
      the PC's QR code or an iPhone's "Copy the sign-in link") is opened, or pasted here: on an iPhone or iPad, a new
      home screen icon starts with nothing of Safari's, so this is where it lands. There its button is "Paste my
      sign-in", which takes the old Vault icon's move pass too (no password: see "an iPhone's sign-in" below). */
-  function connectScreen() {
-    const icon = iconHere();
+  function connectScreen(back = null) {
+    const icon = passHere();  // (a sign-in pass can be pasted here: any device at wefty.org)
+    const apple = iconHere();  // (an iPhone or iPad's home screen icon: its own words about Safari)
     const [linkRow, linkBox] = field('Or paste it here', { type: 'url', placeholder: 'https://...#invite=..., #join=... or #connect=...',
       autocomplete: 'off', spellcheck: 'false' });
     const problem = V.h('p.error-text', { role: 'alert' });
@@ -478,16 +533,18 @@
         location.reload();
       } }));
     screen(V.h('h1', { text: 'Connect Wefty' }),
-      V.h('p.muted', { text: icon ? PASS_WORDS.firstScreen
+      V.h('p.muted', { text: apple ? PASS_WORDS.firstScreen : icon ? PASS_WORDS.firstElsewhere
         : 'Open the link you were sent (an invite or a join code\'s link from a friend, or the link from Wefty on your PC). Or copy it, then tap Paste the link.' }),
-      icon ? V.h('p.muted.pass-mover', { text: PASS_WORDS.mover }) : null,  // (second: most who see this never had Vault)
+      apple ? V.h('p.muted.pass-mover', { text: PASS_WORDS.mover }) : null,  // (second: most who see this never had Vault)
       paste, linkRow, V.button('Connect', { kind: 'wide-btn', onClick: connect }), problem,
-      V.h('p.hint', { text: icon
+      V.h('p.hint', { text: apple
         // (A scanned code opens in Safari, never in this icon: the link comes from Safari's Vault instead.)
         ? `In Safari's Wefty, open Settings > Devices > Copy the sign-in link, then come back and tap Paste my sign-in. `
           + 'Or on the PC: Wefty > Settings > Devices > Add a phone or computer > Copy the link, and send it to this phone.'
         : 'Setting up your own phone? In Wefty on your PC, open Settings > Devices > Add a phone or computer and point this phone\'s camera at the code.' }),
-      manual);
+      manual,
+      // (1.21: opened by "I have an invite" on js/doors.js's first screen, which it goes back to)
+      back ? V.h('button.link-btn.connect-back', { type: 'button', text: 'Back', onclick: () => back() }) : null);
   }
 
   /* The PC's first start: making the owner's own free cloud (vault/cloudsetup.py does the work), or joining a
@@ -724,29 +781,40 @@
   const REFRESH = /^[A-Za-z0-9._~+/=-]{8,512}$/;
   const PASS_NOTE = 'wefty-pass';  // sessionStorage: what became of a pass across the reload ('in', 'used', 'expired')
   const PASS_WORDS = {
-    in: 'Signed in. You can remove the old Vault icon now.',
-    expired: 'That sign-in pass has expired. If the old Vault icon still shows Copy it again, tap it, then tap Paste my '
-      + 'sign-in here. If not, sign in with your e-mail and password.',
+    in: 'Signed in. You can remove the old Wefty (or Vault) icon now.',
+    expired: 'That sign-in pass has expired. If the old Wefty (or Vault) still shows Copy it again, tap it, then tap '
+      + 'Paste my sign-in here. If not, sign in with your e-mail and password.',
     used: 'That sign-in pass was already used or isn\'t valid. Sign in with your e-mail and password.',
-    bad: 'That sign-in pass isn\'t valid. Copy it again from the old Vault icon.',
+    bad: 'That sign-in pass isn\'t valid. Copy it again from the old Wefty (or Vault).',
     offline: 'You\'re offline. Connect to the internet, then tap Paste my sign-in again.',
     unreachable: 'Wefty couldn\'t reach the cloud just now. Check the internet, then tap Paste my sign-in again.',
     safari: 'That\'s your sign-in for the new Wefty icon. Add Wefty to your Home Screen first (Share > Add to Home '
       + 'Screen, and keep Open as Web App on), then open the new icon and tap Paste my sign-in there. If your new '
       + 'icon opens in Safari, remove it and add it again with Open as Web App on.',
-    elsewhere: 'That sign-in is for the new Wefty icon on an iPhone or iPad. Paste it there.',
+    elsewhere: 'That sign-in is for Wefty at wefty.org. Open wefty.org and tap Paste my sign-in there.',
     none: 'That isn\'t a Wefty sign-in or link. Copy it again, then tap Paste my sign-in.',
     unread: 'Wefty couldn\'t read what you copied. Tap Paste my sign-in again, then tap Paste.',
+    firstElsewhere: 'Open the link you were sent (an invite or a join code\'s link from a friend, or the link from Wefty on your '
+      + 'PC). Coming from the old Wefty (or Vault)? Tap Copy my sign-in there, then Paste my sign-in here. No password needed.',
     firstScreen: 'Copy the link you were sent (an invite, or the sign-in link from Wefty in Safari), then tap Paste '
       + 'my sign-in.',
-    mover: 'Coming from the old Vault icon? Tap Copy my sign-in there, then Paste my sign-in here. No password needed.',
-    handOver: 'No password needed: this hands your sign-in to the new icon and signs this old one out.',
-    copied: 'Copied. This old icon is signed out now: your sign-in is waiting for the new Wefty icon.',
+    mover: 'Coming from the old Wefty (or Vault)? Tap Copy my sign-in there, then Paste my sign-in here. No password '
+      + 'needed.',
+    handOver: 'No password needed: this hands your sign-in to the new Wefty and signs this old one out.',
+    copied: 'Copied. This old one is signed out now: your sign-in is waiting for the new Wefty.',
     again: 'Copied again. It works for 10 minutes.',
     once: 'Paste it on one new icon only, within 10 minutes. Lost it before pasting? Tap Copy it again.',
     notCopied: 'Wefty couldn\'t copy it. Tap the button again.',
-    handed: 'You already moved your sign-in to the new Wefty icon. If it worked there, remove this old icon (press and '
-      + 'hold it, then Remove App). If not, sign in there with your e-mail and password.',
+    handed: 'You already moved your sign-in to the new Wefty. If it worked there, remove this old one. If not, sign in '
+      + 'there with your e-mail and password.',
+    moving: 'Signing you in at wefty.org…',
+    moved: 'Done: you\'re signed in at wefty.org, in the window that opened. This old one is signed out.',
+    slow: 'Nothing yet from wefty.org. If it opened but asks you to sign in, tap Copy my sign-in here, then Paste my '
+      + 'sign-in there.',
+    blocked: 'Your browser didn\'t open wefty.org. Tap Copy my sign-in, then open wefty.org and tap Paste my sign-in.',
+    retry: 'wefty.org couldn\'t reach the cloud just now. Check the internet, then tap Try again.',
+    other: 'wefty.org is signed in as someone else in this browser, so nothing was moved. This one is still signed in.',
+    arrived: 'Signed in. Welcome to Wefty\'s new home, wefty.org.',
   };
   // What says everything here reached the cloud, now that there's no Synced pill (1.16): the old icon runs this
   // version too, so its steps point at the picture's mark (js/profile.js).
@@ -756,6 +824,9 @@
   // Here: an iPhone's or iPad's new home screen icon. (A Safari tab keeps a storage of its own, and the old Vault icon,
   // at the old address, is the one handing its sign-in over: a pass is for the new icon.)
   const iconHere = () => !V.desktop && V.deviceKind.ios && V.install.installed() && !(V.moved && V.moved.old);
+  /* Where a move pass can be pasted (1.20): Wefty at its own address, on any device; on an iPhone or iPad only in its
+     home screen icon (a Safari tab keeps a storage of its own). Never on an old address: it's the one handing over. */
+  const passHere = () => !V.desktop && !(V.moved && V.moved.old) && (!V.deviceKind.ios || V.install.installed());
 
   /* What this icon could hand over: its cloud, e-mail and session's refresh token (supabase-js keeps the session in
      localStorage 'vault-auth'), or null when it isn't signed in or the cloud isn't a Supabase one with a public key. */
@@ -912,8 +983,8 @@
       take(text) {
         const read = readPass(text);
         if (!read) return false;
-        if (!iconHere()) {  // a Safari tab, or not an iPhone: left on the clipboard for the icon, never used here
-          say(V.deviceKind.ios ? PASS_WORDS.safari : PASS_WORDS.elsewhere);
+        if (!passHere()) {  // a Safari tab, or an old address: left on the clipboard for Wefty at its own address
+          say(V.moved && V.moved.old ? PASS_WORDS.elsewhere : PASS_WORDS.safari);
           return true;
         }
         if (!navigator.onLine) { keepClipboard(); say(PASS_WORDS.offline); return true; }  // (there for the next tap)
@@ -974,139 +1045,345 @@
     }
   }
 
-  /* The old installed app (js/moved.js): Vault is now Wefty, at a new address, and an installed app can't move itself.
-     "Open Wefty" opens the new address (this page's ?search and #hash kept) in the browser, where it can be installed
-     (on Android a link into an installed Wefty opens that); "Keep using this one for now" opens this one as before.
+  /* ---------------------------------------------------------------- the move to wefty.org (1.20)
 
-     The steps are this device's (V.welcome.howToInstall's kind). An Android phone, a Chromebook and a computer keep
-     both apps' notes and sign-in in one place (the same site), so removing the old one loses nothing, unless its
-     uninstall box also clears the site's data, which would sign the new one out too: the steps say to leave that.
-     An iPhone or iPad keeps each home screen icon's storage apart and deletes it with the icon. So there this icon's
-     own sign-in goes to the new one as a move pass (Copy my sign-in, above), or, with no session here to give, the
-     new icon needs the sign-in link (the cloud and the e-mail, never a password) and a password. While this icon still
-     has changes the cloud hasn't got, there's no pass (signed out, it could never send them): it says to let them
-     sync first, then to open this icon again for Copy my sign-in. Opened again after it handed its sign-in over, it
-     says so (HANDED) instead of starting the steps over as if nothing had happened. */
+     wefty.org is a new site to the browser, so nothing kept at an old address (crustyt0es.github.io/wefty/ or /vault/)
+     is there: not the sign-in, not the offline copy, not this device's settings. A tab that's signed in, and every old
+     installed app, gets the move screen (js/moved.js's 'ask'), and one tap carries everything over without a password:
+
+     Move to wefty.org opens wefty.org in a new window with #moving, keeping the link between the two (no noopener). The
+     new page (takeHandOver, below) says it's ready to this page, by postMessage, to the old addresses' origin only;
+     this page answers only a message from the very window it opened and only from wefty.org's origin, and sends back,
+     to that origin only, its cloud, e-mail and session's refresh token (the move pass, as an object: nothing in an
+     address, a clipboard or any storage) and its settings (CARRY: never the sign-in's own keys, push sign-ups, update
+     state or admin keys). This page lets go of its session right then (dropSession: never signOut, see "an iPhone's
+     sign-in" above), as two pages renewing one session get it ended. wefty.org swaps the token twice (swapPass) for a
+     session of its own and says how it went: 'in', or 'failed' with why ('unreachable': this page still holds the pass
+     in memory and Try again opens a window again; 'used'; 'other': wefty.org is signed in as someone else in this
+     browser, so nothing moved and this page signs back in with what it held). With no answer in SLOW_MS, or a window
+     that didn't open, Copy my sign-in puts the same pass on the clipboard for wefty.org's Paste my sign-in (any device
+     there, an iPhone only in its home screen icon). An iPhone or iPad icon only ever gets the clipboard pass: each icon
+     keeps its storage apart, and one opens wefty.org in Safari.
+
+     Changes this device has that the cloud hasn't got (waitingHere) would be stranded: then there's no pass, only "Keep
+     using this one for now" until they're up. Signed out here: the link to wefty.org carries the cloud and e-mail
+     (#connect=), so its sign-in screen knows them. Opened again after it handed its sign-in over, it says so
+     (HANDED). */
+  const SLOW_MS = 12000;
+  const MOVE = { ready: 'wefty-move-ready', pass: 'wefty-move-pass', in: 'wefty-move-in', failed: 'wefty-move-failed' };
+  // This device's settings that go along: every 'vault-...' key but the sign-in itself, push sign-ups (they belong to
+  // the old address's worker), update state and admin keys. Each up to CARRY_MOST letters.
+  const NOT_CARRIED = /^vault-(?:auth|user$|config$|handed$|update|push|admin|files-host|share)/;
+  const CARRY_MOST = 20000;
+  const carriable = (key, value) => /^vault-[a-z0-9-]+$/.test(key) && !NOT_CARRIED.test(key) && typeof value === 'string'
+    && value.length <= CARRY_MOST;
+  function carried() {
+    const out = {};
+    let total = 0;
+    try {
+      for (const key of Object.keys(localStorage).sort()) {
+        const value = localStorage.getItem(key);
+        if (!carriable(key, value) || total + value.length > 10 * CARRY_MOST) continue;
+        out[key] = value;
+        total += value.length;
+      }
+    } catch (error) { /* private browsing: nothing to carry */ }
+    return out;
+  }
+  /* What came along, kept where wefty.org has nothing of its own yet, and the look put on at once. */
+  function keepCarried(keep) {
+    if (!keep || typeof keep !== 'object') return;
+    try {
+      for (const [key, value] of Object.entries(keep).slice(0, 200)) {
+        if (carriable(key, value) && localStorage.getItem(key) === null) localStorage.setItem(key, value);
+      }
+    } catch (error) { /* full or private: the settings just start fresh */ }
+    try {
+      if (V.theme) {
+        V.theme.set(localStorage.getItem('vault-theme'));
+        V.theme.setBlack(localStorage.getItem('vault-black') === 'on');
+      }
+    } catch (error) { /* (the look follows at the next start) */ }
+  }
+
+  /* The pass as sent by postMessage, checked like a pasted one (readPass): { url, key, email, refresh, x } or null. */
+  function checkedPass(data) {
+    if (!data || typeof data !== 'object' || !CLOUD.test(String(data.u || '')) || !PUBLIC_KEY.test(String(data.k || ''))
+      || typeof data.r !== 'string' || !REFRESH.test(data.r)) return null;
+    const email = typeof data.e === 'string' && /^[^@\s]+@[^@\s]+$/.test(data.e.trim()) ? data.e.trim().slice(0, 254) : '';
+    return { url: data.u, key: data.k, email, refresh: data.r, x: Date.now() + PASS_MINUTES * 60000 };
+  }
+
   async function movedScreen() {
     const how = V.welcome.howToInstall();
     const apple = how.kind === 'ios' || V.deviceKind.ios;
-    const waiting = apple ? await waitingHere() : 0;
+    const icon = apple && V.moved.installed;  // an iPhone's home screen icon: the clipboard pass only
+    const waiting = await waitingHere();
+    const host = V.moved.host;
     return new Promise((resolve) => {
       const saved = stored('vault-config');
       const email = (saved && saved.email) || ((stored('vault-user') || {}).email) || '';
       const link = saved && saved.url && saved.key
         ? `${V.moved.to}#connect=${b64url(JSON.stringify({ u: saved.url, k: saved.key, e: email }))}` : '';
-      const KEEP_DATA = 'If it offers to clear data too, leave that unticked: it would sign you out of Wefty as well.';
       const model = V.deviceKind.model || 'iPhone';
-      const session = V.deviceKind.ios && !!ownSignIn();
+      const session = !!ownSignIn();
       let passable = session && waiting === 0;
       const later = session && waiting > 0;  // a sign-in to hand over once the changes are up: come back for it then
       if (session) {
         try { localStorage.removeItem(HANDED); } catch (error) { /* (signed in here again since) */ }
       }
-      const handed = apple && !session && !!stored(HANDED);
-      let given = null;  // the sign-in handed over (memory only), for Copy it again
+      const handed = !session && !!stored(HANDED);
+      let given = null;  // the sign-in handed over (memory only), for Try again / Copy it again
+      let state = '';  // '', 'moving', 'slow', 'blocked', 'retry', 'moved', 'used', 'copied'
       const said = V.h('p.moved-done', { role: 'status', hidden: true });
       const say = (text, trouble = false) => {
         said.textContent = text;
         said.hidden = !text;
         said.classList.toggle('trouble', trouble);
       };
-      // Made and written in this very tap (Safari only lets a page write the clipboard during one); this icon lets go
-      // of its session only once the pass is on the clipboard.
-      const handOver = () => {
+      const KEEP_DATA = 'If it offers to clear data too, it doesn\'t matter now: your notes are in your cloud.';
+      const what = V.moved.vault ? 'Vault' : 'Wefty';
+      let held = null;  // this page's own sign-in keys, kept in memory when it lets go (put back if nothing moved)
+      const lettingGo = (from) => {
+        if (!given) {
+          held = {};
+          try {
+            for (const key of Object.keys(localStorage)) {
+              if (key === 'vault-auth' || key.startsWith('vault-auth-') || key === 'vault-user') held[key] = localStorage.getItem(key);
+            }
+          } catch (error) { /* private browsing */ }
+          dropSession();
+        }
+        given = from;
+      };
+      // Notifications (js/push.js) belong to this address's service worker, so they'd keep coming here, and twice
+      // once turned on at wefty.org: this browser's sign-up is ended (the helper drops it at its next send) once the
+      // sign-in has moved, and the steps say to turn them on again there.
+      const hadPush = !!stored('vault-push');
+      const stopPush = () => {
+        try {
+          localStorage.removeItem('vault-push');
+          if (!navigator.serviceWorker) return;
+          navigator.serviceWorker.getRegistration()
+            .then((registration) => registration && registration.pushManager && registration.pushManager.getSubscription())
+            .then((subscription) => subscription && subscription.unsubscribe())
+            .catch(() => {});
+        } catch (error) { /* (the helper drops it when it next fails anyway) */ }
+      };
+      const takeBack = () => {
+        try {
+          for (const [key, value] of Object.entries(held || {})) localStorage.setItem(key, value);
+          localStorage.removeItem(HANDED);
+        } catch (error) { /* */ }
+        given = null;
+        held = null;
+      };
+
+      // Copy my sign-in: made and written in this very tap (Safari only lets a page write the clipboard during one);
+      // this page lets go of its session only once the pass is on the clipboard.
+      const copyPass = () => {
         const from = given || ownSignIn();
         if (!from) { passable = false; draw(); return; }
         let writing;
         try { writing = navigator.clipboard.writeText(makePass(from)); } catch (error) { writing = Promise.reject(error); }
         Promise.resolve(writing).then(() => {
           const first = !given;
-          given = from;
-          if (first) dropSession();
+          lettingGo(from);
+          stopPush();
+          state = 'copied';
           draw();
           say(first ? PASS_WORDS.copied : PASS_WORDS.again);
-          const next = app.querySelector('.moved-open');  // (the button tapped is gone: on to the next step)
-          if (next) next.focus({ preventScroll: true });
         }, () => say(PASS_WORDS.notCopied, true));
       };
+
+      // Move to wefty.org: the window, then the pass by postMessage (see above).
+      let listening = null;
+      const moveByWindow = () => {
+        const from = given || ownSignIn();
+        if (!from) { passable = false; draw(); return; }
+        if (listening) window.removeEventListener('message', listening);
+        let win = null;
+        try { win = window.open(V.moved.to + '#moving', '_blank'); } catch (error) { win = null; }
+        if (!win) { state = 'blocked'; draw(); say(PASS_WORDS.blocked, true); return; }
+        state = 'moving';
+        draw();
+        say(PASS_WORDS.moving);
+        const timer = setTimeout(() => {
+          if (state !== 'moving') return;
+          state = 'slow';
+          draw();
+          say(PASS_WORDS.slow, true);
+        }, SLOW_MS);
+        listening = (event) => {
+          if (event.origin !== V.moved.toOrigin || event.source !== win) return;
+          const data = event.data && typeof event.data === 'object' ? event.data : {};
+          if (data.type === MOVE.ready) {
+            lettingGo(from);
+            try {
+              win.postMessage({ type: MOVE.pass, u: from.url, k: from.key, e: from.email, r: from.refresh, keep: carried() },
+                V.moved.toOrigin);
+            } catch (error) { /* the window closed: Try again */ }
+            return;
+          }
+          if (data.type !== MOVE.in && data.type !== MOVE.failed) return;
+          clearTimeout(timer);
+          window.removeEventListener('message', listening);
+          listening = null;
+          if (data.type === MOVE.in) {
+            stopPush();
+            state = 'moved';
+            draw();
+            say(PASS_WORDS.moved);
+          } else if (data.why === 'other') {
+            takeBack();  // (nothing was taken there: this page keeps its session)
+            state = '';
+            draw();
+            say(PASS_WORDS.other, true);
+          } else if (data.why === 'unreachable') {
+            state = 'retry';
+            draw();
+            say(PASS_WORDS.retry, true);
+          } else {
+            state = 'used';
+            draw();
+            say(PASS_WORDS.used, true);
+          }
+        };
+        window.addEventListener('message', listening);
+      };
+
       const draw = () => {
-        let steps;
-        if (apple && passable) {
-          steps = [
-            given ? null : 'Tap Copy my sign-in.',
-            'Tap Open Wefty. It opens in Safari.',
-            'In Safari, tap Share, then Add to Home Screen (keep Open as Web App on).',
-            'Open the new Wefty icon and tap Paste my sign-in.',
-            'Then remove the old Vault icon: press and hold it, then Remove App.',
-          ];
-        } else if (apple && later) {
-          steps = [
-            'Tap Keep using this one for now and ' + NO_DOT + '.',
-            'Then close this app (swipe it away in the app switcher) and open this old icon again.',
-            'Tap Copy my sign-in. No password needed.',
-          ];
-        } else if (apple) {
-          steps = [
-            link ? 'Tap Copy the sign-in link.' : null,
-            'Tap Open Wefty. It opens in Safari.',
-            'In Safari, tap Share, then Add to Home Screen (keep Open as Web App on).',
-            link ? 'Open the new Wefty icon, tap Paste my sign-in, then sign in with your e-mail and password.'
-              : 'Open the new Wefty icon and connect it: on the PC, open Wefty > Settings > Devices > Add a phone or '
-                + 'computer > Copy the link, and send it to this phone.',
-            waiting > 0 ? null : waiting < 0
-              ? 'Once the small dot on your picture at the top is gone (or there never was one), remove the old Vault icon: '
-                + 'press and hold it, then Remove App.'
-              : 'Then remove the old Vault icon: press and hold it, then Remove App.',
-          ];
-        } else if (how.kind === 'chromebook') {
-          steps = [
-            'Click Open Wefty. It opens in Chrome, still signed in.',
-            'Click Install in the address bar (or Chrome\'s ⋮ menu > Cast, save and share > Install page as app).',
-            `Then remove the old Vault app: right-click its icon in the launcher > Uninstall. ${KEEP_DATA}`,
-          ];
-        } else if (how.kind === 'android' || V.deviceKind.android) {
-          steps = [
-            'Tap Open Wefty. It opens in Chrome, still signed in (if it opens inside this app, tap ⋮ > Open in Chrome).',
-            'Tap Install (or Chrome\'s ⋮ menu > Add to Home screen).',
-            'Then remove the old Vault icon: press and hold it, then Uninstall (or Remove).',
-          ];
-        } else {  // a Windows PC or a Mac, the old app installed from Chrome or Edge
-          steps = [
-            'Click Open Wefty. It opens in your browser, still signed in.',
-            `Install it from there. ${how.steps.join(' ')}`,
-            `Then remove the old Vault app: in its window, open the ⋮ (or …) menu > Uninstall. ${KEEP_DATA}`,
-          ];
+        let steps = [];
+        // (With no #hash of its own, the cloud and e-mail go along as #connect=, so wefty.org's sign-in knows them.)
+        const goNew = V.h(`a.btn${state === 'moved' || state === 'copied' || !passable ? '.primary' : ''}.wide-btn.moved-open`, {
+          href: location.hash || !link ? V.moved.target() : V.moved.target() + link.slice(link.indexOf('#')),
+          target: '_blank', rel: 'noopener' }, V.icon('open'), V.h('span', { text: `Open ${host}` }));
+        const install = icon || apple
+          ? 'There, tap Share, then Add to Home Screen (keep Open as Web App on).'
+          : how.kind === 'chromebook' ? 'There, click Install in the address bar (or ⋮ > Cast, save and share > Install page as app).'
+            : how.kind === 'android' || V.deviceKind.android ? 'There, tap Install (or ⋮ > Add to Home screen).'
+              : `There, install it if you like. ${how.steps.join(' ')}`;
+        const removeOld = V.moved.installed
+          ? (apple ? `Then remove this old ${what} icon: press and hold it, then Remove App.`
+            : `Then remove this old ${what} app. ${KEEP_DATA}`)
+          : 'Then close this tab, and use wefty.org from now on (update your bookmark).';
+        const again = hadPush ? 'Notifications: turn them on again there (tap your picture, then Settings > Notifications).' : null;
+        let buttons = [];
+        if (icon && passable) {
+          steps = [given ? null : 'Tap Copy my sign-in.', `Tap Open ${host}. It opens in Safari.`, install,
+            'Open the new Wefty icon and tap Paste my sign-in.', again, removeOld];
+          const pass = V.button(given ? 'Copy it again' : 'Copy my sign-in', {
+            kind: given ? 'wide-btn moved-pass' : 'primary wide-btn moved-pass', icon: 'copy', onClick: copyPass });
+          buttons = given ? [goNew, pass] : [pass, V.h('p.hint.moved-hint', { text: PASS_WORDS.handOver }), goNew];
+        } else if (passable) {
+          const move = V.button(state === 'retry' ? 'Try again' : `Move to ${host}`, {
+            kind: `${state === 'moved' ? '' : 'primary '}wide-btn moved-move`, icon: 'open', onClick: moveByWindow });
+          const pass = ['slow', 'blocked', 'copied', 'retry'].includes(state)
+            ? V.button(given && state === 'copied' ? 'Copy it again' : 'Copy my sign-in',
+              { kind: 'wide-btn moved-pass', icon: 'copy', onClick: copyPass }) : null;
+          if (state === 'moved') {
+            steps = [install, again, removeOld];
+            buttons = [goNew];
+          } else {
+            steps = [`Tap Move to ${host}. It opens in a new window, already signed in.`, install, again, removeOld];
+            buttons = [move, state ? null : V.h('p.hint.moved-hint', { text: PASS_WORDS.handOver }), pass,
+              state === 'copied' ? goNew : null];
+          }
+        } else if (later) {
+          steps = [`Tap Keep using this one for now and ${NO_DOT}.`,
+            'Then close it and open this old one again.',
+            icon ? 'Tap Copy my sign-in. No password needed.' : `Tap Move to ${host}. No password needed.`];
+        } else {
+          const tap = apple || how.kind === 'android' || V.deviceKind.android ? 'Tap' : 'Click';
+          steps = [apple && link ? 'Tap Copy the sign-in link.' : null, `${tap} Open ${host}.`,
+            apple && link ? 'There, tap Paste my sign-in, then sign in with your e-mail and password.'
+              : 'Sign in there with your e-mail and password.', install,
+            waiting > 0 ? null : removeOld];
+          const copy = apple && link ? V.button('Copy the sign-in link', { kind: 'wide-btn moved-copy', icon: 'copy',
+            onClick: async () => {
+              await V.copy(link);
+              V.toast('Copied. In Wefty at wefty.org, tap Paste my sign-in.', { ms: 6000 });
+            } }) : null;
+          buttons = [goNew, copy];
         }
-        // With a sign-in to hand over, Copy my sign-in comes first; once it's done, Open Wefty is the next thing to tap.
-        const leading = !passable || given;
-        const open = V.h(`a.btn${leading ? '.primary' : ''}.wide-btn.moved-open`, { href: V.moved.target(), target: '_blank',
-          rel: 'noopener' }, V.icon('open'), V.h('span', { text: 'Open Wefty' }));
-        const pass = passable ? V.button(given ? 'Copy it again' : 'Copy my sign-in', {
-          kind: given ? 'wide-btn moved-pass' : 'primary wide-btn moved-pass', icon: 'copy', onClick: handOver }) : null;
-        const copy = apple && link && !passable && !later ? V.button('Copy the sign-in link', { kind: 'wide-btn moved-copy', icon: 'copy',
-          onClick: async () => {
-            await V.copy(link);
-            V.toast('Copied. In the new Wefty icon, tap Paste my sign-in.', { ms: 6000 });
-          } }) : null;
-        const things = waiting === 1 ? `1 change on this ${model} isn't in your cloud yet, and removing this icon would delete it`
-          : `${waiting} changes on this ${model} aren't in your cloud yet, and removing this icon would delete them`;
+        const things = waiting === 1 ? `1 change on this ${apple ? model : 'device'} isn't in your cloud yet`
+          : `${waiting} changes on this ${apple ? model : 'device'} aren't in your cloud yet`;
         screen(V.h('img.moved-icon', { src: 'icons/wefty-192.png', alt: '', width: 72, height: 72 }),
-          V.h('h1', { text: 'Vault is now Wefty' }),
-          V.h('p.muted', { text: 'Same notes, same sign-in, a new name and icon. It lives at a new web address now, so this '
-            + 'old icon can\'t follow by itself.' }),
+          V.h('h1', { text: V.moved.vault ? 'Vault is now Wefty' : `Wefty has moved to ${host}` }),
+          V.h('p.muted', { text: V.moved.vault
+            ? `Same notes, a new name and a new home: ${host}. Your notes are all in your cloud, so nothing is lost.`
+            : `Same notes, same everything, at a shorter address. Your notes are all in your cloud, so nothing is lost.` }),
           said,
-          given ? [open, pass] : [pass, pass ? V.h('p.hint.moved-hint', { text: PASS_WORDS.handOver }) : null, open, copy],
+          buttons,
           V.h('ol.steps.moved-steps', {}, steps.filter(Boolean).map((text) => V.h('li', { text }))),
-          given ? V.h('p.hint.moved-hint', { text: PASS_WORDS.once }) : null,
+          given && icon ? V.h('p.hint.moved-hint', { text: PASS_WORDS.once }) : null,
           waiting > 0 ? V.h('p.moved-waiting', { role: 'note', text: later ? `${things}.`
-            : `${things}. Tap Keep using this one for now and ${NO_DOT}. Only then remove the old Vault `
-              + 'icon (press and hold it, then Remove App).' }) : null,
-          // (Signed out here once the sign-in is handed over: this icon can't carry on without the password.)
+            : `${things}. Tap Keep using this one for now and ${NO_DOT}.` }) : null,
+          // (Signed out here once the sign-in is handed over: this one can't carry on without the password.)
           given ? null : V.h('button.link-btn.welcome-skip.moved-keep', { type: 'button', text: 'Keep using this one for now',
-            onclick: () => resolve() }));
+            onclick: () => {
+              if (listening) window.removeEventListener('message', listening);
+              resolve();
+            } }));
       };
       if (handed) say(PASS_WORDS.handed);
       draw();
+    });
+  }
+
+  /* wefty.org's half of the move (1.20, see above): opened with #moving by an old address's Move to wefty.org. Says
+     ready to the window that opened it (its opener, at the old addresses' origin only), takes one pass from that very
+     window and that origin, swaps it for a session of its own, keeps what came along, and says how it went. Returns
+     'in', 'here' (already signed in here as the same person), 'used', 'unreachable', 'other' or '' (nothing came). */
+  async function takeHandOver() {
+    if (location.hash !== '#moving') return '';
+    history.replaceState(null, '', location.pathname + location.search);
+    const opener = window.opener;
+    if (!opener || V.desktop || !V.moved || V.moved.old) return '';
+    const origins = V.moved.origins || [];
+    screen(V.h('img.moved-icon', { src: 'icons/wefty-192.png', alt: '', width: 72, height: 72 }),
+      V.h('h1', { text: 'Moving your sign-in…' }), V.h('p.muted', { text: 'One moment.' }));
+    return new Promise((resolve) => {
+      let busy = false;
+      const tell = (origin, data) => { try { opener.postMessage(data, origin); } catch (error) { /* closed */ } };
+      const finish = (outcome) => {
+        clearTimeout(timer);
+        window.removeEventListener('message', listen);
+        resolve(outcome);
+      };
+      const timer = setTimeout(() => finish(''), 20000);
+      const listen = async (event) => {
+        if (busy || event.source !== opener || !origins.includes(event.origin)) return;
+        const data = event.data && typeof event.data === 'object' ? event.data : {};
+        if (data.type !== MOVE.pass) return;
+        busy = true;
+        const pass = checkedPass(data);
+        if (!pass) { tell(event.origin, { type: MOVE.failed, why: 'used' }); finish('used'); return; }
+        const mine = ownSignIn();
+        if (mine) {  // signed in here already: the same person takes only the settings; someone else, nothing
+          const same = mine.url === pass.url && mine.email && mine.email.toLowerCase() === pass.email.toLowerCase();
+          if (same) keepCarried(data.keep);
+          tell(event.origin, same ? { type: MOVE.in } : { type: MOVE.failed, why: 'other' });
+          finish(same ? 'here' : 'other');
+          return;
+        }
+        const got = await swapPass(pass);
+        try {
+          localStorage.setItem('vault-config', JSON.stringify({ url: pass.url, key: pass.key,
+            email: (got && got.email) || pass.email }));
+        } catch (error) { /* private browsing */ }
+        if (got === 'unreachable' || got === 'used') {
+          tell(event.origin, { type: MOVE.failed, why: got });
+          finish(got);
+          return;
+        }
+        try { localStorage.setItem('vault-auth', got.session); } catch (error) { /* */ }
+        keepCarried(data.keep);
+        tell(event.origin, { type: MOVE.in });
+        finish('in');
+      };
+      window.addEventListener('message', listen);
+      for (const origin of origins) tell(origin, { type: MOVE.ready });
     });
   }
 
@@ -1152,10 +1429,22 @@
             return;
           }
           join = null;  // (used: the code goes out of memory too)
-          try {
-            await V.cloud.signIn(made.email || email, passBox.value);
-          } catch (error) {
-            await signInScreen(made.email || email, 'Your Wefty is made. Sign in with the e-mail and password you just picked.');
+          // A helper since 1.21 hands back a one-time sign-in for the new account (no CAPTCHA, which a cloud open to
+          // everyone may ask a password sign-in for); an older one doesn't, and the password signs in as before.
+          let signed = false;
+          if (made.tokenHash) {
+            try {
+              const { data, error } = await V.cloud.sb.auth.verifyOtp({ token_hash: made.tokenHash, type: made.type || 'magiclink' });
+              signed = !error && !!(data && data.session);
+              if (signed) V.data.user = await V.cloud.user();
+            } catch (error) { /* the password, then */ }
+          }
+          if (!signed) {
+            try {
+              await V.cloud.signIn(made.email || email, passBox.value);
+            } catch (error) {
+              await signInScreen(made.email || email, 'Your Wefty is made. Sign in with the e-mail and password you just picked.');
+            }
           }
           resolve('joined');
         } finally {
@@ -1192,7 +1481,11 @@
     } finally {
       clearTimeout(timer);
     }
-    if (response.ok) return { email: String((answer && answer.email) || email) };
+    if (response.ok) {
+      const hash = answer && typeof answer.token_hash === 'string' && /^[A-Za-z0-9_.-]{10,300}$/.test(answer.token_hash)
+        ? answer.token_hash : '';
+      return { email: String((answer && answer.email) || email), tokenHash: hash, type: 'magiclink' };
+    }
     const said = answer && typeof answer.message === 'string' && answer.error ? V.weftyWords(answer.message) : '';
     if (response.status === 404 || response.status === 401) return { error: NO_JOINING };  // none there, or one too old
     if (response.status === 540) return { error: 'That cloud is asleep right now. Ask whoever showed you the code to open Wefty (it wakes up in a few minutes), then try again.' };
@@ -1466,10 +1759,29 @@
     if (V.news) V.news.start();  // updates for everyone (js/news.js): asked now, shown at a calm moment
   }
 
+  /* The first screen's Paste my sign-in (js/doors.js's front): where a move pass or a sign-in link can be pasted, as
+     on the connect screen, with its own words. On an iPhone's or iPad's home screen icon it's the main way in (the
+     icon starts with nothing of Safari's: the welcome's last step sends people there with a link to paste). */
+  function frontPaste() {
+    if (!passHere()) return null;
+    const icon = iconHere();
+    const problem = V.h('p.error-text', { role: 'alert' });
+    const { button } = pasteButton('Paste my sign-in', icon ? 'primary wide-btn' : 'quiet doors-paste', problem,
+      (text) => { if (!openPasted(text)) problem.textContent = PASS_WORDS.none; },
+      () => { problem.textContent = PASS_WORDS.unread; });
+    const hint = icon ? [V.h('p.muted', { text: PASS_WORDS.firstScreen }), V.h('p.muted.pass-mover', { text: PASS_WORDS.mover })]
+      : V.h('p.muted.pass-mover', { text: PASS_WORDS.mover });
+    return { button, problem, hint, icon };
+  }
+
   async function boot() {
     let joined = false;  // made a new account with a join code just now: no password to choose, the welcome steps next
     let passed = '';  // what became of a move pass pasted just before this reload: 'in', 'used' or 'expired'
+    let door = null;  // (1.21) an e-mail's link or Google coming back: { note } when it didn't work, { toast } when it did
     try {
+      // Every script first (they're after this one in index.html): a screen before them would be drawn without what
+      // they add, like js/pair.js's "Use a code from another device" on the first and sign-in screens.
+      if (document.readyState === 'loading') await new Promise((done) => document.addEventListener('DOMContentLoaded', done, { once: true }));
       if (V.desktop) {
         await V.pc.ready;
         let config = await V.pc.call('config');
@@ -1489,26 +1801,37 @@
           await signInScreen(config.email || '');
           config = await V.pc.call('config');
         }
-        V.data.user = { id: config.userId, email: config.email, invited: !!config.invited, name: config.name || '' };
+        V.data.user = { id: config.userId, email: config.email, invited: !!config.invited, name: config.name || '',
+          ...(config.who ? { who: config.who } : {}) };
       } else {
-        // The old web address (js/moved.js): a browser tab goes to the new one; the old installed app asks first.
+        // An old web address (js/moved.js): a tab with nothing to carry goes to wefty.org; one signed in, and an old
+        // installed app, get the move screen first. At wefty.org, a window an old address opened takes its sign-in.
         const moving = V.moved ? await V.moved.ready : 'stay';
         if (moving === 'moving') return;
         if (moving === 'ask') await movedScreen();
-        if (V.moved && V.moved.arrived) {
-          V.moved.said();
-          V.toast('Vault is now Wefty. Same notes, new name.', { ms: 6000 });
-        }
+        // Wefty 1.21: an e-mail's link, or Google coming back, before any other part of the address is read (it's
+        // taken out of the address at once).
+        if (V.doors) door = await V.doors.arrival().catch((error) => { console.error(error); return null; });
+        const arrived = await takeHandOver();
         takeConnectLink();
         if (await V.update.atBoot()) return;
         takeInviteLink();
         takeJoinLink();
         if ((invite && invite.busy) || (join && join.busy)) await busyScreen();
         else if ((invite || join) && V.deviceKind.inApp) await inAppScreen();
-        const saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
+        let saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
+        // The open door (1.21): nothing saved here, and the site names its own cloud (cloud.json). Without one, the
+        // connect screen as before.
+        const site = !saved && V.doors ? await V.doors.defaultCloud() : null;
+        if (site) {
+          saved = await V.doors.front({ cloud: site, note: (door && door.note) || '', paste: frontPaste(),
+            signIn: (back) => signInScreen('', '', false, back), invite: (back) => connectScreen(back) });
+        }
         if (!saved) return connectScreen();
         passed = passOutcome();
         if (passed) clearAtNextTap();  // (the pass on the clipboard: see emptyClipboard)
+        if (['used', 'unreachable'].includes(arrived)) passed = arrived === 'used' ? 'used' : 'retry';
+        else if (['in', 'here'].includes(arrived)) passed = 'arrived';
         // New links and codes (Connect your phone, invites, join codes, calendar links) name this page's own address,
         // or the new one when js/moved.js found it up ('ask': the old installed app). Never the new one before it
         // answers: a link to a site that isn't there yet would be a dead end, while the old address always opens and
@@ -1527,7 +1850,7 @@
             await V.cloud.signIn(invite.email, invite.code);
             user = await V.cloud.user();
           } catch (error) {
-            note = /fetch|network|load failed/i.test(error.message || '')
+            note = error.kind === 'captcha' ? error.message : /fetch|network|load failed|reach the cloud/i.test(error.message || '')
               ? 'Wefty couldn\'t reach the cloud. Check the internet, then open the invite link again.'
               : 'That invite has already been used (or a newer one was made). If you chose your own password, sign in with it; otherwise ask for a new invite.';
           }
@@ -1535,15 +1858,23 @@
         if (!user) {
           // (A move pass the cloud turned down, or that ran out: said here, with its e-mail filled in.)
           await signInScreen((invite && invite.email) || saved.email || '',
-            note || (['used', 'expired'].includes(passed) ? PASS_WORDS[passed] : ''), !note && passed === 'expired');
+            note || (door && door.note) || (['used', 'expired'].includes(passed) ? PASS_WORDS[passed]
+              : passed === 'retry' ? 'Wefty couldn\'t reach the cloud to move your sign-in. Go back to the old Wefty and tap '
+                + 'Try again, or sign in here with your e-mail and password.' : ''), !note && passed === 'expired');
           user = await V.cloud.user();
         }
         V.data.user = user;
       }
+      // (1.21) An account that came by Google agrees to the Terms once (never an e-mail one, an invited friend's or
+      // one made with a join code); one made just now (its e-mail confirmed, or that agreement) is new.
+      const terms = !V.desktop && V.doors ? await V.doors.needsTerms() : null;
+      if (terms) await V.doors.termsGate(terms);
+      const fresh = !V.desktop && !!V.doors && !!V.data.user && V.doors.isNew(V.data.user.id);
       // A friend still on their one-time invite code chooses their own password first, then the welcome steps
       // (js/welcome.js: their free AI key, Vault on the home screen), picked up where they were if Vault was closed.
-      // One who joined with a join code picked theirs already: straight to the steps.
-      if ((await mustChoose()) || (joined && V.data.user && V.data.user.id)) V.welcome.remember(V.data.user.id);
+      // One who joined with a join code picked theirs already, and someone who signed up just now: straight to the steps.
+      if ((await mustChoose()) || ((joined || fresh) && V.data.user && V.data.user.id)) V.welcome.remember(V.data.user.id);
+      if (fresh) V.doors.welcomed();
       let welcomed = false;  // (the welcome steps finished just now: the tour, js/tour.js, starts by itself after them)
       if (V.welcome.pending(V.data.user && V.data.user.id)) {
         hello();  // (a gate screen like the others: this version started, whether or not the steps get finished now)
@@ -1553,7 +1884,9 @@
       await main();
       hello();
       if (V.tour) V.tour.begin({ welcomed });  // (someone new: the tour; anyone else: offered once, at a calm moment)
-      if (passed === 'in' && V.data.user) V.toast(PASS_WORDS.in, { ms: 8000 });  // (in by the old Vault icon's sign-in)
+      if (passed === 'in' && V.data.user) V.toast(PASS_WORDS.in, { ms: 8000 });  // (in by the old icon's sign-in)
+      if (passed === 'arrived' && V.data.user) V.toast(PASS_WORDS.arrived, { ms: 8000 });  // (moved by Move to wefty.org)
+      if (door && door.toast && V.data.user) V.toast(door.toast, { ms: 9000 });  // (an e-mail's link, 1.21)
     } catch (error) {
       console.error(error);
       // On the PC, a downloaded version that breaks after it started can be left from here too.

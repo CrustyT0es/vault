@@ -8,7 +8,9 @@
    The Gemini key: "Open Google AI Studio" opens aistudio.google.com/apikey in a new tab; back in Vault, one tap on
    "Paste my key" reads the clipboard in that very tap (iPhones and Chrome only let a page read it during a tap; an
    iPhone then shows its own little Paste button) and goes through js/ai.js's saveGeminiKey, which asks Google first.
-   A box to paste into by hand comes up whenever reading didn't work. Google's own rule is said plainly: 18 or older.
+   A box to paste into by hand comes up whenever reading didn't work. Google's own rule is said plainly, in js/ai.js's
+   words (V.ai.googleTerms, 1.21): the person making the key is 18 or older, so a parent or guardian can make it with
+   them, with Google's terms linked and "I've read Google's terms" ticked before Google's page opens (never an age).
 
    The home screen: Chrome's own Install where it offers it (V.install), else the steps for this device. An iPhone or
    iPad has no such offer (Safari's Share > Add to Home Screen), and its new icon starts with nothing of Safari's
@@ -63,7 +65,8 @@ V.welcome = (() => {
 
   // A friend's account lives in the cloud of the person who invited them (cloud.js's user.invited): what's kept there
   // (their free AI key too) is in that person's reach, and the AI step says so before anything is saved.
-  const invited = () => !!(V.data.user && V.data.user.invited);
+  // (1.21: someone who signed up by themselves is in Wefty's own cloud, someone else's too: V.who 'self')
+  const invited = () => !!(V.data.user && (V.data.user.invited || (V.who && V.who() === 'self')));
   // What the owner's Stats show about each friend (js/access.js, vault/stats.py): said on the choose-password screen
   // and, for good, under "Your account" in a friend's Settings (friends who joined before the Stats were made too).
   const STATS_WORDS = 'Their Stats show a few numbers about you: how many notes and files you have, how much space they '
@@ -438,8 +441,7 @@ V.welcome = (() => {
         for (const button of buttons) button.disabled = true;
         try {
           const saved = await V.ai.saveGeminiKey(text);
-          V.toast(saved.checked ? (invited() ? 'Your free AI key works. It\'s kept in your private storage in the Wefty cloud '
-            + 'of the person who invited you (they could read it), and it\'s never shown here.'
+          V.toast(saved.checked ? (invited() ? `Your free AI key works. It's ${V.ai.kept()}.`
             : 'Your free AI key works. It\'s kept in your own cloud, never shown.')
             : 'Key saved. Google couldn\'t check it just now, so Wefty checks it the first time it\'s used.', { ms: 8000 });
           resolve('saved');
@@ -471,16 +473,23 @@ V.welcome = (() => {
       const manual = V.h('div.welcome-manual', { hidden: true }, box, saveTyped);
       const buttons = [paste, saveTyped];
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter') save(box.value); });
+      const studio = V.button('Open Google AI Studio', { kind: 'wide-btn', icon: 'open', onClick: () => {
+        if (V.desktop && V.pc) V.pc.call('openLink', { url: GEMINI_PAGE }).catch(V.problem);
+        else window.open(GEMINI_PAGE, '_blank', 'noopener');
+      } });
+      // (Google's age rule, its terms and the tick before its page opens: js/ai.js's, the same as Settings > AI's)
+      const terms = V.ai && V.ai.googleTerms ? V.ai.googleTerms(studio) : null;
+      if (terms) terms.classList.add('welcome-terms');
       screen(dots('ai'), V.h('h1', { text: 'Free AI for your notes' }),
         V.h('p.muted', { text: 'Wefty\'s AI writes your notes and makes your flash cards (and chats with you), using Google\'s '
           + 'Gemini. It\'s free with your own key, and getting one takes about a minute.' }),
+        terms,
         V.h('ol.steps', {},
-          V.h('li', { text: 'Tap Open Google AI Studio and sign in with your own Google account (not your school one).' }),
+          V.h('li', { text: 'Tick I\'ve read Google\'s terms, tap Open Google AI Studio and sign in with your own Google account (not your school one).' }),
           V.h('li', { text: 'Tap Create API key (any name is fine), then Copy.' }),
           V.h('li', { text: 'Come back here and tap Paste my key.' })),
-        V.button('Open Google AI Studio', { kind: 'wide-btn', icon: 'open', onClick: () => window.open(GEMINI_PAGE, '_blank', 'noopener') }),
+        studio,
         paste, manual, status, problem,
-        V.h('p.welcome-age', {}, V.icon('alert'), V.h('span', { text: 'Google says you must be 18 or older to use the Gemini API.' })),
         // (School Google accounts: their school usually switches Google AI Studio off for them, so the key is made with the
         // person's own account, on their own phone or computer: never a way round the school's settings for its accounts.)
         V.h('p.welcome-age.welcome-school', {}, V.icon('alert'), V.h('span', { text: 'School Google accounts usually can\'t '
@@ -489,9 +498,11 @@ V.welcome = (() => {
         V.deviceKind.inApp ? V.h('p.welcome-age.welcome-in-app', {}, V.icon('alert'), V.h('span', { text: 'Google won\'t let you '
           + `sign in inside Instagram, Snapchat and other apps' own browsers. Open Wefty in ${V.deviceKind.ios ? 'Safari' : 'Chrome'} `
           + 'for this step, or skip it for now.' })) : null,
-        invited() ? V.h('p.welcome-kept', {}, V.icon('lock'), V.h('span', { text: 'Your key is stored in the cloud of '
-          + 'the person who invited you. They could read it. You can delete it any time in Settings > AI, or remove the key in '
-          + 'Google AI Studio.' })) : null,
+        invited() ? V.h('p.welcome-kept', {}, V.icon('lock'), V.h('span', { text: V.who && V.who() === 'self'
+          ? 'Your key is stored in Wefty\'s cloud. Whoever runs it could read it. You can delete it any time in Settings > AI, '
+            + 'or remove the key in Google AI Studio.'
+          : 'Your key is stored in the cloud of the person who invited you. They could read it. You can delete it any time in '
+            + 'Settings > AI, or remove the key in Google AI Studio.' })) : null,
         V.h('p.hint', { text: 'Wefty works fully without it: notes, files, sending and everything else. You can add a key any time in Settings > AI.' }),
         V.h('button.link-btn.welcome-skip', { type: 'button', text: 'Skip for now', onclick: () => { if (!busy) resolve('skipped'); } }));
     });

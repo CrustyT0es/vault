@@ -47,7 +47,7 @@ V.push = (() => {
   let started = false;
 
   const me = () => (V.data && V.data.user && V.data.user.id) || '';
-  const isOwner = () => !(V.data.user || {}).invited;
+  const isOwner = () => V.who() === 'owner';
   const read = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
   const write = (key, value) => {
     try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (error) { /* private */ }
@@ -362,6 +362,8 @@ V.push = (() => {
         ? 'Notifications need Wefty\'s helper in your cloud. On your PC: your picture > Friends > Set up (with a Supabase access token).'
         : 'Notifications need the newest helper in your cloud. On your PC: your picture > Friends > Update the helper.';
     }
+    // (1.21: someone who signed up by themselves has nobody who invited them: Wefty's own team runs their cloud)
+    if (V.who() === 'self') return `Notifications aren't ready in Wefty's cloud yet. Wefty's team can switch them on: write to ${V.TEAM_EMAIL}.`;
     return 'Notifications aren\'t set up in this Wefty yet. Ask the person who invited you to update Wefty\'s helper on their PC.';
   }
 
@@ -412,7 +414,8 @@ V.push = (() => {
       if (helper && helper.state === 'ready' && !helper.timer) {
         rows.push(V.h('p.hint.warn-text.push-timer', { text: isOwner()
           ? 'Your cloud\'s timer hasn\'t run lately, so nothing is being sent. On your PC: your picture > Friends > Update the helper.'
-          : 'Your Wefty cloud\'s timer hasn\'t run lately, so nothing is being sent. Ask the person who invited you to update Wefty\'s helper.' }));
+          : V.who() === 'self' ? `Wefty's timer hasn't run lately, so nothing is being sent. Let ${V.TEAM} know.`
+            : 'Your Wefty cloud\'s timer hasn\'t run lately, so nothing is being sent. Ask the person who invited you to update Wefty\'s helper.' }));
       }
     } else if (permission() === 'denied') {
       rows.push(ui.line('Blocked on this device', blockedWords(), null, 'notifications-here'));

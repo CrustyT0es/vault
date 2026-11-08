@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.19.11';
+V.VERSION = '1.21.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -108,6 +108,39 @@ V.setDevice = (id) => {
 V.bus = new EventTarget();
 V.on = (type, fn) => V.bus.addEventListener(type, (event) => fn(event.detail));
 V.emit = (type, detail) => V.bus.dispatchEvent(new CustomEvent(type, { detail }));
+
+/* Who the signed-in person is in this cloud (1.21: anyone can sign up at wefty.org): 'owner' (runs the cloud: its own
+   account, made when it was set up), 'invited' (an invite or a join QR code: js/cloud.js's user.invited) or 'self'
+   (signed up by themselves: e-mail and password with the Terms ticked, which keeps user_metadata.terms, or Google).
+   From what V.data.user says when it says (`self`), else from the session this page keeps (supabase-js, under
+   'vault-auth'), never asked of the cloud. The PC's own sign-in carries no session here: a PC is its owner's unless
+   it says otherwise. Here, not in js/profile.js, so Settings and the rest still know when that one doesn't load. */
+V.who = () => {
+  const user = (V.data && V.data.user) || {};
+  if (['owner', 'invited', 'self'].includes(user.who)) return user.who;  // (js/cloud.js's person(), the PC's config)
+  if (user.invited) return 'invited';
+  if (typeof user.self === 'boolean') return user.self ? 'self' : 'owner';
+  if (user.terms) return 'self';
+  if (V.desktop) return 'owner';
+  try {
+    const kept = JSON.parse(localStorage.getItem('vault-auth') || 'null');
+    const account = (kept && (kept.user || (kept.currentSession && kept.currentSession.user))) || null;
+    if (account && (!user.id || account.id === user.id)) {
+      const meta = account.user_metadata || {};
+      const app = account.app_metadata || {};
+      if (app.wefty_owner) return 'owner';
+      if (meta.invited_by || app.vault_invited_by || app.vault_join) return 'invited';
+      if (meta.terms) return 'self';
+      // (made by Google: nobody made it for them. Only how it was made, never what was linked to it later: the owner
+      // may add Google to their own account)
+      if (app.provider && app.provider !== 'email') return 'self';
+    }
+  } catch (error) { /* a private window: as below */ }
+  return 'owner';
+};
+// Where people who signed up by themselves (and anyone else with nobody to ask) turn for help.
+V.TEAM_EMAIL = 'wefty.info@gmail.com';
+V.TEAM = `Wefty's team (${V.TEAM_EMAIL})`;
 
 /* Putting Vault on the home screen. Chrome (Android, a Chromebook, a computer) offers it once with an event that has
    to be caught early, so it's kept here for Settings and the welcome steps (js/welcome.js): 'install' goes out with
@@ -999,6 +1032,8 @@ V.notice = (() => {
 })();
 
 V.problem = (error) => {
+  // (an upload turned down for want of room: its words with a button to where files are managed, js/send.js)
+  if (error && error.full && V.storage && V.storage.say) { V.storage.say(error); return; }
   const text = (error && (error.message || error.error_description || error.msg)) || String(error);
   console.warn('Vault:', error);
   V.toast(text, { kind: 'err', ms: 5000 });

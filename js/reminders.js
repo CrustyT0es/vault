@@ -714,7 +714,7 @@ V.reminders = (() => {
   function noteLink(id) {
     const page = location.origin + location.pathname;
     const own = location.protocol === 'https:' || location.protocol === 'http:' ? (V.moved ? V.moved.address(page) : page) : '';
-    const base = (V.config && V.config.phoneUrl) || own || 'https://crustyt0es.github.io/wefty/';
+    const base = (V.config && V.config.phoneUrl) || own || 'https://wefty.org/';
     return `${base.replace(/#.*$/, '')}#note=${id}`;
   }
 

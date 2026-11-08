@@ -416,7 +416,7 @@ V.files = (() => {
       } else throw refusal('Wefty on the phone doesn\'t know that yet: it updates by itself soon.');
       if (here) here.looked = Date.now();
     } catch (error) {
-      reply = error.refused ? { state: 'refused', error: error.message }
+      reply = error.refused || error.full ? { state: 'refused', error: error.message }
         : { state: 'error', error: error.name === 'NotFoundError' || error.name === 'TypeError' ? 'That isn\'t there any more.'
           : error.name === 'NotAllowedError' ? 'Wefty on the phone needs its permission again: open Files there.'
             : 'The phone couldn\'t read that.' };
@@ -490,7 +490,10 @@ V.files = (() => {
     if (!navigator.onLine) return V.toast(OFFLINE, { kind: 'err' });
     for (const file of picked) {
       if (file.size > MAX) { V.toast(`${file.name} is over 50 MB, the most the free cloud takes.`, { kind: 'err', ms: 6000 }); continue; }
-      if (used() + file.size > FREE_SPACE) { V.toast(FULL, { kind: 'err', ms: 8000 }); break; }
+      // (1.21: the person's own room as the cloud counts it, V.storage; a cloud that doesn't count: the plan's 1 GB)
+      const full = V.storage.before();
+      if (full) { V.problem(full); break; }
+      if (!V.storage.now() && used() + file.size > FREE_SPACE) { V.toast(FULL, { kind: 'err', ms: 8000 }); break; }
       const id = V.uuid();
       const path = `${V.data.user.id}/drive/${id}/${V.storageName(file.name || 'file')}`;
       uploads.set(id, { name: file.name || 'file', size: file.size, share: 0, folder });
@@ -555,7 +558,9 @@ V.files = (() => {
 
   /* A file the other device brought up (pcfiles/ or phonefiles/), kept in Vault Drive's top folder. */
   async function copyToDrive(file) {
-    if (used() + (file.size || 0) > FREE_SPACE) throw new Error(FULL);
+    const full = V.storage.before();
+    if (full) throw full;
+    if (!V.storage.now() && used() + (file.size || 0) > FREE_SPACE) throw new Error(FULL);
     const id = V.uuid();
     const path = `${V.data.user.id}/drive/${id}/${V.storageName(file.name)}`;
     const { error } = await V.cloud.sb.storage.from('vault').copy(file.path, path);
@@ -1079,7 +1084,7 @@ V.files = (() => {
     parts.space = V.h('div.space-row.files-space');
     V.clear(main,
       V.h('div.files-host.files-wraps', {}, V.icon('cloud'), V.h('div.files-host-text', {}, V.h('strong', { text: 'Wefty Drive' }),
-        V.h('span', { text: 'In your own cloud: both devices see it, even with the other one off.' }))),
+        V.h('span', { text: `${V.who() === 'owner' ? 'In your own cloud' : 'In the cloud'}: both devices see it, even with the other one off.` }))),
       drive ? V.h('div.files-bar', {}, V.iconButton('back', 'Up a folder', () => { drive = drive.split('/').slice(0, -1).join('/'); draw(); }, 'quiet'),
         crumbsAt(crumbs)) : null,
       V.h('div.files-tools', {}, picker,
@@ -1110,9 +1115,7 @@ V.files = (() => {
     })] : empty('cloud', drive ? 'This folder is empty' : 'Wefty Drive is empty',
       V.desktop ? 'Upload files, or drop them here: your phone sees them too, even when this PC is off.'
         : 'Upload files here and your PC sees them too, even when this phone is off.'));
-    const total = used();
-    V.clear(parts.space, V.h('div.bar.space', {}, V.h('i', { style: { width: Math.min(100, (100 * total) / FREE_SPACE) + '%' } })),
-      V.h('span', { text: `${V.size(total)} of 1 GB of free space used` }));
+    V.clear(parts.space, V.storage.meter(used()));  // (1.21: the person's own room, else the plan's 1 GB)
   }
 
   function drawUploads() {
@@ -1222,6 +1225,7 @@ V.files = (() => {
 
   V.on('status', (state) => { if (state === 'synced' || state === 'held') start(); });
   V.on('data', (table) => { if (table === 'transfers' && source === 'drive') drawDriveList(); });
+  V.on('storage', () => { if (source === 'drive') drawDriveList(); });  // (the cloud's count came: V.storage)
   V.on('away', hereAway);
   V.on('back', async () => {
     if (here && here.handle) {

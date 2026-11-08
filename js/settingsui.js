@@ -27,7 +27,7 @@
   const isPc = () => V.desktop;
   const isPhone = () => !V.desktop && V.device === 'phone';
   const isWeb = () => !V.desktop && V.device === 'web';
-  const isOwner = () => !(V.data.user || {}).invited;
+  const isOwner = () => V.who() === 'owner';
   const has = (pref) => () => V.desktop && !!V.prefs && pref in V.prefs;
   const step = () => (V.desktop ? 'PC' : V.device === 'phone' ? (V.deviceKind.ios ? V.deviceKind.model : 'phone')
     : V.deviceKind.chromebook ? 'Chromebook' : 'browser');
@@ -35,11 +35,17 @@
   /* -- every setting, for search: its page, the row's key (its data-setting, or a CSS selector starting with "."),
      the words shown, the words people may use for it, whether it's under More options, and on which devices. */
   const SEARCH = [
-    { page: 'account', key: 'your-email', name: 'Your e-mail', hint: 'Your notes, files and clipboard are only in your own cloud.',
-      words: ['account', 'email', 'e-mail', 'signed in', 'privacy', 'who'] },
+    { page: 'account', key: 'your-email', name: 'Your e-mail', hint: () => (isOwner() ? 'Your notes, files and clipboard are only in your own cloud.'
+      : 'Your notes, files and clipboard are yours alone.'), words: ['account', 'email', 'e-mail', 'signed in', 'privacy', 'who'] },
     { page: 'account', key: 'change-password', name: 'Change password', hint: 'For signing in on a new device. It isn\'t your locked-notes PIN.',
       words: ['password', 'forgot', 'sign in'] },
     { page: 'account', key: 'sign-out', name: 'Sign out', hint: 'Your notes stay safe in the cloud.', words: ['sign out', 'log out', 'logout', 'leave'] },
+    // (1.21: the data's own two, beside the account)
+    { page: 'account', key: 'export-everything', name: 'Export everything', hint: 'Every note, folder and chat in one ZIP, to keep or take elsewhere.',
+      words: ['export', 'download my', 'my data', 'take out', 'takeout', 'zip', 'save everything', 'copy of'] },
+    { page: 'account', key: 'delete-my-account', name: 'Delete my account', hint: () => (isOwner()
+      ? 'You run this Wefty cloud, so your account can\'t be deleted here.' : 'Every note, file, chat and setting, on every device, for good.'),
+    words: ['delete', 'account', 'remove', 'erase', 'close my', 'my data', 'leave', 'quit', 'gdpr'] },
     { page: 'account', key: 'sync', name: 'Sync', hint: 'Up to date, or what holds it up, and Sync now.', more: true,
       words: ['sync', 'synced', 'offline', 'not synced', 'refresh'] },
     { page: 'account', key: 'connected-to', name: 'Connected to', hint: 'The address of your free cloud.', more: true,
@@ -72,6 +78,9 @@
     { page: 'devices', key: 'add-a-phone-or-computer', name: 'Add a phone or computer',
       hint: () => (isPhone() ? 'Send yourself a link that opens Wefty there, ready to sign in.' : 'Show a code to scan with its camera, or copy the link.'),
       words: ['qr', 'code', 'connect', 'phone', 'computer', 'link', 'new device', 'iphone', 'android', 'chromebook', 'laptop'] },
+    { page: 'devices', key: 'sign-in-another-device', name: 'Sign in another device', hint: 'Type the code a device that isn\'t signed in shows.',
+      words: ['code', 'pair', 'new phone', 'new device', 'another device', 'sign in', 'log in', 'login', 'phone', 'chromebook', 'iphone'],
+      shown: () => !!V.pair },
     { page: 'devices', key: 'copy-what-arrives', name: 'Copy what arrives', hint: 'What\'s sent to this PC goes on its clipboard.',
       words: ['clipboard', 'paste', 'arrivals', 'received'], shown: has('copyArrivals') },
     { page: 'devices', key: 'show-what-arrives', name: 'Show what arrives', hint: 'A small card with the picture, at the corner of the screen.',
@@ -143,6 +152,9 @@
       words: ['invite', 'invite people', 'friends', 'people', 'classmates', 'code', 'link'] },
     { page: 'friends', key: 'join-with-a-qr-code', name: 'Join with a QR code', hint: 'Anyone who scans it in the next 30 minutes gets their own Wefty.',
       words: ['qr', 'join', 'scan', 'invite', 'friends'] },
+    { page: 'friends', key: 'open-sign-ups', name: 'Open sign-ups', hint: 'Let anyone who finds wefty.org make their own Wefty here.',
+      words: ['sign up', 'signups', 'sign-ups', 'open', 'everyone', 'public', 'strangers', 'cap', 'smtp', 'e-mail sender', 'captcha',
+        'turnstile', 'google sign-in', 'waitlist'], shown: () => isPc() && isOwner() && !!(V.pc && V.pc.can('doorsState')) },
     { page: 'friends', key: 'new-announcement', name: 'New announcement', hint: 'Post an update, a poll or a note for everyone.',
       words: ['announcement', 'announcements', 'poll', 'news', 'post'] },
     { page: 'friends', key: 'stats', name: 'Stats', hint: 'How many are active today, this week and this month.', words: ['stats', 'numbers', 'active'] },

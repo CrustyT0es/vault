@@ -995,7 +995,8 @@ V.ink = (() => {
       if (made.length) V.cloud.remove(made).catch(() => {});
       saving(false);
       keepDraft();
-      V.toast(error && error.message ? error.message : 'That didn\'t save. Try again.', { kind: 'err', ms: 6000 });
+      if (error && error.full) V.problem(error);  // (out of room: js/send.js's V.storage says so, with a button)
+      else V.toast(error && error.message ? error.message : 'That didn\'t save. Try again.', { kind: 'err', ms: 6000 });
     }
   }
 

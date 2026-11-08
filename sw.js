@@ -11,12 +11,14 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.19.11-67be8834544b';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.21.0-babb26069b20';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 /* Since Wefty moved (1.15: crustyt0es.github.io/vault/ -> /wefty/, one origin, so one set of caches), the new
    address's caches are called "wefty-...": a worker from before 1.15 at the old address deletes every "vault-..." cache
    but its own when it switches over, and would take the new address's offline copy with it. Anywhere else (the old
    address, the tests' own) they stay "vault-...". Each worker only ever counts and clears its own name's caches. */
-const PREFIX = /\/wefty\/$/.test(new URL(self.registration.scope).pathname) ? 'wefty-' : 'vault-';
+// wefty.org (1.20) is a site of its own, so its caches are only ever its own: "wefty-..." there too.
+const PREFIX = /\/wefty\/$/.test(new URL(self.registration.scope).pathname)
+  || /^(?:www\.)?wefty\.org$/.test(new URL(self.registration.scope).hostname) ? 'wefty-' : 'vault-';
 const CACHE = PREFIX + BUILD;
 const LEGACY = /^vault-1\.0\.\d+$/;  // Vault 1.0.x's caches: its pages can't say "update-now", so it switches itself
 const KEPT = /^(?:vault|wefty)-(\d+(?:\.\d+)+)-[0-9a-f]{12}$/;  // a version kept here since (<prefix><version>-<hash>)

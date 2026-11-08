@@ -50,7 +50,7 @@ V.news = (() => {
   const seenNow = new Set(); // seen this session (when this browser keeps nothing: a private window)
 
   const me = () => (V.data.user && V.data.user.id) || '';
-  const isOwner = () => !!me() && !V.data.user.invited;
+  const isOwner = () => !!me() && V.who() === 'owner';
   const letters = (text) => Array.from(String(text || '')).length;  // (an emoji is one letter, as the helper counts)
   const offline = (error) => !navigator.onLine || !!(error && error.offline)
     || /fetch|network|internet|offline|load failed/i.test(String((error && error.message) || error));

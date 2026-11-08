@@ -225,7 +225,9 @@ V.startHere = (() => {
     }
     return !state.failed && V.ai.lacksGemini() && !V.ai.has('claude');
   }
-  const AI_NOTE = 'Use your own personal Google account, not a school one. Google says you must be 18 or older to use the Gemini API.';
+  // (Google's age rule in js/ai.js's own words, the same sentence everywhere a key is made: V.ai.AGE_WORDS)
+  const AI_NOTE = `Use your own personal Google account, not a school one. ${(V.ai && V.ai.AGE_WORDS) || 'Google requires the '
+    + 'person making the key to be 18 or older, so a parent or guardian can make it with you.'}`;
 
   /* The next step in a title and one or two short sentences (calm: what to do, and what the AI does with it). */
   function words(step, noKey) {

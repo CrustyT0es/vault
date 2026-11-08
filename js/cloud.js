@@ -134,6 +134,12 @@ V.cloud = (() => {
     /JWT|refresh token|not authenticated|signed out/i.test(error.message || ''));
 
   function client(cfg) {
+    // The same cloud asked for again on the web (js/doors.js made its client before the start got here): the one
+    // already made, so a session never has two clients renewing it (each renewal uses the last one's token up).
+    if (sb && !V.desktop && config && config.url === cfg.url && config.key === cfg.key) {
+      config = cfg;
+      return sb;
+    }
     config = cfg;
     const options = { realtime: { params: { eventsPerSecond: 5 } }, global: { headers: { 'x-vault': V.VERSION } } };
     if (V.desktop) options.accessToken = () => V.pc.token();
@@ -764,6 +770,11 @@ V.cloud = (() => {
         let message = 'The upload didn\'t work (' + xhr.status + ').';
         try { message = JSON.parse(xhr.responseText).message || message; } catch (e) { /* not JSON */ }
         if (/maximum allowed size|too large|payload/i.test(message)) message = 'That file is over 50 MB, the most the free cloud takes.';
+        // (1.21: turned down because the person's own room for files is full? js/send.js's V.storage asks the cloud)
+        if (V.storage && V.storage.isRefusal(xhr.status, message)) {
+          V.storage.refused(new Error(message)).then(reject, () => reject(new Error(message)));
+          return;
+        }
         reject(new Error(message));
       };
       xhr.onerror = () => reject(new Error('No internet: it\'ll go when you\'re back online.'));
@@ -800,18 +811,29 @@ V.cloud = (() => {
   /* -- signing in and out */
 
   /* Who's signed in: { id, email }, plus invited (a friend's account in the owner's cloud: js/access.js) and name. */
+  /* Who the account is in this cloud (1.21, V.who): the owner (app_metadata.wefty_owner, which only the cloud's
+     admin side can set: the helper's set-up marks the owner's account), invited (an invite or a join QR code), or
+     signed up by themselves (the Terms ticked, kept in user_metadata.terms, or an account made by Google). An account
+     with none of these is a cloud's own from before 1.21, when nobody could sign up alone: its owner. Never from the
+     list of linked sign-ins (the owner may add Google to theirs), only from how the account was made. */
+  const whoOf = (meta, app) => {
+    if (app.wefty_owner) return 'owner';
+    if (meta.invited_by || app.vault_invited_by || app.vault_join) return 'invited';
+    if (meta.terms || (app.provider && app.provider !== 'email')) return 'self';
+    return 'owner';
+  };
   const person = (account) => {
     const meta = (account && account.user_metadata) || {};
     const app = (account && account.app_metadata) || {};
     return { id: account.id, email: account.email, invited: !!(meta.invited_by || app.vault_invited_by),
-      name: String(meta.name || '').slice(0, 60) };
+      name: String(meta.name || '').slice(0, 60), who: whoOf(meta, app) };
   };
 
   async function user() {
     if (V.desktop) {
       const answer = await V.pc.call('config');
       return answer.signedIn ? { id: answer.userId, email: answer.email, invited: !!answer.invited,
-        name: answer.name || '' } : null;
+        name: answer.name || '', ...(answer.who ? { who: answer.who } : {}) } : null;
     }
     const { data } = await sb.auth.getSession();
     if (data.session) {
@@ -826,18 +848,23 @@ V.cloud = (() => {
     return null;
   }
 
+  /* The password sign-in. On the web, a cloud that asks for a CAPTCHA (js/doors.js) gets a fresh token for each try;
+     what went wrong keeps the cloud's own code and status (js/doors.js's words say it). */
   async function signIn(email, password) {
     if (V.desktop) {
       await V.pc.call('signIn', { email, password });
     } else {
-      let { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+      const check = async () => ({ captchaToken: V.doors && V.doors.captcha ? await V.doors.captcha() : '' });
+      let { error } = await sb.auth.signInWithPassword({ email: email.trim(), password, options: await check() });
       // An invite code typed as it's shown (k7qx-9mrt-2b): the account has it as K7QX9MRT2B (vault/invites.py).
       const code = V.inviteCode(password);
       if (error && /invalid login/i.test(error.message) && code && code !== password) {
-        ({ error } = await sb.auth.signInWithPassword({ email: email.trim(), password: code }));
+        ({ error } = await sb.auth.signInWithPassword({ email: email.trim(), password: code, options: await check() }));
       }
       if (error) {
-        throw new Error(/invalid login/i.test(error.message) ? 'That e-mail or password isn\'t right.' : error.message);
+        const words = /invalid login/i.test(error.message) ? 'That e-mail or password isn\'t right.'
+          : V.doors && V.doors.words ? V.doors.words(error) : error.message;
+        throw Object.assign(new Error(words), { code: error.code || '', status: error.status || 0, name: error.name || 'Error' });
       }
     }
     V.data.user = await user();
@@ -922,6 +949,8 @@ V.cloud = (() => {
     changePassword, accessToken, unsent, mergeExtra, notePrint, mustChange,
     waits,  // (tests shorten them)
     get sb() { return sb; },
+    /* The cloud the client was made for ({ url, key }), or null before there's one (js/doors.js). */
+    cloudConfig: () => (config ? { url: config.url, key: config.key } : null),
     get status() { return status; },
     get held() { return heldCount(); },
     get live() { return live; },

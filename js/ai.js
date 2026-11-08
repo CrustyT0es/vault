@@ -161,10 +161,15 @@ V.ai = (() => {
   const ownKeys = () => !V.desktop || !!(V.pc && V.pc.standalone && V.pc.standalone());
   // A friend's private storage is in the cloud of the person who invited them, who holds that cloud's secret key and so
   // could read a key kept there: said so wherever a key is saved (js/welcome.js too), never "your own cloud".
-  const invited = () => !!(V.data.user && V.data.user.invited);
+  // (1.21: someone who signed up by themselves at wefty.org is in Wefty's own cloud, so the same goes for them: V.who.)
+  const invited = () => !!(V.data.user && (V.data.user.invited || (V.who && V.who() === 'self')));
   const KEPT_THEIRS = 'kept in your private storage in the Wefty cloud of the person who invited you (they could read it), '
     + 'and never shown here';
-  const kept = () => (invited() ? KEPT_THEIRS : 'kept in your own cloud, never shown');
+  const KEPT_WEFTY = 'kept in your private storage in Wefty\'s cloud (whoever runs it could read it), and never shown here';
+  const selfMade = () => !!(V.who && V.who() === 'self');
+  // "the Wefty cloud of the person who invited you", or Wefty's own for someone who signed up there
+  const theirCloud = () => (selfMade() ? 'Wefty\'s cloud' : 'the Wefty cloud of the person who invited you');
+  const kept = () => (!invited() ? 'kept in your own cloud, never shown' : selfMade() ? KEPT_WEFTY : KEPT_THEIRS);
   const month = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthName = () => new Date().toLocaleDateString([], { month: 'long' });
   /* "Use Claude too" (Settings > AI), the same on every device: off unless the owner switched it on. A Vault 1.8 on
@@ -2041,7 +2046,7 @@ V.ai = (() => {
     } });
     if (known.cloud) {
       return ui.line('Claude key', !ownKeys() ? 'Jarvis\'s key is in your own cloud: your phone and Chromebook can use Claude too.'
-        : invited() ? 'In your private storage in the Wefty cloud of the person who invited you (they could read it), never '
+        : invited() ? `In your private storage in ${theirCloud()} (${selfMade() ? 'whoever runs it' : 'they'} could read it), never `
           + 'shown here. Claude can be used here. Remove it any time.'
           : 'In your own cloud, never shown. Claude can be used here.', V.h('div.setting-buttons', {}, ready, remove));
     }
@@ -2079,6 +2084,36 @@ V.ai = (() => {
       V.h('button.link-btn.ai-console', { type: 'button', text: 'Get a key at console.anthropic.com', onclick: open }));
   }
 
+  /* Google's rule for the free key (1.21: anyone can sign up), in the same words wherever a key is made (this sheet,
+     the welcome's AI step, Start here's box: one sentence, AGE_WORDS): the person making the key has to be 18 or
+     older, so a parent or guardian can make it with them. A link to Google's terms, and one tick, "I've read Google's
+     terms", that has to be on before the button that opens Google's key page (`opens`: disabled until then). Wefty
+     never asks anyone's age: the tick only says the terms were seen (they're accepted on Google's own page), and it's
+     kept on this device once given. Pasting a key someone already has never waits for it. */
+  const AGE_WORDS = 'Google requires the person making the key to be 18 or older, so a parent or guardian can make it with you.';
+  const TERMS_URL = 'https://ai.google.dev/gemini-api/terms';
+  const TERMS_SEEN = 'wefty-google-terms';
+  const termsSeen = () => { try { return localStorage.getItem(TERMS_SEEN) === '1'; } catch (error) { return false; } };
+  const openOut = (url) => {
+    if (V.desktop && V.pc) V.pc.call('openLink', { url }).catch(V.problem);
+    else window.open(url, '_blank', 'noopener');
+  };
+  function googleTerms(opens = []) {
+    const buttons = [].concat(opens).filter(Boolean);
+    const tick = V.h('input.covers-tick.ai-terms-box', { type: 'checkbox', checked: termsSeen(), onchange: () => {
+      try {
+        if (tick.checked) localStorage.setItem(TERMS_SEEN, '1'); else localStorage.removeItem(TERMS_SEEN);
+      } catch (error) { /* a private window: ticked for now */ }
+      lock();
+    } });
+    const lock = () => { for (const button of buttons) button.disabled = !tick.checked; };
+    lock();
+    return V.h('div.ai-terms', {},
+      V.h('p.ai-terms-age', {}, V.icon('alert'), V.h('span', { text: AGE_WORDS })),
+      V.h('button.link-btn.ai-terms-link', { type: 'button', text: 'Google\'s Gemini API terms', onclick: () => openOut(TERMS_URL) }),
+      V.h('label.ai-terms-tick', {}, tick, V.h('span', { text: 'I\'ve read Google\'s terms' })));
+  }
+
   /* The free Gemini key's three steps, its box and the school / wifi / 18+ words, in a sheet of their own (Settings >
      AI's "Set up", and "Set up free Gemini" from Chat and the note-taker). A sheet isn't drawn again when Settings
      is, so a half-typed key keeps its words and its caret. Saved: the sheet closes and the page says so. */
@@ -2110,23 +2145,24 @@ V.ai = (() => {
       }
     } });
     box.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); save.click(); } });
-    const open = () => window.open(GEMINI_CONSOLE, '_blank', 'noopener');
+    const open = () => openOut(GEMINI_CONSOLE);
     const step = (...bits) => V.h('li', {}, bits.map((bit) => (Array.isArray(bit) ? V.h('strong', { text: bit[0] }) : bit)));
+    const get = V.button('Get a free key', { kind: 'tonal', icon: 'open', onClick: open });
     keySheet = V.sheet({
       title: 'Set up the free Gemini',
       content: V.h('div.ai-key.ai-key-gemini.ai-gemini-sheet', {},
         V.h('p', { text: 'Chat and the note-taker use Google\'s free Gemini. It needs a free key from Google (new ones start with AQ.).' }),
+        googleTerms(get),
         V.h('ol.steps.ai-steps', {},
-          step('Tap ', ['Get a free key'], ' and sign in with your own Google account.'),
+          step('Tick ', ['I\'ve read Google\'s terms'], ', tap ', ['Get a free key'], ' and sign in with your own Google account.'),
           step('Tap ', ['Create API key'], ', then copy the key.'),
           step('Paste it here and tap ', ['Save'], '.')),
-        V.h('div.setting-buttons', {}, V.button('Get a free key', { kind: 'tonal', icon: 'open', onClick: open })),
+        V.h('div.setting-buttons', {}, get),
         V.h('div.ai-key-row', {}, box, save),
-        V.h('p.hint', { text: `Wefty checks it with Google, then it's ${kept()}.` }),
+        V.h('p.hint', { text: `Already have a key? Paste it and tap Save. Wefty checks it with Google, then it's ${kept()}.` }),
         V.h('p.hint.ai-school', { text: 'A school Google account usually can\'t make a key (schools switch it off), so use your '
           + 'own personal one: on a school Chromebook, make the key on your phone, and Wefty uses it on all your devices. If a '
-          + 'wifi blocks Gemini, use mobile data, or let your messages wait and go when you\'re home. Google says you must be '
-          + '18 or older to use the Gemini API.' })),
+          + 'wifi blocks Gemini, use mobile data, or let your messages wait and go when you\'re home.' })),
       onClose: () => { keySheet = null; },
     });
     return keySheet;
@@ -2158,7 +2194,7 @@ V.ai = (() => {
     if (!known.gemini) recheck();  // (its answer draws Settings again: the 'ai' event)
     if (known.gemini) {
       const ready = V.h('span.ai-ready', {}, V.icon('check'), V.h('span', { text: 'Set up' }));
-      return line(invited() ? 'In your private storage in the Wefty cloud of the person who invited you, so they could '
+      return line(invited() ? `In your private storage in ${theirCloud()}, so ${selfMade() ? 'whoever runs it' : 'they'} could `
         + 'read it: remove it here any time, or delete the key in Google AI Studio.' : 'Kept in your own cloud, never shown.',
       V.h('div.setting-buttons', {}, ready, invited() ? removeGemini(ui) : null));
     }
@@ -2388,6 +2424,7 @@ V.ai = (() => {
   return { ask, price, rates, money, tally, count, overLimit, headers, forgetKey, check, reachable, card, getKey, saveKey,
     removeKey, callGemini, checkGemini, timingLine, networkLine, getGeminiKey, saveGeminiKey, removeGeminiKey,
     forgetGeminiKey, AiError, WORDS, PRICES, THINKING, THINKING_2, invited, KEPT_THEIRS, page, geminiSheet,
+    googleTerms, termsSeen, AGE_WORDS, TERMS_URL, kept, theirCloud,
     // How quickly each Gemini model starts answering here, and the others this key may use (tests, Settings).
     speed: { order: (use = 'chat', tier = 'fast') => ranked(use, { tier }), headFor, typical, extras, failing,
       slow: (model, use = 'chat') => isSlow(model, use), forget: forgetSpeed,

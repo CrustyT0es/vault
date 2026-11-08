@@ -700,6 +700,48 @@ textarea.field { resize: vertical; min-height: 48px; }
 .manual summary { cursor: pointer; color: var(--text-2); font-weight: 500; min-height: 48px; display: flex; align-items: center; }
 .manual[open] { padding-bottom: 16px; }
 .manual .btn { margin-top: 14px; }
+/* Buttons on the screens before the app wrap their words rather than run off a narrow phone (bigger text too). */
+.gate-box .btn.wide-btn { white-space: normal; text-align: center; }
+
+/* Wefty 1.21's doors (js/doors.js): the first screen, signing up, the e-mail's code, a new password, the Terms. */
+.gate-box > .doors-pitch { font: 600 22px/30px var(--font-display); margin: 0 0 8px; text-wrap: balance; }
+.gate-box > .doors-note { margin: 0 0 4px; padding: 12px 14px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--text); text-align: center; }
+.doors-stack { display: grid; gap: 10px; margin-top: 12px; }
+.gate-box .doors-stack .btn.wide-btn { margin-top: 0; }
+.doors-slot { display: contents; }
+.doors-more { display: grid; gap: 8px; }
+.doors-more:empty { display: none; }
+.gate-box .doors-more .btn.wide-btn { margin-top: 4px; }
+.doors-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 0; color: var(--muted); font-size: 13px; line-height: 18px; }
+.doors-or::before, .doors-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.gate-box > .link-btn.doors-forgot { margin-top: 4px; min-height: 44px; }
+.gate-box .doors-new { text-align: center; margin: 14px 0 0; color: var(--text-2); }
+.doors-new .link-btn { display: inline; padding: 12px 2px; font: inherit; font-weight: 600; }
+.gate-box > .doors-paste { justify-self: center; }
+.gate-box > .doors-legal { text-align: center; color: var(--muted); font-size: 13px; line-height: 18px; margin: 14px 0 0; }
+.doors-legal a { display: inline-block; padding: 13px 8px; }
+.doors-tick a, .doors-legal a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+.doors-tick { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; margin: 18px 0 2px; color: var(--text-2); font-size: 14px; line-height: 21px; cursor: pointer; }
+.doors-tick input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--primary); cursor: pointer; }
+.doors-pass { position: relative; }
+.doors-pass .field { padding-right: 68px; }
+.doors-show {
+  position: absolute; right: 6px; bottom: 6px; min-width: 56px; height: 36px; padding: 0 10px; border-radius: 9px;
+  background: transparent; border: none; color: var(--accent-ink); font: 600 13.5px/1 var(--font);
+}
+.doors-show:hover { background: var(--surface-2); }
+.doors-show::after { content: ""; position: absolute; inset: -4px; }  /* (a 44 px target) */
+.gate-box > .doors-sent { margin: 0; }
+.gate-box > .doors-address { text-align: center; font-weight: 600; color: var(--text); margin: 2px 0 4px; overflow-wrap: anywhere; }
+.gate-box .field.doors-code { font: 600 24px/30px var(--font); letter-spacing: .25em; text-align: center; font-variant-numeric: tabular-nums; }
+.gate-box > .hint.doors-center { text-align: center; margin: 2px 0; }
+.gate-box > .doors-status { text-align: center; color: var(--text-2); font-size: 13.5px; margin: 4px 0 0; }
+.gate-box > .doors-status:empty { display: none; }
+/* The sign-in check (Cloudflare Turnstile): invisible unless it wants a tick, then a card at the bottom. */
+.doors-check { position: fixed; z-index: 100; left: 50%; bottom: calc(16px + var(--safe-bottom)); transform: translateX(-50%); width: min(340px, calc(100vw - 32px)); pointer-events: none; }
+.doors-check-words { display: none; margin: 0 0 10px; text-align: center; color: var(--text); font-size: 14px; line-height: 20px; }
+.doors-check.asking { pointer-events: auto; display: grid; justify-items: center; padding: 14px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-3); }
+.doors-check.asking .doors-check-words { display: block; }
 
 /* ------------------------------------------------------------ notes */
 
@@ -4235,6 +4277,85 @@ button.chat-sent-pic { display: block; padding: 0; border: none; border-radius: 
 .feedback-kinds { margin: 6px 0 10px; }
 .feedback-text { min-height: 140px; }
 .feedback-count { display: block; text-align: right; color: var(--muted); font-size: 12.5px; min-height: 18px; font-variant-numeric: tabular-nums; }
+
+/* -- the account (1.21) ----------------------------------------------------------------------------------------------
+   A code from another device (js/pair.js: the new device's screen, and the sheet that types it in), Settings >
+   Account's Delete my account and its goodbye, the owner's Open sign-ups sheet (js/access.js), Google's terms in the
+   free Gemini's setup (js/ai.js, js/welcome.js) and the storage meter with each person's own room (js/send.js). */
+.pair-code { display: grid; place-items: center; min-height: 96px; margin: 10px 0 2px; padding: 12px; border: 1px solid var(--line);
+  border-radius: var(--r-lg); background: var(--sunken); }
+.pair-digits { color: var(--text); font: 600 clamp(30px, 10vw, 44px)/1.15 ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  letter-spacing: .08em; font-variant-numeric: tabular-nums; -webkit-user-select: all; user-select: all; overflow-wrap: anywhere; text-align: center; }
+.pair-blank { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.pair-blank .icon { width: 22px; height: 22px; }
+.gate-box > .pair-left { margin: 2px 0 0; text-align: center; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.gate-box > .pair-left:empty, .gate-box > .pair-state:empty { display: none; }
+.gate-box > .pair-state { margin: 0; text-align: center; color: var(--text-2); }
+.gate-box > .pair-device { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 2px 0 0; color: var(--text-2);
+  font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; text-align: center; }
+.pair-device .icon { flex: none; width: 18px; height: 18px; }
+.pair-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+.pair-buttons:empty { display: none; }
+.pair-problem > .error-text { margin: 6px 0 0; text-align: center; }
+.pair-problem > .pair-owner { margin: 4px 0 0; text-align: center; }
+.gate-box > .pair-back { margin-top: 4px; }
+.pair-approve { display: grid; gap: 4px; }
+.pair-approve > p { margin: 6px 0; color: var(--text-2); }
+.pair-box { font: 600 22px/30px ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.pair-box::placeholder { letter-spacing: .08em; }
+.pair-approve > .pair-ask { margin: 8px 0 0; color: var(--text); font-size: 17px; line-height: 24px; overflow-wrap: anywhere; }
+.pair-approve > .pair-when { margin: 0 0 4px; }
+.pair-warn, .ai-terms-age { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--warn-soft); color: var(--text); font-size: 13.5px; line-height: 20px; }
+.pair-warn .icon, .ai-terms-age .icon { flex: none; width: 18px; height: 18px; color: var(--warn); margin-top: 1px; }
+.pair-approve > .pair-done { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.pair-done .icon { flex: none; width: 20px; height: 20px; color: var(--ok); margin-top: 2px; }
+.pair-problem > .error-text:first-child { margin-top: 8px; }
+.pair-approve .pair-problem > .error-text, .pair-approve .pair-problem > .pair-owner { text-align: left; }
+.delete-account { display: grid; }
+.delete-account > p { margin: 6px 0; color: var(--text-2); }
+.delete-account > .delete-what { color: var(--text); }
+.delete-account > .setting-buttons { padding: 6px 0 2px; }
+.delete-account .label { overflow-wrap: anywhere; }
+.sheet:has(.delete-account) .sheet-actions > .btn { white-space: normal; text-align: center; min-width: 0; flex: 1 1 auto; }
+.gate-box > .goodbye-what { margin-top: 4px; }
+.doors { display: grid; }
+.doors > p { margin: 6px 0; color: var(--text-2); }
+.doors-token { margin-top: 4px; }
+.doors-state { display: grid; gap: 0; margin: 10px 0 4px; }
+.doors-state > .hint { margin: 0; }
+.doors-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.doors-row:last-child { border-bottom: 0; }
+.doors-label { color: var(--text-2); font-size: 14px; line-height: 20px; }
+.doors-row > strong { color: var(--text); font: 600 14px/20px var(--font); text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.doors-row[data-warn] > strong { color: var(--warn); }
+.doors-form { display: grid; margin-top: 6px; }
+.doors-form[hidden] { display: none; }
+.doors-switch { padding: 10px 0; }
+.doors-fold { margin-top: 12px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
+.doors-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-height: 44px; padding: 10px 0; cursor: pointer; }
+.doors-fold > summary strong { color: var(--text); font-weight: 600; }
+.doors-fold > summary span { color: var(--muted); font-size: 13px; }
+.doors-fold > .hint { margin: 0 0 4px; }
+.doors-callback { margin: 0 0 4px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--sunken); color: var(--text);
+  font: 500 13px/18px ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace; overflow-wrap: anywhere; -webkit-user-select: all; user-select: all; }
+.doors-file { display: grid; margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.doors-file > h3 { margin: 0 0 2px; color: var(--text); font: 600 15px/21px var(--font); }
+.doors-file > .hint { margin: 0; }
+.doors-file > .setting-buttons { padding: 8px 0 4px; }
+.doors-file-said { margin: 2px 0 0; color: var(--text-2); }
+.doors-file-said:empty { display: none; }
+.doors-file-steps[hidden] { display: none; }
+.doors-file-steps .link-btn { padding: 0; }
+.ai-terms { display: grid; gap: 2px; margin: 4px 0 8px; }
+.ai-terms > .ai-terms-age { margin: 0; }
+.ai-terms-link { justify-self: start; padding: 8px 0 2px; }
+.ai-terms-tick { display: flex; align-items: center; gap: 12px; min-height: 44px; color: var(--text); font: 500 15px/20px var(--font); cursor: pointer; }
+.ai-terms-tick > span { min-width: 0; }
+.welcome-terms { margin: 10px 0 0; }
+.space-words { overflow-wrap: anywhere; }
+.bar.space[data-level=near] i { background: var(--warn); }
+.bar.space[data-level=full] i { background: var(--danger); }
 
 /* Joining (1.10, js/welcome.js): one step a screen, dots for how far along */
 .welcome-dots { display: flex; justify-content: center; gap: 8px; margin: 2px 0 6px; }

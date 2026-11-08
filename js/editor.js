@@ -2487,6 +2487,7 @@ V.editor = (() => {
         await attach(id, item);
       } catch (error) {
         const again = note && note.id === id;
+        if (error && error.full) { V.problem(error); continue; }  // (out of room: js/send.js's V.storage says so)
         V.toast(error && error.message ? error.message : 'That didn\'t go up to the cloud.', {
           kind: 'err', ms: 6000, action: again ? 'Try again' : undefined,
           onAction: again ? () => addFiles([file], [extra]) : undefined,

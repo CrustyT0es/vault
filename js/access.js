@@ -35,7 +35,7 @@
 
 V.invites = (() => {
   const SLUG = 'vault-admin';
-  const PHONE_URL = 'https://crustyt0es.github.io/wefty/';  // vault/__init__.py's, for a device that doesn't say
+  const PHONE_URL = 'https://wefty.org/';  // vault/__init__.py's, for a device that doesn't say
   const JOIN_SINCE = 2;  // the helper's first version that makes join codes (vault/helper.py's JOIN_SINCE)
   const NEWS_SINCE = 3;  // ...and the first with announcements (vault/helper.py's NEWS_SINCE)
   const PUSH_SINCE = 4;  // ...and the first that sends phone notifications (vault/helper.py's PUSH_SINCE)
@@ -55,7 +55,7 @@ V.invites = (() => {
   let statsTrouble = '';
   let progress = null;  // the setup sheet's progress line, while it shows
 
-  const owner = () => { const user = V.data.user || {}; return !!user.id && !user.invited; };
+  const owner = () => { const user = V.data.user || {}; return !!user.id && V.who() === 'owner'; };
   // The PC part: one new enough asks Python for everything (helper or key); an older one has 1.8's own calls.
   const newPc = () => !!(V.desktop && V.pc && V.pc.can('adminCall'));
   const oldPc = () => !!(V.desktop && V.pc && !newPc() && V.pc.can('invitesState'));
@@ -158,6 +158,13 @@ V.invites = (() => {
   const tokenBox = () => V.h('input.field', { type: 'password', placeholder: 'sbp_...', autocomplete: 'off', spellcheck: 'false',
     'aria-label': 'Supabase access token' });
 
+  // How to make a Supabase access token (Set up / Update the helper, Turn off, Open sign-ups): the same three steps.
+  const tokenSteps = (verb) => [V.h('ol.steps', {},
+    V.h('li', { text: 'Open the tokens page (sign in to Supabase if it asks).' }),
+    V.h('li', { text: 'Choose "Create legacy token", call it Wefty, create it, then Copy.' }),
+    V.h('li', { text: `Paste it here and press ${verb}. Wefty uses it once and never keeps it: you can delete it afterwards.` })),
+  V.h('div.setting-buttons', {}, tokensButton())];
+
   /* Set up (or update) the helper with an access token, used once and never kept. The secret key itself works too:
      invites on this PC only, as Vault 1.8 did. */
   function setUpSheet(ui, update = false) {
@@ -170,11 +177,7 @@ V.invites = (() => {
       content: [
         V.h('p', { text: 'Wefty puts a small helper in your own free cloud, so you can invite friends and see stats from your '
           + 'phone, Chromebook or this PC. Your cloud\'s secret key stays in the cloud and on this PC: never on a phone.' }),
-        V.h('ol.steps', {},
-          V.h('li', { text: 'Open the tokens page (sign in to Supabase if it asks).' }),
-          V.h('li', { text: 'Choose "Create legacy token", call it Wefty, create it, then Copy.' }),
-          V.h('li', { text: `Paste it here and press ${update ? 'Update' : 'Set up'}. Wefty uses it once and never keeps it: you can delete it afterwards.` })),
-        V.h('div.setting-buttons', {}, tokensButton()),
+        tokenSteps(update ? 'Update' : 'Set up'),
         box, log, problem,
         update ? null : V.h('p.hint', { text: 'Got your cloud\'s secret key (sb_secret_...) instead? Paste it to turn invites on for this PC only.' })],
       actions: [{ label: 'Cancel' }, { label: update ? 'Update' : 'Set up', kind: 'primary', onClick: async () => {
@@ -293,6 +296,220 @@ V.invites = (() => {
     try { await V.pc.call('invitesTurnOff'); } catch (error) { V.problem(error); }
     reset();
     ui.draw();
+  }
+
+  /* -- open sign-ups (1.21, the owner's PC): anyone who finds wefty.org may make their own Wefty in this cloud
+
+     Python does it through Supabase's Management API with an access token used once (vault/doors.py: doorsState,
+     doorsSave), never kept by this page or by Python. The sheet says how the cloud is set now, in words, and changes
+     only what's changed: sign-ups on or off, the cap on people signing up by themselves, and three parts that keep
+     what's set when left empty (the e-mail sender, Google sign-in, Cloudflare's bot protection). Their secrets are
+     password boxes, never shown back (the cloud never gives them) and emptied once saved. Then wefty.org's cloud file
+     (its address and public key, which strangers' browsers read to find this cloud): put on wefty.org by Python with
+     GitHub's own tool when it can (cloudFilePut), else copied with the steps to add it by hand (cloudFile). */
+  const DOORS_REPO = 'https://github.com/CrustyT0es/wefty.org';
+  const CAP = 500;
+  const canDoors = () => !!(V.desktop && V.pc && V.pc.can('doorsState'));
+
+  function doorsWords(now) {
+    const row = (label, words, key, warn = false) => V.h('div.doors-row', { dataset: { doors: key, warn: warn ? '1' : null } },
+      V.h('span.doors-label', { text: label }), V.h('strong', { text: words }));
+    const count = Number(now.count) || 0;
+    return [
+      row('Sign-ups', now.open ? 'Open' : 'Closed', 'open'),
+      row('People who signed up themselves', now.cap ? `${count} of ${now.cap}` : `${count} (no cap)`, 'count',
+        !!now.cap && count >= now.cap),
+      row('E-mail confirmation', now.confirm ? 'On' : 'Off', 'confirm', !!now.open && !now.confirm),
+      row('E-mail sender', now.smtp ? 'Set' : 'Supabase\'s built-in one, which only reaches your own address, 2 an hour',
+        'smtp', !now.smtp),
+      row('Google sign-in', now.google ? 'On' : 'Off', 'google'),
+      row('Bot protection', now.captcha ? 'On' : 'Off', 'captcha'),
+    ];
+  }
+
+  function doorsSheet(ui) {
+    const token = tokenBox();
+    const shown = V.h('div.doors-state', { role: 'status' }, V.h('p.hint', { text: 'Paste an access token and press Check to see how sign-ups are set.' }));
+    const problem = V.h('p.error-text.doors-problem', { role: 'alert' });
+    const field = (label, attrs = {}) => {
+      const input = V.h('input.field', { type: 'text', autocomplete: 'off', spellcheck: 'false', ...attrs, 'aria-label': label });
+      return [V.h('label.label', {}, label, input), input];
+    };
+    const open = V.h('input.switch.doors-open', { type: 'checkbox', 'aria-label': 'Let anyone sign up' });
+    const [capRow, cap] = field('Most people who can sign up by themselves', { type: 'number', min: '1', max: '1000000', step: '1',
+      value: String(CAP), inputmode: 'numeric' });
+    const [hostRow, host] = field('Server (host)', { placeholder: 'smtp.example.com' });
+    const [portRow, port] = field('Port', { type: 'number', min: '1', max: '65535', placeholder: '465', inputmode: 'numeric' });
+    const [userRow, user] = field('User name');
+    const [passRow, pass] = field('Password', { type: 'password' });
+    const [fromRow, from] = field('From address', { type: 'email', placeholder: 'no-reply@wefty.org' });
+    const [nameRow, sender] = field('From name', { placeholder: 'Wefty' });
+    const [idRow, clientId] = field('Client ID', { placeholder: '....apps.googleusercontent.com' });
+    const [secretRow, clientSecret] = field('Client secret', { type: 'password' });
+    const [siteRow, site] = field('Site key');
+    const [botRow, bot] = field('Secret key', { type: 'password' });
+    const smtpBoxes = [host, port, user, pass, from, sender];
+    const secrets = [token, pass, clientSecret, bot];
+    const fold = (title, kids) => V.h('details.doors-fold', {}, V.h('summary', {}, V.h('strong', { text: title }),
+      V.h('span', { text: 'Leave empty to keep what\'s set.' })), kids);
+    const callback = `${(V.config && V.config.url) || 'https://<your cloud>.supabase.co'}/auth/v1/callback`;
+    const form = V.h('div.doors-form', { hidden: true },
+      V.h('div.setting.doors-switch', { dataset: { setting: 'let-anyone-sign-up' } }, V.h('div.setting-text', {},
+        V.h('strong', { text: 'Let anyone sign up' }), V.h('span', { text: 'Off: only the people you invite, as now.' })), open),
+      capRow,
+      fold('E-mail sender', [V.h('p.hint', { text: 'Your own sender (SMTP), so confirmation and sign-in e-mails reach everyone. '
+        + 'The sender service gives you these.' }), hostRow, portRow, userRow, passRow, fromRow, nameRow]),
+      fold('Google sign-in', [V.h('p.hint', { text: 'From Google Cloud > APIs & Services > Credentials > Create credentials > '
+        + 'OAuth client ID, a web application, with this as its redirect address:' }),
+      V.h('p.doors-callback', { text: callback }), idRow, secretRow]),
+      fold('Bot protection', [V.h('p.hint', { text: 'Cloudflare Turnstile\'s site key and secret key (Cloudflare > Turnstile > '
+        + 'Add widget, for wefty.org). Real people rarely see a puzzle.' }), siteRow, botRow]));
+    let now = null;
+    let busy = false;
+
+    function drawState() {
+      V.clear(shown, now ? doorsWords(now) : V.h('p.hint', { text: 'Paste an access token and press Check to see how sign-ups are set.' }));
+      form.hidden = !now;
+      if (!now) return;
+      open.checked = !!now.open;
+      cap.value = String(Number(now.cap) > 0 ? now.cap : CAP);
+    }
+
+    async function check() {
+      if (busy) return;
+      problem.textContent = '';
+      if (!token.value.trim()) { problem.textContent = 'Paste the access token first.'; token.focus(); return; }
+      busy = true;
+      checkBtn.disabled = true;
+      V.clear(shown, V.h('div.log-line', {}, V.h('div.spinner'), V.h('span', { text: 'Asking your cloud...' })));
+      try {
+        now = await V.pc.call('doorsState', { token: token.value.trim() });
+      } catch (error) {
+        problem.textContent = error.message || String(error);
+      } finally {
+        busy = false;
+        checkBtn.disabled = false;
+        drawState();
+      }
+    }
+
+    /* What Save sends: the switch always, the cap when it changed, each part only when it was filled in. */
+    function changes() {
+      const sent = { token: token.value.trim(), open: open.checked };
+      const most = Number(cap.value);
+      if (!Number.isInteger(most) || most < 1) throw new Error('Type how many people can sign up by themselves (500, say).');
+      if (most !== Number(now.cap)) sent.cap = most;
+      const typed = (box) => box.value.trim();
+      if ([host, user, pass, from].some((box) => typed(box)) || typed(port) || typed(sender)) {
+        if (![host, user, pass, from].every((box) => (box === pass ? pass.value : typed(box)))) {
+          throw new Error('For the e-mail sender, fill in the server, user name, password and from address (or leave them all empty).');
+        }
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(typed(from))) throw new Error('The from address isn\'t an e-mail address.');
+        sent.smtp = { host: typed(host), port: Number(typed(port) || 465), user: typed(user), password: pass.value,
+          sender: typed(from), name: typed(sender) || 'Wefty' };
+      }
+      if (typed(clientId) || clientSecret.value) {
+        if (!typed(clientId) || !clientSecret.value) throw new Error('For Google sign-in, fill in both the client ID and the client secret.');
+        sent.google = { id: typed(clientId), secret: clientSecret.value };
+      }
+      if (typed(site) || bot.value) {
+        if (!typed(site) || !bot.value) throw new Error('For bot protection, fill in both the site key and the secret key.');
+        sent.captcha = { site: typed(site), secret: bot.value };
+      }
+      return sent;
+    }
+
+    async function save() {
+      if (busy) return true;
+      problem.textContent = '';
+      if (!now) { problem.textContent = 'Press Check first, to see how sign-ups are set now.'; return true; }
+      if (!token.value.trim()) { problem.textContent = 'Paste the access token again: Wefty used the last one already.'; token.focus(); return true; }
+      let sent;
+      try { sent = changes(); } catch (error) { problem.textContent = error.message; return true; }
+      if (sent.open && !now.open && !now.smtp && !sent.smtp) {
+        const sure = await V.confirm('Open sign-ups without an e-mail sender?', 'Only your own address gets e-mails until you '
+          + 'add an e-mail sender. Open anyway?', { ok: 'Open anyway' });
+        if (!sure) return true;
+      }
+      busy = true;
+      const button = sheet.el.querySelector('.sheet-actions .btn.primary');
+      if (button) { button.disabled = true; button.lastChild.textContent = 'Saving...'; }
+      try {
+        now = await V.pc.call('doorsSave', sent);
+        for (const box of [...secrets, ...smtpBoxes, clientId, site]) box.value = '';
+        V.toast(now.open ? 'Saved. Anyone who finds wefty.org can sign up.' : 'Saved. Only the people you invite can join.', { ms: 6000 });
+      } catch (error) {
+        problem.textContent = error.message || String(error);
+      } finally {
+        busy = false;
+        if (button) { button.disabled = false; button.lastChild.textContent = 'Save'; }
+        drawState();
+      }
+      return true;
+    }
+
+    // wefty.org's cloud file
+    const fileSaid = V.h('p.doors-file-said', { role: 'status' });
+    const fileSteps = V.h('ol.steps.doors-file-steps', { hidden: true },
+      V.h('li', {}, 'Open ', V.h('button.link-btn.doors-repo', { type: 'button', text: 'github.com/CrustyT0es/wefty.org',
+        onclick: () => V.pc.call('openLink', { url: DOORS_REPO }).catch(V.problem) }), '.'),
+      V.h('li', { text: 'Add file > Create new file, and name it cloud.json.' }),
+      V.h('li', { text: 'Paste, then Commit changes.' }));
+    const copyFile = async () => {
+      try {
+        const got = await V.pc.call('cloudFile');
+        await V.copy(String((got && got.text) || ''));
+        fileSteps.hidden = false;
+        fileSaid.textContent = 'Copied. Now add it on GitHub:';
+      } catch (error) { fileSaid.textContent = error.message || String(error); }
+    };
+    const putFile = async () => {
+      fileSaid.textContent = 'Putting it on wefty.org...';
+      try {
+        const got = await V.pc.call('cloudFilePut');
+        if (got && got.put) {
+          fileSteps.hidden = true;
+          fileSaid.textContent = 'It\'s on wefty.org. New people can find this cloud in a minute or two.';
+        } else {
+          fileSteps.hidden = false;
+          fileSaid.textContent = `${(got && got.why) || 'Wefty couldn\'t put it there by itself.'} Copy it and add it by hand instead:`;
+        }
+      } catch (error) {
+        fileSteps.hidden = false;
+        fileSaid.textContent = `${error.message || error} Copy it and add it by hand instead:`;
+      }
+    };
+    const file = V.pc.can('cloudFile') || V.pc.can('cloudFilePut') ? V.h('div.doors-file', {},
+      V.h('h3', { text: 'wefty.org\'s cloud file' }),
+      V.h('p.hint', { text: 'Strangers\' browsers read it to find this cloud: its address and public key, never a secret.' }),
+      V.h('div.setting-buttons', {},
+        V.pc.can('cloudFilePut') ? V.button('Put it on wefty.org', { icon: 'upload', onClick: putFile }) : null,
+        V.pc.can('cloudFile') ? V.button('Copy it', { icon: 'copy', onClick: copyFile }) : null),
+      fileSaid, fileSteps) : null;
+
+    const checkBtn = V.button('Check', { onClick: check });
+    token.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !now) { event.preventDefault(); event.stopPropagation(); check(); } });
+    const sheet = V.sheet({
+      title: 'Open sign-ups',
+      wide: true,
+      content: V.h('div.doors', {},
+        V.h('p', { text: 'Let anyone who finds wefty.org make their own Wefty in your cloud. The people you invite still join as now.' }),
+        tokenSteps('Check'),
+        V.h('div.ai-key-row.doors-token', {}, token, checkBtn),
+        shown, form, problem, file),
+      actions: [{ label: 'Close' }, { label: 'Save', kind: 'primary', onClick: save }],
+    });
+    return sheet;
+  }
+
+  /* Friends' "Sign-ups" card: the sheet on a PC that can, else a line saying where it's done. */
+  function doorsCard(ui) {
+    if (canDoors()) {
+      return ui.card('Sign-ups', ui.line('Open sign-ups', 'Let anyone who finds wefty.org make their own Wefty here, with a cap, '
+        + 'e-mail checks and bot protection.', V.button('Set up', { icon: 'users', onClick: () => doorsSheet(ui) }), 'open-sign-ups'));
+    }
+    return ui.card('Sign-ups', ui.line('Open sign-ups', V.desktop ? `Wefty on this PC can't do that yet. ${V.pc.howToUpdate()}`
+      : 'Opening sign-ups to everyone is done from Wefty on your PC (Settings > Friends).', null, 'open-sign-ups'));
   }
 
   /* -- inviting */
@@ -821,7 +1038,8 @@ V.invites = (() => {
         tryAgain(ui)))], more: [], says: '' };
     }
     const feedback = V.feedback && V.feedback.everyone ? V.feedback.everyone(ui) : null;
-    if (!state.on) return { parts: [offCard(ui)], more: feedback ? [feedback] : [], says: feedback ? 'Feedback from everyone' : '' };
+    const doors = doorsCard(ui);  // (1.21: open sign-ups, whether invites are on or not)
+    if (!state.on) return { parts: [offCard(ui), doors], more: feedback ? [feedback] : [], says: feedback ? 'Feedback from everyone' : '' };
     // Invite people
     const top = [ui.line('Invite someone', 'They get a link that signs them in once.',
       V.button('Invite', { kind: 'primary', icon: 'plus', onClick: () => inviteSheet(ui) })), joinRow(ui, true)];
@@ -846,7 +1064,8 @@ V.invites = (() => {
         + 'phone and Chromebook can invite people and see stats too.', V.button('Set up', { onClick: () => setUpSheet(ui) })));
       says.push('invite from your phone too');
     } else if (state.how === 'pc' && Number(state.helper.version) < state.current) {
-      more.push(lift(ui.line('Update the helper', 'This Wefty has a newer helper for your cloud. Paste an access token to put it in.',
+      more.push(lift(ui.line('Update the helper', `This Wefty has a newer helper for your cloud${Number(state.helper.version) < 6
+        ? ': it lets anyone sign up, and adds codes from another device and Delete my account' : ''}. Paste an access token to put it in.`,
         V.button('Update', { kind: 'primary', onClick: () => setUpSheet(ui, true) }))));
     }
     if (state.how === 'old') { more.push(updateLine(ui)); says.push('updates'); }
@@ -858,7 +1077,7 @@ V.invites = (() => {
     says.push('turn off invites');
     says = says.filter(Boolean);
     return {
-      parts: [ui.card('Invite people', ...top), peopleCard,
+      parts: [ui.card('Invite people', ...top), peopleCard, doors,
         write || news.length ? ui.card('Announcements', write, news) : null,
         statsSection(ui)],
       more: more.filter(Boolean),
@@ -866,7 +1085,8 @@ V.invites = (() => {
     };
   }
 
-  return { card, statsCard, page, counts, state: () => state, refresh, call, findHelper, linkFor, joinLinkFor, waits };
+  return { card, statsCard, page, counts, state: () => state, refresh, call, findHelper, linkFor, joinLinkFor, waits, helperCall,
+    doorsSheet, canDoors };
 })();
 
 /* Each device's line in its person's settings row: { kind, label, version, seen }, under an id of its own (each
@@ -995,14 +1215,15 @@ V.feedback = (() => {
     counted();
     const device = V.h('input.switch', { type: 'checkbox', checked: draft.device, 'aria-label': 'Include device info',
       onchange: (event) => { draft.device = event.target.checked; } });
-    const owner = !(V.data.user || {}).invited;
+    const owner = V.who() === 'owner';
     let busy = false;
     V.sheet({
       title: 'Send feedback',
       content: [kinds, box, count,
         V.h('div.setting', {}, V.h('div.setting-text', {}, V.h('strong', { text: 'Include device info' }),
           V.h('span', { text: 'Wefty\'s version, which kind of device, and the browser\'s name. Never your notes.' })), device),
-        V.h('p.hint', { text: owner ? 'It lands in your Feedback folder.' : 'It goes to the person who runs your Wefty cloud.' })],
+        V.h('p.hint', { text: owner ? 'It lands in your Feedback folder.' : V.who() === 'self' ? 'It goes to Wefty\'s team.'
+          : 'It goes to the person who runs your Wefty cloud.' })],
       actions: [{ label: 'Cancel' }, { label: 'Send', kind: 'primary', onClick: async () => {
         if (busy) return true;
         if (!box.value.trim()) { V.toast('Write something first.', { kind: 'err' }); return true; }
@@ -1013,6 +1234,7 @@ V.feedback = (() => {
           V.toast('Thanks! Your feedback was sent.');
           return false;
         } catch (error) {
+          if (error && error.full) { V.problem(error); return true; }  // (out of room: js/send.js's V.storage)
           V.toast(offline(error) ? OFFLINE : `Couldn't send: ${error.message || error}`, { kind: 'err', ms: 5000 });
           return true;
         } finally {
@@ -1045,7 +1267,7 @@ V.feedback = (() => {
 
   /* "Feedback from everyone" (Friends > More options, the owner's PC): where everyone's feedback is collected. */
   function everyone(ui) {
-    if (!V.desktop || (V.data.user || {}).invited || !V.pc || !V.pc.can('feedbackCollect')) return null;
+    if (!V.desktop || V.who() !== 'owner' || !V.pc || !V.pc.can('feedbackCollect')) return null;
     const invites = V.invites.state();
     if (invites && invites.on && invites.local) {  // (collected with the secret key on this PC)
       return ui.line('Feedback from everyone', 'Your PC collects it into your Feedback folder by itself, every half hour.',

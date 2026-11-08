@@ -21,7 +21,7 @@ V.profile = (() => {
   let outgoing = 0;         // files waiting in V.db's "outgoing" (counted again whenever something may have changed)
 
   const status = () => state || (V.cloud && V.cloud.status) || 'idle';
-  const isOwner = () => !(V.data.user || {}).invited;
+  const isOwner = () => V.who() === 'owner';
   // Rows this device is sending up now (a change made here, not one set aside as too big): the ring shows at once.
   const sending = () => TABLES.some((table) => [...V.data[table].values()].some((row) => row._dirty && row._refused !== row._dirty))
     || !!(V.data.settings && V.data.settings._dirty);
@@ -190,6 +190,8 @@ V.profile = (() => {
       V.feedback ? { label: 'Feedback', icon: 'feedback', onClick: () => V.feedback.sheet() } : null,
       // (1.19.6, js/tour.js: the walk through Wefty, any time; after the menu has gone, so the keyboard comes back here)
       V.tour ? { label: 'Take the tour', icon: 'spark', onClick: () => setTimeout(() => V.tour.start({ why: 'menu' }), 0) } : null,
+      // (1.21, js/pair.js: the code another device shows, typed here to sign it in)
+      V.pair && (V.data.user || {}).id ? { label: 'Sign in another device', icon: 'devices', onClick: () => V.pair.approve() } : null,
       { sep: true },
       { label: 'Sign out', icon: 'sign-out', danger: true, onClick: () => V.settings.signOut().catch(V.problem) },
     ];  // (no first line while all is well: statusLine gives none, and the menu leaves it out)
@@ -230,6 +232,20 @@ V.profile = (() => {
   /* The free cloud asleep (a week unused) or out of reach: what to do. */
   function trouble() {
     const asleep = V.cloud.status === 'asleep' || status() === 'asleep';
+    if (!isOwner()) {  // (a friend's or a sign-up's cloud is someone else's: only they can wake it)
+      const self = V.who() === 'self';
+      return V.sheet({
+        title: asleep ? 'Wefty\'s cloud is asleep' : 'Wefty can\'t reach your cloud',
+        content: [
+          V.h('p', { text: asleep ? 'The cloud your Wefty is in is asleep. Everything is still there.'
+            : 'If the internet is working, the cloud your Wefty is in may be asleep or busy. Everything is still there.' }),
+          V.h('p', { text: self ? `If it lasts more than a day, write to ${V.TEAM}.`
+            : 'Ask the person who invited you to open Wefty: that wakes it up in a few minutes.' }),
+          V.h('p.hint', { text: 'Until then, what you write is kept on this device and goes up once it\'s back.' }),
+        ],
+        actions: [{ label: 'Close' }, { label: 'Try again', kind: 'primary', onClick: () => V.cloud.sync() }],
+      });
+    }
     return V.sheet({
       title: asleep ? 'Your cloud is asleep' : 'Wefty can\'t reach your cloud',
       content: [
