@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.21.0';
+V.VERSION = '1.22.0';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -287,6 +287,8 @@ const ICONS = {
   key: '<circle cx="7.5" cy="15.5" r="4"/><path d="M10.5 12.5 20 3M16.5 6.5l2.5 2.5M14 9l2 2"/>',
   // Notifications (1.19): js/reminders.js's bell
   bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4.4 1.5 6.1 2.5 7h-17c1-.9 2.5-2.6 2.5-7z"/><path d="M10 20.2a2.3 2.3 0 0 0 4 0"/>',
+  // Help (1.22, js/help.js): a question mark in a circle
+  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.85.85c0 1.7-2.45 2.2-2.45 3.75"/><circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none"/>',
 };
 
 V.icon = function icon(name, cls) {
@@ -906,16 +908,21 @@ V.contextMenu = (() => {
   return attach;
 })();
 
-V.toast = function toast(text, { kind = '', action, onAction, ms = 3200 } = {}) {
+/* `help` (1.22): a Help card's id (js/help.js V.help.forError), for a Help button that opens that answer: a message that
+   needs more than one tap to fix is never a dead end. */
+V.toast = function toast(text, { kind = '', action, onAction, ms = 3200, help = '' } = {}) {
   const box = document.getElementById('toasts');
+  const helps = !!help && !!(V.help && V.help.open);
   const item = V.h('div.toast' + (kind ? '.' + kind : ''), { role: 'status' },
     kind === 'err' ? V.icon('alert') : null, V.h('span', { text }),
-    action ? V.h('button.toast-action', { type: 'button', text: action, onclick: () => { onAction(); gone(); } }) : null);
+    action ? V.h('button.toast-action', { type: 'button', text: action, onclick: () => { onAction(); gone(); } }) : null,
+    helps ? V.h('button.toast-action.toast-help', { type: 'button', text: 'Help', 'aria-label': `Help: ${text}`,
+      onclick: () => { gone(); V.help.open({ card: help }); } }) : null);
   const gone = () => { item.classList.add('leaving'); setTimeout(() => item.remove(), 200); };
   box.append(item);
   const all = box.querySelectorAll(':scope > .toast');  // (a card from V.notice above them stays)
   for (let i = 0; i < all.length - 3; i++) all[i].remove();
-  setTimeout(gone, action ? Math.max(ms, 5000) : ms);
+  setTimeout(gone, action || helps ? Math.max(ms, 5000) : ms);
 };
 
 /* A small card that comes up for a moment over the corner, for something that just happened (js/arrive.js: what was
@@ -1036,7 +1043,10 @@ V.problem = (error) => {
   if (error && error.full && V.storage && V.storage.say) { V.storage.say(error); return; }
   const text = (error && (error.message || error.error_description || error.msg)) || String(error);
   console.warn('Vault:', error);
-  V.toast(text, { kind: 'err', ms: 5000 });
+  // (1.22: the Help card that fixes it, when there's one: js/help.js)
+  let help = '';
+  try { help = (V.help && V.help.forError && V.help.forError(error)) || ''; } catch (problem) { help = ''; }
+  V.toast(text, { kind: 'err', ms: 5000, help });
 };
 
 /* ---------------------------------------------------------------- little things */

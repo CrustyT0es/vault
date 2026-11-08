@@ -17,7 +17,23 @@
    words in it, AI notes made, AI flash cards added, a page snapped: the 'study-loop' event, or a note showing it was
    done on another device) or when it's put away with its X (Undo brings it back). Both go in extra.start through
    V.cloud.changeExtra ({ since, done, how } or { since, closed }); until the cloud has them, this device keeps its own
-   word in localStorage 'vault-start-here' (it hides at once, offline too) and sends it at the next sync. */
+   word in localStorage 'vault-start-here' (it hides at once, offline too) and sends it at the next sync.
+
+   The first week (1.22, the guide: "a first-week checklist on Today: make a folder, add a note, finish a study round,
+   add Wefty to the home screen"), for someone new since 1.22 only (js/welcome.js's start.week mark; never the owner or
+   an account from before): a small checklist that ticks itself, each item with its one button:
+     Make a folder (one of their own: not Inbox, the starter folders or their classes'),
+     Write a note (words in a note that isn't the welcome note: extra.starter),
+     Finish a study round (js/review.js's 'study-done', or a card's progress anywhere),
+     Add Wefty to your home screen (left out in the PC app, and where Wefty runs installed, which ticks it; the item's
+       button opens js/homescreen.js's card),
+     Try Help (only when js/help.js is here: V.help).
+   While the study loop's step shows, it's in the same card (calm: one card on a phone, where it's one chip in the
+   card's top row that opens its list; beside the step when wide); once the loop is done, it's a card of its own in
+   the same place, until every item
+   is ticked, its X (with an Undo), or WEEK_DAYS days. Start here's own X puts both away. Ticks and the rest go in
+   extra.start.week ({ since, ticks, done, closed }) through V.cloud.changeExtra; this device's word waits in
+   localStorage 'wefty-first-week' until the cloud has it. */
 'use strict';
 
 V.startHere = (() => {
@@ -280,7 +296,9 @@ V.startHere = (() => {
   }
 
   function card() {
-    if (!shown()) return null;
+    const loop = shown();
+    const week = weekShown();
+    if (!loop) return week ? weekCard() : null;
     const step = next();
     const noKey = aiMissing();
     const said = words(step, noKey);
@@ -292,20 +310,343 @@ V.startHere = (() => {
       V.button('Set up free AI', { icon: 'spark', onClick: () => V.ai.setUp('gemini'), key: 'start:ai' }),
       V.h('p.hint.start-ai-note', { text: AI_NOTE })) : null;
     const note = noKey && step.kind === 'cards' ? V.h('p.hint.start-ai-note', { text: AI_NOTE }) : null;
+    // (1.22: on a phone, the first week is one chip in this row, opening its list: the card stays as tall as it was)
+    const top = V.h('div.start-top', {},
+      V.h('p.start-label', { text: 'Start here' }),
+      week && !V.wide() ? weekChip() : null,
+      V.iconButton('x', 'Hide Start here', close, 'start-close', 'start:close'));
+    const main = [
+      V.h('div.start-next', {},
+        V.h('span.tile-ic.start-ic', {}, said.icon === 'record' ? V.welcome.loopIcon('record') : V.icon(said.icon)),
+        V.h('div.start-text', {}, V.h('h2', { id: 'start-here-title', text: said.title }), V.h('p', { text: said.line }))),
+      why,
+      V.h('div.start-acts', {}, buttons(step, noKey)),
+      note,
+      loopRow(step),
+      ai];
+    // (1.22: the first week beside the step when wide)
+    const side = week && V.wide();
     return V.h('section.today-sec.start-here', { 'aria-labelledby': 'start-here-title', dataset: { section: 'start', step: step.kind } },
-      V.h('div.today-box.start-box' + (ai ? '.no-key' : ''), {},
-        V.h('div.start-top', {},
-          V.h('p.start-label', { text: 'Start here' }),
-          V.iconButton('x', 'Hide Start here', close, 'start-close', 'start:close')),
-        V.h('div.start-next', {},
-          V.h('span.tile-ic.start-ic', {}, said.icon === 'record' ? V.welcome.loopIcon('record') : V.icon(said.icon)),
-          V.h('div.start-text', {}, V.h('h2', { id: 'start-here-title', text: said.title }), V.h('p', { text: said.line }))),
-        why,
-        V.h('div.start-acts', {}, buttons(step, noKey)),
-        note,
-        loopRow(step),
-        ai));
+      V.h('div.today-box.start-box' + (ai ? '.no-key' : '') + (side ? '.with-week' : ''), {}, top,
+        side ? V.h('div.start-cols', {}, V.h('div.start-main', {}, main), weekSide()) : main));
   }
 
-  return { card, shown, did, close, isNew, next, send, LOCAL };
+  /* -- the first week (1.22) */
+
+  const WEEK_LOCAL = 'wefty-first-week';
+  const WEEK_DAYS = 14;  // it goes by itself this long after the account was made, done or not
+  const STARTER = ['inbox', 'school', 'work', 'personal', 'gaming'];
+  let weekMemory = null;   // (this device's word where storage can't be used)
+  let weekChain = Promise.resolve();
+  let finished = false;    // "all done" said on this page
+
+  const squash = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const weekOf = () => { const w = startOf().week; return w && typeof w === 'object' ? w : null; };
+  /* New since 1.22: the account's mark, or this device's welcome plan before it's sent (js/welcome.js). */
+  function guided() {
+    const user = me();
+    if (!user) return false;
+    return !!weekOf() || !!(V.welcome && V.welcome.guided && V.welcome.guided(user));
+  }
+  function readWeek() {
+    try {
+      const kept = JSON.parse(localStorage.getItem(WEEK_LOCAL) || 'null');
+      return kept && kept.user === me() ? kept : null;
+    } catch (error) { return weekMemory && weekMemory.user === me() ? weekMemory : null; }
+  }
+  function writeWeek(change) {
+    const was = readWeek() || { user: me(), ticks: {} };
+    // (`at` tells this word from a newer one: never the clock alone, which two changes in one moment would share)
+    const next = { ...was, ...change, user: me(), at: `${Date.now()}.${Math.random().toString(36).slice(2, 10)}`,
+      ticks: { ...(was.ticks || {}), ...((change && change.ticks) || {}) } };
+    if (change && change.reopen) { delete next.closed; }
+    if (change && change.closed) { delete next.reopen; }
+    weekMemory = next;
+    try { localStorage.setItem(WEEK_LOCAL, JSON.stringify(next)); } catch (error) { /* memory, above */ }
+    return next;
+  }
+
+  /* This device's word (ticks, done, put away or put back) sent to the account, one at a time. */
+  function sendWeek() {
+    weekChain = weekChain.catch(() => {}).then(async () => {
+      const here = readWeek();
+      if (!here || !V.cloud || !V.cloud.changeExtra) return;
+      try {
+        await V.cloud.changeExtra((extra) => {
+          const start = { ...(extra.start || {}) };
+          const was = start.week && typeof start.week === 'object' ? start.week : { since: start.since || new Date().toISOString() };
+          const week = { ...was, ticks: { ...(was.ticks || {}) } };
+          for (const [id, at] of Object.entries(here.ticks || {})) if (!week.ticks[id]) week.ticks[id] = at;
+          if (here.done && !week.done) week.done = here.done;
+          if (here.closed) week.closed = here.closed;
+          if (here.reopen) delete week.closed;
+          return { ...extra, start: { ...start, week } };
+        });
+        const now = readWeek();
+        if (now && now.at === here.at) {
+          weekMemory = null;
+          try { localStorage.removeItem(WEEK_LOCAL); } catch (error) { /* (memory) */ }
+        }
+      } catch (error) { /* offline or slow: sent at the next sync */ }
+    });
+    return weekChain;
+  }
+
+  /* -- what it ticks by */
+
+  // The folders Wefty made for them (the starter ones, their classes', their test's class): not "a folder of their own".
+  function madeForThem() {
+    const plan = startOf().plan && typeof startOf().plan === 'object' ? startOf().plan : {};
+    const names = new Set(STARTER);
+    for (const c of Array.isArray(plan.classes) ? plan.classes : []) if (c && c.name) names.add(squash(c.name));
+    if (plan.test && plan.test.name) names.add(squash(plan.test.name));
+    const own = V.welcome && V.welcome.readPlan ? V.welcome.readPlan(me()) : null;  // (this device's, before it's sent)
+    for (const c of own && Array.isArray(own.classes) ? own.classes : []) if (c && c.name) names.add(squash(c.name));
+    if (own && own.test && own.test.name) names.add(squash(own.test.name));
+    return names;
+  }
+  const introOf = () => startOf().intro || (V.welcome && V.welcome.introId ? V.welcome.introId(me()) : '');
+  function detected() {
+    const found = [];
+    const names = madeForThem();
+    if ([...V.data.folders.values()].some((f) => f && !f.deleted && !names.has(squash(f.name)))) found.push('folder');
+    const intro = introOf();
+    let studied = false;
+    let wrote = false;
+    for (const note of V.data.notes.values()) {
+      if (!note || note._purge) continue;
+      const extra = note.extra || {};
+      if (!studied && extra.cards && typeof extra.cards === 'object'
+        && Object.values(extra.cards).some((s) => Array.isArray(s) || (s && typeof s === 'object' && s.last))) studied = true;
+      if (!wrote && !note.deleted && note.id !== intro && !extra.starter
+        && /[\p{L}\p{N}]/u.test(`${note.title || ''} ${note.body || ''}`)) wrote = true;
+    }
+    if (wrote) found.push('note');
+    if (studied) found.push('study');
+    if (!V.desktop && V.install.installed()) found.push('home');
+    return found;
+  }
+
+  /* The items on this device, in order. */
+  function weekItems() {
+    const list = ['folder', 'note', 'study'];
+    if (!V.desktop && !V.install.installed()) list.push('home');
+    if (V.help && typeof V.help.open === 'function') list.push('help');
+    return list;
+  }
+
+  /* Every tick: the account's, this device's, and what it finds now (sent once, later: never inside Today's draw). */
+  let tickQueued = false;
+  function ticks() {
+    const out = { ...((weekOf() || {}).ticks || {}), ...((readWeek() || {}).ticks || {}) };
+    const fresh = detected().filter((id) => !out[id]);
+    const at = new Date().toISOString();
+    for (const id of fresh) out[id] = at;
+    if (fresh.length && !tickQueued) {
+      tickQueued = true;
+      setTimeout(() => { tickQueued = false; tick(...detected()); }, 0);
+    }
+    return out;
+  }
+  /* Items done (`ids`), kept here and sent; the card drawn again. */
+  function tick(...ids) {
+    if (!guided()) return;
+    const had = { ...((weekOf() || {}).ticks || {}), ...((readWeek() || {}).ticks || {}) };
+    const fresh = ids.filter((id) => id && !had[id]);
+    if (!fresh.length) return;
+    const at = new Date().toISOString();
+    writeWeek({ ticks: Object.fromEntries(fresh.map((id) => [id, at])) });
+    sendWeek();
+    setTimeout(redraw, 0);
+  }
+
+  /* All done, put away with its own X (until an Undo), or with Start here's (which puts both away). */
+  function weekClosed() {
+    const w = weekOf() || {};
+    const here = readWeek() || {};
+    if (w.done || here.done) return true;
+    const start = readLocal();
+    const startShut = start && start.reopen ? false : !!(startOf().closed || (start && start.closed));
+    if (startShut) return true;
+    return here.closed ? true : here.reopen ? false : !!w.closed;
+  }
+  // (the first week is two weeks long at most: an account older than that never sees it again)
+  function tooOld() {
+    const since = Date.parse(((weekOf() || {}).since) || startOf().since || '');
+    return Number.isFinite(since) && Date.now() - since > WEEK_DAYS * 86400000;
+  }
+
+  function weekShown() {
+    if (!guided() || weekClosed() || tooOld()) return false;
+    const all = weekItems();
+    const done = ticks();
+    if (all.every((id) => done[id])) {
+      allDone();
+      return false;
+    }
+    return true;
+  }
+
+  /* Every item ticked: gone for good, on every device (an item this device hasn't, the home screen in the PC app or
+     Help without js/help.js, never keeps it on another). */
+  function allDone() {
+    if (finished) return;
+    finished = true;
+    writeWeek({ done: new Date().toISOString() });
+    sendWeek();
+    setTimeout(() => {
+      V.toast('Your first week in Wefty: all done. Nice work!', { ms: 5000 });
+      redraw();
+    }, 0);
+  }
+
+  function closeWeek() {
+    writeWeek({ closed: new Date().toISOString() });
+    sendWeek();
+    setTimeout(redraw, 0);
+    V.toast('Your first week list is hidden.', { ms: 6000, action: 'Undo', onAction: () => {
+      writeWeek({ reopen: true });
+      sendWeek();
+      setTimeout(redraw, 0);
+    } });
+  }
+
+  /* -- what each item's button does */
+
+  async function folderNow() {
+    try {
+      const made = V.organise && V.organise.newFolder ? await V.organise.newFolder() : null;
+      if (made) { V.go('notes'); if (V.notes.setFilter) V.notes.setFilter(made.id); }
+    } catch (error) { V.problem(error); }
+  }
+  function noteNow() {
+    V.notes.create(V.TEMPLATES[0], {}, { fresh: true }).catch(V.problem);
+  }
+  function cardsDue() {
+    try { return V.review ? V.review.dueCount() : 0; } catch (error) { return 0; }
+  }
+  function cardsAny() {
+    try { return V.review ? V.review.now().list.length : 0; } catch (error) { return 0; }
+  }
+  function studyNow() {
+    if (cardsAny()) { V.review.start('all'); return; }
+    V.go('notes');
+    if (V.notes.setFilter) V.notes.setFilter('review');
+  }
+  const homeWords = () => (['chromebook', 'browser'].includes(V.deviceKind.kind) && !V.deviceKind.ios
+    ? 'Install Wefty as an app' : V.deviceKind.ios ? 'Add Wefty to your Home Screen' : 'Add Wefty to your home screen');
+  function homeNow() {
+    if (V.homeScreen && V.homeScreen.open) V.homeScreen.open({ from: 'week' });
+    else if (V.go) V.go('settings', { page: 'devices' });
+  }
+  function helpNow() {
+    if (V.help && V.help.open) V.help.open();
+  }
+  function itemOf(id) {
+    if (id === 'folder') return { text: 'Make a folder', act: 'New folder', icon: 'folder', go: folderNow };
+    if (id === 'note') return { text: 'Write a note', act: 'New note', icon: 'plus', go: noteNow };
+    if (id === 'study') {
+      const due = cardsDue();
+      return { text: 'Finish a study round', act: due ? `Study ${due}` : cardsAny() ? 'Study' : 'Show me how', icon: 'cards',
+        said: due ? `Study ${due} flash card${due === 1 ? '' : 's'}` : '', go: studyNow };
+    }
+    if (id === 'home') return { text: homeWords(), act: 'Show me how', icon: 'download', said: `${homeWords()}: show me how`, go: homeNow };
+    return { text: 'Try Help', act: 'Open Help', icon: 'info', go: helpNow };
+  }
+
+  /* -- the list */
+
+  /* The items, ticked or not, each unticked one with its button. `lead`: its first button is the screen's main one. */
+  function weekList(done, lead, before = null) {
+    let first = lead;
+    return V.h('ul.fw-list', { 'aria-label': 'Your first week' }, weekItems().map((id) => {
+      const item = itemOf(id);
+      const ticked = !!done[id];
+      let kind = 'quiet';
+      if (!ticked && first) { kind = 'primary'; first = false; }
+      return V.h('li.fw-item' + (ticked ? '.done' : ''), { dataset: { item: id, done: ticked ? 'yes' : 'no' } },
+        V.h('span.fw-mark', { 'aria-hidden': 'true' }, ticked ? V.icon('check') : null),
+        V.h('span.fw-text', {}, V.h('span.sr-only', { text: ticked ? 'Done: ' : 'To do: ' }), item.text),
+        ticked ? null : V.h('button.btn.fw-go.' + kind, { type: 'button', dataset: { key: `fw:${id}` },
+          'aria-label': item.said || `${item.text}: ${item.act}`, onclick: () => {
+            if (before) before();
+            try { item.go(); } catch (error) { V.problem(error); }
+          } },
+        V.icon(item.icon), V.h('span', { text: item.act })));
+    }));
+  }
+  const countWords = (done) => {
+    const all = weekItems();
+    return `${all.filter((id) => done[id]).length} of ${all.length} done`;
+  };
+  function progress(done) {
+    const all = weekItems();
+    const share = all.length ? all.filter((id) => done[id]).length / all.length : 0;
+    return V.h('div.bar.fw-bar', { 'aria-hidden': 'true' }, V.h('i', { style: { width: `${Math.round(share * 100)}%` } }));
+  }
+
+  /* Inside Start here, beside the step when wide. */
+  function weekSide() {
+    const done = ticks();
+    return V.h('div.fw.fw-side', {},
+      V.h('h3.fw-title', {}, V.h('span', { text: 'Your first week' }), V.h('span.fw-count', { text: countWords(done) })),
+      progress(done), weekList(done, false));
+  }
+
+  /* Inside Start here on a phone: one chip in its top row ("First week 1/4"), opening the list in a sheet, so the
+     card stays one calm card, no taller than before (Quick actions stay on the first screen). */
+  function weekChip() {
+    const done = ticks();
+    const all = weekItems();
+    const n = all.filter((id) => done[id]).length;
+    return V.h('button.fw-chip', { type: 'button', 'aria-haspopup': 'dialog', dataset: { key: 'fw:chip' },
+      'aria-label': `Your first week: ${n} of ${all.length} done. Show the list`, onclick: weekSheet },
+    V.h('span.fw-chip-ring', { 'aria-hidden': 'true', style: { '--done': String(all.length ? n / all.length : 0) } }),
+    V.h('span', { text: 'First week' }), V.h('span.fw-chip-n', { text: `${n}/${all.length}`, 'aria-hidden': 'true' }),
+    V.icon('chevron', 'fw-chev'));
+  }
+  function weekSheet() {
+    const done = ticks();
+    let sheet = null;
+    sheet = V.sheet({
+      title: 'Your first week',
+      content: V.h('div.fw.fw-in-sheet', {}, V.h('p.fw-count', { text: countWords(done) }), progress(done),
+        weekList(done, true, () => { if (sheet) sheet.close(); })),
+    });
+  }
+
+  /* On its own, once the study loop is done: the same place, one card. */
+  function weekCard() {
+    const done = ticks();
+    return V.h('section.today-sec.first-week', { 'aria-labelledby': 'first-week-title', dataset: { section: 'week1' } },
+      V.h('div.today-box.fw-box', {},
+        V.h('div.start-top', {},
+          V.h('p.start-label', { text: 'Your first week' }),
+          V.iconButton('x', 'Hide your first week', closeWeek, 'start-close', 'fw:close')),
+        V.h('h2.fw-head', { id: 'first-week-title', text: countWords(done) }),
+        progress(done),
+        weekList(done, true)));
+  }
+
+  V.on('study-done', () => tick('study'));
+  V.on('home-screen', (what) => { if (what === 'installed' || what === 'added') tick('home'); });
+  V.on('install', (what) => { if (what === 'done') tick('home'); });
+  V.on('help', () => tick('help'));
+  V.on('status', (value) => { if ((value === 'synced' || value === 'held') && readWeek()) sendWeek(); });
+  // Help opened (js/help.js, however it was opened: its own entry points, #help, a card): ticked. Wrapped once every
+  // script has run, as help.js may load after this file.
+  const helpHash = () => { if (/^#help\b/.test(location.hash)) tick('help'); };
+  window.addEventListener('hashchange', helpHash);
+  document.addEventListener('DOMContentLoaded', () => {
+    helpHash();
+    const help = V.help;
+    if (!help || typeof help.open !== 'function' || help.open.weekTicks) return;
+    const real = help.open;
+    const open = function open(...args) { tick('help'); return real.apply(this, args); };
+    open.weekTicks = true;
+    help.open = open;
+  });
+
+  return { card, shown, did, close, isNew, next, send, LOCAL,
+    guided, weekShown, weekItems, ticks, tick, closeWeek, WEEK_LOCAL, WEEK_DAYS };
 })();

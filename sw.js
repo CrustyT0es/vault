@@ -11,7 +11,7 @@
    js/update.js says "update-now" at a safe moment (the app in the background, nothing being typed) and reloads. */
 'use strict';
 
-const BUILD = '1.21.0-babb26069b20';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
+const BUILD = '1.22.0-a0be3e10ba13';  // publish.py writes the build here; vault/web's own copy (never published as is) never installs
 /* Since Wefty moved (1.15: crustyt0es.github.io/vault/ -> /wefty/, one origin, so one set of caches), the new
    address's caches are called "wefty-...": a worker from before 1.15 at the old address deletes every "vault-..." cache
    but its own when it switches over, and would take the new address's offline copy with it. Anywhere else (the old
@@ -147,8 +147,11 @@ self.addEventListener('fetch', (event) => {
   }
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   // This version's own files, nothing refreshed in the background: new code only ever comes as a whole checked version.
+  // (1.22: a screen's own address, like notes/ or settings/ai/, is its folder's kept index.html, a copy of the app.)
   event.respondWith(caches.open(CACHE)
-    .then((cache) => cache.match(event.request, { ignoreSearch: true }))
+    .then(async (cache) => (await cache.match(event.request, { ignoreSearch: true }))
+      || (event.request.mode === 'navigate' && url.pathname.endsWith('/')
+        ? cache.match(new URL('index.html', url).href, { ignoreSearch: true }) : undefined))
     .then((kept) => kept || fetch(event.request)));
 });
 

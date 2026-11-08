@@ -712,7 +712,7 @@ V.reminders = (() => {
   const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');  // 20261030T130000Z
 
   function noteLink(id) {
-    const page = location.origin + location.pathname;
+    const page = V.appBase || location.origin + location.pathname;  // (the app's own address, never a screen's: 1.22)
     const own = location.protocol === 'https:' || location.protocol === 'http:' ? (V.moved ? V.moved.address(page) : page) : '';
     const base = (V.config && V.config.phoneUrl) || own || 'https://wefty.org/';
     return `${base.replace(/#.*$/, '')}#note=${id}`;

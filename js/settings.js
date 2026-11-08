@@ -504,25 +504,33 @@ V.settings = (() => {
         } }), 'clipboard-step');
   }
 
+  /* "Install Wefty" (1.22): opens the home screen card for this device (js/homescreen.js: the browser's own install
+     where it offers one, else the steps, Safari's animated ones on an iPhone, the QR code for a phone on a computer).
+     The steps stay here in short too, for a glance. */
   function installLine(ui) {
     const phone = V.device === 'phone';
     const how = V.welcome.howToInstall();
     if (V.install.installed()) {
       return ui.line(phone ? 'On your home screen' : 'Installed as an app', 'Wefty is installed.', null, 'install');
     }
+    const card = V.homeScreen && V.homeScreen.open;
+    const opener = (kind) => V.button('Install Wefty', { kind, icon: 'download',
+      onClick: () => (card ? V.homeScreen.open({ from: 'settings' }) : V.install.ask().then(draw)) });
     if (V.install.ready()) {
       return ui.line('Install Wefty', V.deviceKind.android ? 'Puts it on your home screen like any app, and lets you share to it.'
-        : 'Puts it with your other apps, so it opens in its own window.',
-      V.button('Install', { kind: 'primary', icon: 'download', onClick: async () => { await V.install.ask(); draw(); } }), 'install');
+        : 'Puts it with your other apps, so it opens in its own window.', opener('primary'), 'install');
     }
     const ios = how.kind === 'ios';
     if (ios && !unmark) unmark = V.welcome.markConnect();
     return V.h('div.setting.install-how', { dataset: { setting: 'install' } }, V.h('div.setting-text', {},
-      V.h('strong', { text: phone ? 'Put it on your home screen' : 'Install as an app' }),
+      V.h('strong', { text: 'Install Wefty' }),
+      V.h('span', { text: phone ? 'Put it on your home screen: it opens like an app and works offline.'
+        : 'Install it as an app: it opens in its own window and works offline.' }),
       V.h('ol.steps', {}, how.steps.map((step) => V.h('li', { text: step }))),
       how.note ? V.h('span', { text: how.note }) : null,
       // (Its icon starts with nothing of Safari's: the link it connects with, as the welcome's step offers it.)
-      ios ? V.welcome.iosIcon((V.data.user || {}).email || 'your e-mail') : null));
+      ios ? V.welcome.iosIcon((V.data.user || {}).email || 'your e-mail') : null,
+      card ? V.h('div.setting-buttons.install-open', {}, opener('')) : null));
   }
 
   // "PC files" (1.19, js/share.js): Files in Share, off unless switched on. One card of its own.
@@ -663,6 +671,7 @@ V.settings = (() => {
         now.needsShell ? ui.line(`Wefty ${now.needsShell} needs the PC part updated`,
           V.pc.howToUpdate(), null, 'pc-part') : null,
         V.h('div.setting-buttons', {}, V.button('What\'s new', { onClick: () => V.update.whatsNew() }))),
+      V.help ? V.help.card(ui) : null,  // js/help.js: Help (1.22)
       V.feedback ? V.feedback.card(ui) : null,  // js/access.js
       V.tour ? V.tour.card(ui) : null,  // js/tour.js: Take the tour (1.19.6)
       V.news && !owner() ? V.news.card(ui) : null,  // js/news.js: a friend's announcements (the owner's are in Friends)

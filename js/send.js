@@ -1321,7 +1321,8 @@ V.storage = (() => {
   function say(error) {
     if (Date.now() - saidAt < 4000) return true;
     saidAt = Date.now();
-    V.toast(error.message, { kind: 'err', ms: 8000, action: 'Manage files', onAction: manage });
+    V.toast(error.message, { kind: 'err', ms: 8000, action: 'Manage files', onAction: manage,
+      help: V.help && V.help.forError ? V.help.forError(error) || '' : '' });  // (1.22: and Help, js/help.js)
     return true;
   }
 

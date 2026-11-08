@@ -672,7 +672,10 @@ V.review = (() => {
         // (the study loop, 1.19: what most people will do first)
         V.h('p.hint.loop-line', { text: 'Record a class or snap a page: AI writes your notes, then makes the cards from them.' }),
         V.h('p.hint', { text: 'Or write a line like "mitosis :: cell division", or "The {{mitochondria}} makes ATP", in any note: it shows up here, ready to study.' }),
-        V.h('div.review-make', {}, makeButton()));
+        // (1.22: the one button that fills it, a note to write them in, with one to change; with AI beside it)
+        V.h('div.review-make', {}, V.button('Write flash cards', { kind: 'tonal empty-go', icon: 'cards',
+          onClick: () => V.notes.create(V.TEMPLATES[0], { title: 'Flash cards', body: 'Question :: Answer\n' }, { fresh: true }).catch(V.problem) }),
+        makeButton()));
     }
     const due = at.list.filter((c) => isDue(c, at)).length;
     const tests = at.plans;

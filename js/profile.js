@@ -4,7 +4,7 @@
    they wait here offline, red when the cloud can't be reached; no green, which reads as "online now"), and its menu's
    first line says it in words, with what to do. An iPhone's old Vault icon is told to wait until that dot is gone
    before it's removed (js/start.js), and so is signing out (js/settings.js): no dot means nothing waits here. The menu also
-   holds what moved behind it: Settings, Invite people (the owner's), Feedback and Sign out.
+   holds what moved behind it: Settings, Help (1.22), Invite people (the owner's), Feedback and Sign out.
 
    Loaded before js/start.js (whose frame asks it for the picture at once); if it fails, util.js's V.profileButton
    draws a plain letter that opens Settings, so the way there never goes. */
@@ -186,6 +186,8 @@ V.profile = (() => {
       { node: head() },
       { sep: true },
       { label: 'Settings', icon: 'settings', onClick: () => V.go('settings') },
+      // (1.22, js/help.js: questions and answers, each with Show me; after the menu has gone, so Help gets the keyboard)
+      V.help ? { label: 'Help', icon: 'help', onClick: () => setTimeout(() => V.help.open(), 0) } : null,
       canInvite() ? { label: 'Invite people', icon: 'user-plus', onClick: () => V.go('settings', { page: 'friends' }) } : null,
       V.feedback ? { label: 'Feedback', icon: 'feedback', onClick: () => V.feedback.sheet() } : null,
       // (1.19.6, js/tour.js: the walk through Wefty, any time; after the menu has gone, so the keyboard comes back here)

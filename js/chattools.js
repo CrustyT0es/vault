@@ -25,7 +25,11 @@
      "Delete these 3 notes?" with Delete and Cancel, and only that Delete, or the person's next message saying yes
      (js/chat.js, saysYes), does it: notes go to the Trash (never deleted for good), a folder the way its own menu
      deletes one, and both have an Undo. Any other next message leaves them as they were;
-   - today_summary (what Today shows: js/today.js, js/review.js, js/subs.js).
+   - today_summary (what Today shows: js/today.js, js/review.js, js/subs.js);
+   - the guide (1.22): how_to (Wefty's own help cards for a question about using Wefty, js/help.js: never a note of
+     theirs) and show_me (a "Show me: <title>" row under the answer whose one button, Show me, opens the place and points
+     at it, js/showme.js; only ever when they tap it, never by itself or on a reload). Both only read: they change
+     nothing, need no typed words and count against no change limit. show_me is offered only where Wefty can show.
    Locked notes are never read, written, organised or sent (not even their due date), and neither is the note the
    note-taker is writing into. A change (a "write") only happens in answer to the person's own typed words in the
    message being answered (a picture or a note alone is never a request: `mayWrite`), at most MOST_WRITES a message.
@@ -40,8 +44,9 @@
 
 V.chatTools = (() => {
   // The tool set's version (kept with each turn that had them: js/chat.js). 2: make_flash_cards. 3 (1.18): folders,
-  // organising, reminders, sending, copying, exporting, and deleting after a yes.
-  const VERSION = 3;
+  // organising, reminders, sending, copying, exporting, and deleting after a yes. 4 (1.22): how_to and show_me, and the
+  // prompt's words about them (so thinking made with 3's tools and prompt is dropped, as for any tool change).
+  const VERSION = 4;
   const MOST_WRITES = 25;     // changes one message can make
   const MOST_IDS = 50;        // notes one call can move, pin, archive or ask to delete
   const FOUND_MOST = 20;      // notes find_notes gives back
@@ -51,6 +56,10 @@ V.chatTools = (() => {
   const CARDS_MOST = 200;
   const COPY_MOST = 20000;    // letters copy_everywhere keeps in the chat (for its "Copy here")
   const EXPORT_MOST = 25 * 1024 * 1024;  // a file export_notes holds in this page until it's saved
+  const HOW_MOST = 3;         // help cards how_to gives back...
+  const HOW_Q_MOST = 200;     // ...each question cut to this many letters...
+  const HOW_A_MOST = 700;     // ...and each answer to this many
+  const MOST_SHOWS = 3;       // Show me buttons one answer may have
 
   const str = { type: 'string' };
   const ids = (what) => ({ type: 'array', items: str, description: what });
@@ -218,6 +227,18 @@ V.chatTools = (() => {
     { name: 'today_summary',
       description: 'What Wefty\'s Today shows: today\'s date and weekday, what\'s due today or late, later this week, tests coming up, flash cards due, and subscriptions renewing soon.',
       schema: { type: 'object', properties: {} } },
+    // The guide (1.22): both only read (never `write`), and neither touches their notes.
+    { name: 'how_to',
+      description: 'Look a question about using Wefty itself up in Wefty\'s built-in help: where something is, how to do something in it, what a screen or setting is for. Gives back the best help cards, each a question (q), its answer (a) and, when Wefty can point at the place, a show id for show_me. Reads none of their notes.',
+      schema: { type: 'object', properties: {
+        question: describe(str, 'Their question in plain words, like "how do I make flash cards".'),
+      }, required: ['question'] } },
+    { name: 'show_me',
+      description: 'Put a Show me button under your answer: when they tap it, Wefty opens the place and points at the thing there. Give the show id a how_to card had (never make one up). Nothing opens until they tap it, so never say you showed or opened it: say they can tap Show me.',
+      schema: { type: 'object', properties: {
+        feature: describe(str, 'The show id from a how_to card, like "make-cards".'),
+        label: describe(str, 'Optional: a short name for what it shows, like "Make flash cards".'),
+      }, required: ['feature'] } },
   ];
   const byName = new Map(TOOLS.map((t) => [t.name, t]));
   const WRITES = new Set(TOOLS.filter((t) => t.write).map((t) => t.name));
@@ -225,12 +246,20 @@ V.chatTools = (() => {
   const SUB_TOOLS = new Set(['add_subscription', 'list_subscriptions', 'update_subscription']);
   const subsOn = () => !!(V.subs && V.subs.on && V.subs.on());
   const SUBS_OFF = 'Subscriptions are switched off in their Wefty, so you have no subscription tools. If they ask about subscriptions (adding one, a renewal, a free trial), say it\'s switched off and that they can turn it on in Settings > Notes & files > Subscriptions, then help with the rest of what they asked.';
+  /* Wefty's Show me (js/showme.js) and Help (js/help.js), where this page has them: show_me is offered only with Show
+     me, and how_to says so when there's no Help. Looked at each time (they're other parts' and load on their own). */
+  const showOn = () => !!(V.showMe && typeof V.showMe === 'function' && typeof V.showMe.has === 'function');
+  const helpOn = () => !!(V.help && typeof V.help.search === 'function');
+  /* What a question about using Wefty gets (the guide, 1.22): fixed words, as the whole prompt is (no dates, nothing
+     about this device), so a chat's thinking keeps fitting it day after day. */
+  const GUIDE = 'Questions about using Wefty itself (where something is, how to do something in it, what a screen or setting is for) want an answer, not a change: call how_to first, then answer in one or two plain lines from the help cards it gives back, and call show_me with a card\'s show when it has one, so they get a Show me button. Never invent a button, screen or setting the cards didn\'t mention; if none fits, say you\'re not sure. If they ask you to do it for them, do it with your tools as above.';
 
   /* What the chat's system prompt gets while the tools are offered (js/chat.js adds it to the chat's own, never
      stored). It makes Chat an agent in Wefty: it does the whole request itself, step by step. */
   const lines = (subs) => [
     `You are inside Wefty and can work in it for them with your tools: their notes (find, read, make, add to, rename, move, pin, archive, tag), folders (make, put inside other folders, rename, move), due dates and reminders (repeating too), ${subs ? 'subscriptions, ' : ''}flash cards, sending a note, a picture or words to their phone, PC or Chromebook, copying words to all their devices, exporting notes as a file, and what's on Today.`,
     'Act like an agent: when they ask for something in Wefty, do all of it yourself with your tools, step by step, over as many rounds as it takes. Look first when you need ids (list_folders, find_notes), then make the changes. Never say you can\'t do something your tools can do, never tell them to do it themselves, and never say you did something no tool did.',
+    GUIDE,
     'Plan a request with several parts and carry out every part. For example "make a folder called Badminton, put which teacher is on each day, and set an alarm every day at 6:45 and 10:30" is: create_folder Badminton; create_note in Badminton for each day, titled with the day and saying that day\'s teacher; then set_reminder twice with repeat "every day", once for 6:45 and once for 10:30 (a note holds one reminder, so each time gets its own reminder note in that folder).',
     'If something you need is missing and you can\'t sensibly guess it (like which teacher is on which day), ask one short question and do the rest when they answer. Otherwise make a sensible choice yourself (a fitting emoji, a clear title).',
     'Reminders and alarms: when they ask for one, set it at once (set_reminder, or a remind_time) without asking first; if they gave a day but no time, pick a sensible one and say which. Then end by telling them to tap the calendar button under your answer (Add to Calendar or Google Calendar) so their calendar reminds them even when Wefty is closed.',
@@ -246,14 +275,15 @@ V.chatTools = (() => {
   const PROMPT = lines(true);
   const PROMPT_OFF = lines(false);
 
-  /* The tools offered now: the subscription ones only while Subscriptions are switched on (1.19, js/subs.js). */
-  const offered = () => TOOLS.filter((t) => subsOn() || !SUB_TOOLS.has(t.name));
+  /* The tools offered now: the subscription ones only while Subscriptions are switched on (1.19, js/subs.js), and
+     show_me only where Wefty can show the place (1.22, js/showme.js). */
+  const offered = () => TOOLS.filter((t) => (subsOn() || !SUB_TOOLS.has(t.name)) && (t.name !== 'show_me' || showOn()));
   /* The system prompt's part for the tools offered now (js/chat.js adds it at request time, never stored). */
   const prompt = () => (subsOn() ? PROMPT : PROMPT_OFF);
   /* What a turn keeps of the tools it was asked with (js/chat.js's turn.tools): their version, and while Subscriptions
-     are off that they weren't there (so thinking that hung on the other set is dropped, as for a new version). With
-     them on it's exactly what it was before 1.19. */
-  const key = () => (subsOn() ? { wefty: VERSION } : { wefty: VERSION, subscriptions: false });
+     are off (or there's no Show me here) that those weren't there (so thinking that hung on the other set is dropped,
+     as for a new version). With both there it's exactly { wefty: VERSION }. */
+  const key = () => ({ wefty: VERSION, ...(subsOn() ? {} : { subscriptions: false }), ...(showOn() ? {} : { show_me: false }) });
   /* Whether a message is about subscriptions (asked while they're off: the model is told so with it, js/chat.js, and
      the note is sent with that message for good). Only the words for them: never "subscript", "renewable" or "renew my
      library books", which are homework and errands. */
@@ -1102,7 +1132,67 @@ V.chatTools = (() => {
       return { result: { folders: O().tree().map(({ folder, depth }) => ({ id: folder.id, name: folder.name,
         path: folderName(folder), depth, notes: live.filter((n) => n.folder_id === folder.id).length })) } };
     },
+
+    /* -- the guide (1.22): Wefty's own help, and a Show me button. Only the question goes to Help's search (no AI, on
+       this device), and nothing of their notes comes back. */
+
+    async how_to(args) {
+      const question = text(args.question, 300).replace(/\s+/g, ' ');
+      if (!question) no('Give their question, like "how do I make flash cards".');
+      if (!helpOn()) {
+        return { result: { cards: [], note: 'There are no help cards here, so answer only from what your instructions say about Wefty, and say so if you\'re not sure. Never make up a button, screen or setting.' } };
+      }
+      const found = await V.help.search(question);
+      const cards = (Array.isArray(found) ? found : []).map(helpCard).filter((c) => c.q || c.a).slice(0, HOW_MOST);
+      if (!cards.length) {
+        return { result: { cards: [], note: 'No help card fits that. Don\'t guess: say you\'re not sure, and that they can search Wefty\'s Help.',
+          ...(showOn() && V.showMe.has('help') ? { show: 'help' } : {}) } };
+      }
+      return { result: { cards } };
+    },
+
+    async show_me(args, ctx = {}) {
+      const feature = text(args.feature, 80);
+      if (!feature) no('Give the show id from a how_to card, like "make-cards".');
+      const known = showList();
+      if (!V.showMe.has(feature)) {
+        no(`Wefty has no Show me called "${feature}". The ones here: ${known.map((f) => f.id).join(', ') || 'none'}. Use a show id a how_to card gave, or leave the button out.`);
+      }
+      const entry = known.find((f) => f.id === feature);
+      const title = text(entry && entry.title, 80) || text(args.label, 80) || namedFrom(feature);
+      const where = text(entry && entry.where, 120);
+      const shows = (ctx.actions ? ctx.actions() : []).filter(isShow);
+      if (shows.some((a) => a.feature === feature)) {
+        return { result: { already_there: `Show me: ${title}`, note: 'That Show me button is under your answer already.' } };
+      }
+      if (shows.length >= MOST_SHOWS) no(`That's as many Show me buttons as one answer gets (${MOST_SHOWS}).`);
+      return { result: { button: `Show me: ${title}`, ...(where ? { where } : {}),
+        note: 'Nothing is shown yet: Wefty puts a Show me button under your answer, and it opens the place only when they tap it. Never say you showed or opened it.' },
+        action: { kind: 'show', type: 'show_me', feature, title, ...(where ? { where } : {}), label: `Show me: ${title}` } };
+    },
   };
+
+  /* A help card as how_to gives it back: its question and answer, cut short, and its Show me id only where this device
+     can show it (else null, so the model never offers a button that can't work). */
+  function helpCard(card) {
+    const show = card && typeof card.show === 'string' && showOn() && V.showMe.has(card.show) ? card.show : null;
+    return { q: text(card && card.q, HOW_Q_MOST), a: text(card && card.a, HOW_A_MOST), show };
+  }
+  /* Everything Show me can show here, [{ id, title, where }] (never throws). */
+  function showList() {
+    try {
+      const list = showOn() && typeof V.showMe.list === 'function' ? V.showMe.list() : [];
+      return (Array.isArray(list) ? list : []).filter((f) => f && typeof f.id === 'string');
+    } catch (error) {
+      return [];
+    }
+  }
+  /* A name for a Show me id with no title given ("setting:pure-black" -> "Pure black"). */
+  const namedFrom = (feature) => {
+    const words = feature.replace(/^setting:/, '').replace(/[-_]+/g, ' ').trim();
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : feature;
+  };
+  const isShow = (a) => !!a && a.type === 'show_me';
 
   /* One call the model made: { ok, result, action? }. `ctx.mayWrite`: the message being answered has the person's own
      typed words; `ctx.writes`: changes made for it so far; `ctx.pictures` / `ctx.blobOf`: the chat's pictures
@@ -1112,6 +1202,9 @@ V.chatTools = (() => {
     if (!tool) return { ok: false, result: { error: `Wefty has no tool called "${name}".` } };
     if (SUB_TOOLS.has(name) && !subsOn()) {  // (switched off since the model was told about them, or never offered)
       return { ok: false, result: { error: 'Nothing was done: Subscriptions are switched off in Wefty. Tell them they can turn them on in Settings > Notes & files > Subscriptions.' } };
+    }
+    if (name === 'show_me' && !showOn()) {  // (never offered here: Wefty can't point at places on this device)
+      return { ok: false, result: { error: 'There\'s no Show me on this device, so no button was added. Say where it is in words.' } };
     }
     const input = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
     if (tool.write) {
@@ -1159,8 +1252,12 @@ V.chatTools = (() => {
   const stateOf = (a) => (a.undone ? 'undone' : isAsk(a) ? a.state || 'asked' : 'done');
   /* An ask still waiting for Delete or Cancel (or a yes). */
   const isOpenAsk = (a) => isAsk(a) && !a.undone && (a.state || 'asked') === 'asked';
-  /* What Undo (and Undo all) can take back: not a copy or a file (nothing there to undo), not an ask until it's done. */
-  const undoable = (a) => !!a && !a.undone && a.type !== 'copy' && a.type !== 'export' && (!isAsk(a) || a.state === 'done');
+  /* What Undo (and Undo all) can take back: not a copy, a file or a Show me (nothing there to undo), not an ask until
+     it's done. */
+  const undoable = (a) => !!a && !a.undone && a.type !== 'copy' && a.type !== 'export' && !isShow(a)
+    && (!isAsk(a) || a.state === 'done');
+  /* An action that changed something (or asked to): everything but a Show me button, which only points. */
+  const isChange = (a) => !!a && !isShow(a);
 
   function open(action) {
     if (action.kind === 'sub') {
@@ -1649,15 +1746,57 @@ V.chatTools = (() => {
       ...body);
   }
 
+  /* ---------------------------------------------------------------- Show me (1.22)
+
+     A show_me call is a row of its own under the answer: "Show me: Make flash cards" (where it is, in words, under
+     it) with one button, Show me, which runs js/showme.js's V.showMe for it when tapped, and only then: drawing the
+     list (a reload, another device) never shows anything by itself. */
+
+  /* The place `action` names, shown (its tap). False when it couldn't be: Show me says so itself. */
+  async function show(action) {
+    if (!showOn()) {
+      V.toast(`Show me isn't on this device.${action.where ? ` It's in ${action.where}.` : ''}`);
+      return false;
+    }
+    return !!(await V.showMe(action.feature, { from: 'chat' }));
+  }
+
+  /* A Show me row. `onShow(action)`: what the tap does (js/chat.js first moves its own screen out of the way). */
+  function showRow(action, onShow) {
+    let going = false;
+    const button = V.h('button.chat-action-btn.chat-show-btn', { type: 'button', text: 'Show me', 'aria-label': action.label,
+      dataset: { feature: action.feature || '' },
+      onclick: async () => {
+        if (going) return;
+        going = true;
+        try {
+          await (onShow ? onShow(action) : show(action));
+        } catch (error) {
+          console.warn('Wefty: Show me', error);
+          V.toast('That couldn\'t be shown just now.', { kind: 'err' });
+        } finally {
+          going = false;
+        }
+      } });
+    return V.h('div.chat-action-row', { role: 'listitem' },
+      V.h('div.chat-action.show', { dataset: { action: action.id, tool: action.tool, state: 'done', feature: action.feature || '' } },
+        V.icon('target', 'chat-action-mark'),
+        V.h('span.chat-action-label', { text: action.label }),
+        V.h('span.chat-action-btns', {}, button),
+        action.where ? V.h('span.chat-action-about', { text: action.where }) : null));
+  }
+
   /* The whole list for one answer's `actions`, or null. `key` names it (the turn), for "Show N more". Asks still
-     waiting for Delete or Cancel come first, on their own, never folded away; then one card of the rest. */
-  function list(actions, { onChange, key = '', fresh = null } = {}) {
+     waiting for Delete or Cancel come first, on their own, never folded away; then the Show me rows (1.22), never
+     folded either; then one card of the rest. `onShow`: a Show me row's tap (showRow). */
+  function list(actions, { onChange, key = '', fresh = null, onShow = null } = {}) {
     const shown = (actions || []).filter((a) => a && a.id && a.label);
     if (!shown.length) return null;
     const box = V.h('div.chat-actions-done');
     const draw = () => {
       const asks = shown.filter(isOpenAsk);
-      const rest = shown.filter((a) => !isOpenAsk(a));
+      const shows = shown.filter(isShow);
+      const rest = shown.filter((a) => !isOpenAsk(a) && !isShow(a));
       const can = rest.filter(undoable);
       const done = rest.filter((a) => stateOf(a) === 'done').length;
       const folded = rest.length > FOLD_PAST && !opened.has(key);
@@ -1695,8 +1834,10 @@ V.chatTools = (() => {
       const calendar = calendarAsk(shown, { redraw: () => draw(), kept: onChange ? (changed) => onChange(changed) : null });
       V.clear(box,
         asks.length ? V.h('div.chat-actions-card.asks', { role: 'list', 'aria-label': 'Asks to delete' }, asks.map(row)) : null,
+        shows.length ? V.h('div.chat-actions-card.shows', { role: 'list', 'aria-label': 'Show me' },
+          shows.map((a) => showRow(a, onShow))) : null,
         rest.length ? V.h('div.chat-actions-card', {},
-          shown.length > 1 ? V.h('div.chat-actions-head', {}, V.h('span.chat-actions-count', { text: count }), undoAll) : null,
+          shown.filter(isChange).length > 1 ? V.h('div.chat-actions-head', {}, V.h('span.chat-actions-count', { text: count }), undoAll) : null,
           V.h('div.chat-actions-list', { role: 'list', 'aria-label': 'Done in Wefty' }, rows.map(row)),
           folded ? V.h('button.chat-actions-more', { type: 'button', text: `Show ${rest.length - SHOW_FIRST} more`,
             onclick: () => { opened.add(key); draw(); } }, V.icon('down')) : null) : null,
@@ -1706,7 +1847,8 @@ V.chatTools = (() => {
     return box;
   }
 
-  return { VERSION, TOOLS, WRITES, PROMPT, PROMPT_OFF, prompt, key, aboutSubs, subsOn, offered, MOST_WRITES, forClaude, forGemini, run, undo, open, chip, list, dayFrom, timeFrom,
-    confirm, decline, saysYes, isAsk, isOpenAsk, undoable, stateOf, saveFile, calendarItems, calendarAsk,
-    isWrite: (name) => WRITES.has(name) };
+  return { VERSION, TOOLS, WRITES, PROMPT, PROMPT_OFF, GUIDE, prompt, key, aboutSubs, subsOn, offered, MOST_WRITES, MOST_SHOWS,
+    forClaude, forGemini, run, undo, open, chip, list, dayFrom, timeFrom,
+    confirm, decline, saysYes, isAsk, isOpenAsk, isShow, isChange, undoable, stateOf, saveFile, calendarItems, calendarAsk, show,
+    showOn, helpOn, isWrite: (name) => WRITES.has(name) };
 })();

@@ -34,7 +34,16 @@
    (starterFolders), and the test is a note "<Class> test" due that day in its class's folder, covering it
    (extra.exam, as js/exams.js's Test button writes it), so Today has a real countdown on day one. The account is
    marked new for every device (settings.extra.start.since, through V.cloud.changeExtra), which js/starthere.js's
-   "Start here" card on Today goes by. Nothing here ever blocks: an answer that can't be made is left out. */
+   "Start here" card on Today goes by. Nothing here ever blocks: an answer that can't be made is left out.
+
+   New since 1.22 (the guide's "first run"): someone who came through this welcome on 1.22 or later is marked so for
+   the account (settings.extra.start.week: { since }, sent with the plan, and in the plan made: `guided`), never the
+   owner or anyone from before. For them the device that makes the plan also makes one note in Inbox that explains
+   itself, "Start here: how Wefty works" (introBody: a heading, a short checklist to tick, one "question :: answer"
+   line and one {{blank}} line that really are flash cards, and where Help is), pinned, with a stable id from the
+   account's (introId) and start.intro marked in the same claim as start.made, so it's made once across devices and
+   never again once deleted; the old "Welcome to Wefty" note (js/notes.js) isn't made for them. js/starthere.js's
+   first-week checklist goes by the same mark. */
 'use strict';
 
 V.welcome = (() => {
@@ -152,6 +161,17 @@ V.welcome = (() => {
      shows "Start here" from the start, before the account's own mark is written). */
   const planned = (user) => !!(user && (readPlan(user) || cloudPlan()));
 
+  /* New since 1.22: came through this welcome on 1.22 or later (the account's start.week, or this device's plan before
+     it's sent). The welcome note and js/starthere.js's first week go by it; never the owner or anyone from before. */
+  function guided(user = V.data.user && V.data.user.id) {
+    if (!user) return false;
+    const extra = (V.data && V.data.settings && V.data.settings.extra) || {};
+    const start = extra.start && typeof extra.start === 'object' ? extra.start : {};
+    if (start.week && typeof start.week === 'object') return true;
+    const plan = readPlan(user);
+    return !!(plan && plan.guide);
+  }
+
   /* The plan as it's also kept in the account (settings.extra.start.plan), sent as each answer is given: an iPhone's
      home screen icon starts with none of Safari's storage, and a friend who adds it half-way through the welcome and
      signs in there never goes back to the Safari tab. Whichever device syncs first makes it (makePlan). Also marks
@@ -165,8 +185,11 @@ V.welcome = (() => {
     sending = sending.then(() => V.cloud.changeExtra((extra) => {
       const start = extra.start && typeof extra.start === 'object' ? extra.start : {};
       if (start.made) return extra;
+      const since = start.since || plan.since || new Date().toISOString();
+      // (1.22: new since then, for the welcome note and the first week, js/starthere.js)
+      const week = start.week || (plan.guide ? { since } : null);
       return { ...extra, clip_step: extra.clip_step || 'offer',
-        start: { ...start, since: start.since || plan.since || new Date().toISOString(), plan: { classes, test } } };
+        start: { ...start, since, plan: { classes, test }, ...(week ? { week } : {}) } };
     })).catch(() => { /* offline or slow: this device still makes it after its first sync */ });
     return sending;
   }
@@ -240,13 +263,18 @@ V.welcome = (() => {
       // The account's mark ("Start here" on Today, on every device), kept with any other device's start, and whose
       // plan this is to make.
       const mine = (V.deviceLog && V.deviceLog.installId && V.deviceLog.installId()) || 'this-device';
+      const intro = introId(user);
       let start;
       try {
         await sending;
         const extra = await V.cloud.changeExtra((now) => {
           const was = now.start && typeof now.start === 'object' ? now.start : {};
           if (was.made) return now;
-          return { ...now, start: { ...was, since: was.since || plan.since || new Date().toISOString(), made: mine } };
+          const since = was.since || plan.since || new Date().toISOString();
+          // (1.22: new since then: the first week's mark, and the welcome note, claimed with the plan, so one device
+          // makes it, once)
+          const week = was.week || (plan.guide ? { since } : null);
+          return { ...now, start: { ...was, since, made: mine, ...(week ? { week, intro: was.intro || intro } : {}) } };
         });
         start = (extra && extra.start) || {};
       } catch (error) { return; }  // (tried again at the next sync)
@@ -259,8 +287,56 @@ V.welcome = (() => {
       if (test && test.name && /^\d{4}-\d{2}-\d{2}$/.test(test.day || '') && test.day >= V.today()) {
         try { await makeTest(test); } catch (error) { console.error(error); }
       }
+      if (start.intro === intro) {
+        try { await makeIntro(intro); } catch (error) { console.error('Wefty: the welcome note', error); }
+      }
     }
     if (local) writePlan(null);
+  }
+
+  /* -- the welcome note (1.22)
+
+     One note that explains itself, in Wefty's own marks: a heading, a checklist to tick, one "question :: answer" line
+     and one {{blank}} line that are real flash cards (so a first study round can be done on day one), and where Help
+     is. Explanations never use two colons or curly brackets, so only those two lines become cards. */
+  const INTRO_TITLE = 'Start here: how Wefty works';
+  function introBody() {
+    const help = V.help && typeof V.help.open === 'function' ? 'Tap your picture, then Help. It answers questions like "How do I make flash cards?"'
+      : 'Tap your picture, then Feedback, and tell us what\'s hard.';
+    return [
+      'Wefty turns your notes into **flash cards** and a study plan. Try each part of this note, then delete it whenever you like.',
+      '',
+      '# Try it',
+      '- [ ] Tap this box to tick it',
+      '- [ ] Make a folder for a class: in Notes, tap New folder',
+      '- [ ] Record a class or snap a page of notes: Today, then Quick actions',
+      '',
+      '# Flash cards from your notes',
+      'A line with a question, two colons, then the answer becomes a flash card. So does a word in double curly brackets. These two are real:',
+      'What does Wefty make from a line like this? :: A flash card',
+      'Wefty plans a little study each day until your {{test}}.',
+      'Study them from Today: tap Flash cards.',
+      '',
+      '# Stuck?',
+      help,
+    ].join('\n');
+  }
+  /* The note's id: the same on every device for this account (a UUID made from the account's id), so two devices can
+     never both make it. */
+  function introId(user) {
+    let hex = '';
+    for (let seed = 0; seed < 4; seed++) {
+      let h = 0x811c9dc5;
+      for (const ch of `wefty-intro:${seed}:${user}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+      hex += h.toString(16).padStart(8, '0');
+    }
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${'89ab'[parseInt(hex[16], 16) & 3]}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  }
+  async function makeIntro(id) {
+    if (V.data.notes.has(id)) return;  // (made already, or deleted since: never again)
+    const home = V.notes.inbox();
+    await V.cloud.save('notes', V.notes.blankNote({ id, folder_id: home ? home.id : null, pinned: true, title: INTRO_TITLE,
+      body: introBody(), extra: { starter: 'intro' } }));
   }
 
   /* "<Class> test" on its day, in its class's folder, covering that folder: the countdown js/exams.js's Test button
@@ -272,7 +348,8 @@ V.welcome = (() => {
       && squash(n.title) === squash(title));
     if (there) return;
     await V.cloud.save('notes', V.notes.blankNote({ folder_id: folder.id, title, due: test.day,
-      extra: { exam: { covers: [folder.id], since: V.today(), for: test.day } } }));
+      // (`starter`: made by Wefty, not written: the first week and js/homescreen.js don't count it as a note written)
+      extra: { exam: { covers: [folder.id], since: V.today(), for: test.day }, starter: 'test' } }));
   }
   V.on('status', (value) => { if ((value === 'synced' || value === 'held') && planned(V.data.user && V.data.user.id)) applyPlan().catch(() => {}); });
 
@@ -515,10 +592,13 @@ V.welcome = (() => {
       const finish = (result) => {
         listening = null;
         unmark();
+        if (V.homeScreen && V.homeScreen.asked) V.homeScreen.asked(result);
         resolve(result);
       };
       const computer = how.kind === 'chromebook' || how.kind === 'browser';
       const inApp = how.kind === 'in-app';
+      // (the home screen popup, js/homescreen.js, doesn't ask again the same day)
+      if (V.homeScreen && V.homeScreen.asked) V.homeScreen.asked();
       function draw() {
         const offer = !inApp && V.install.ready() ? V.button(computer ? 'Install Wefty' : 'Add to home screen', {
           kind: 'primary wide-btn', icon: 'download',
@@ -625,7 +705,7 @@ V.welcome = (() => {
     const list = steps();
     if (!user) return;
     if (list.length > 1) write({ user, step: list[1], done: {} });
-    changePlan(user, (p) => p);
+    changePlan(user, (p) => ({ ...p, guide: 1 }));  // (1.22: new since then: the welcome note and the first week)
     sendPlan(user);
   }
 
@@ -663,5 +743,6 @@ V.welcome = (() => {
   }
 
   return { steps, dots, howToInstall, remember, pending, run, markConnect, iosIcon, GEMINI_PAGE, STATS_WORDS,
-    applyPlan, starterFolders, planned, readPlan, emojiFor, loopSteps, loopIcon, SUBJECTS };
+    applyPlan, starterFolders, planned, readPlan, emojiFor, loopSteps, loopIcon, SUBJECTS,
+    guided, introId, introBody, INTRO_TITLE };
 })();

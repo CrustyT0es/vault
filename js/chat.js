@@ -750,9 +750,11 @@ V.chat = (() => {
   }
   const saysWords = (turn) => repliesOf(turn).some((b) => b && b.type !== 'thinking' && b.type !== 'redacted_thinking');
 
+  /* The changes a turn made in Wefty (its Show me buttons aren't: they only point, 1.22). */
+  const changesOf = (turn) => (turn.actions || []).filter((a) => !V.chatTools || !V.chatTools.isChange || V.chatTools.isChange(a));
   /* The changes a turn made in Wefty, in words (for a request that doesn't send its rounds as they were). */
   // (an ask to delete by the words it was asked with, `asked`, which never change: what's sent stays the same)
-  const actionWords = (turn) => (turn.actions || []).map((a) => a.asked || a.label).filter(Boolean).join('; ');
+  const actionWords = (turn) => changesOf(turn).map((a) => a.asked || a.label).filter(Boolean).join('; ');
 
   /* Words added to a message as it's sent (never stored) for changes made in Wefty that the request doesn't otherwise
      show, so the model never makes them again: those of the messages just before it that never got a full answer
@@ -1090,8 +1092,11 @@ V.chat = (() => {
      the turn over) never runs one twice: a call that has a result is done, and one that was started without one is
      said to have maybe happened. `refuse`: the round is answered without running anything (too many rounds). */
   async function runRound(chat, turn, step, job, refuse = '') {
-    // (`signal`: Stop ends a tool that waits on the AI itself too: js/aicards.js, make_flash_cards)
-    const ctx = { mayWrite: mayWrite(turn), writes: (turn.actions || []).length, signal: job.controller.signal,
+    // (`signal`: Stop ends a tool that waits on the AI itself too: js/aicards.js, make_flash_cards. `writes`: the changes
+    // made for this message so far, never its Show me buttons, which change nothing; `actions`: all of them, for
+    // show_me, which never puts the same button there twice)
+    const ctx = { mayWrite: mayWrite(turn), writes: changesOf(turn).length, actions: () => turn.actions || [],
+      signal: job.controller.signal,
       // (send_to_device: the chat's pictures, this message's first, then each earlier one's, newest first)
       pictures: () => chat.turns.slice(0, chat.turns.indexOf(turn) + 1).reverse()
         .map((t) => (t.files || []).filter((f) => f.kind === 'image')),
@@ -1127,7 +1132,7 @@ V.chat = (() => {
       if (out.action) {
         turn.actions = [...(turn.actions || []), out.action];
         call.action = out.action.id;
-        ctx.writes += 1;
+        if (V.chatTools.isWrite(call.name)) ctx.writes += 1;
       }
       if (V.chatTools.isWrite(call.name)) {  // (its result saved: a refused or failed change too, as it's been started)
         turn.answeringAt = now();
@@ -1939,7 +1944,8 @@ V.chat = (() => {
       return;
     }
     if (V.wide()) {
-      try { history.pushState({ vault: 'from-chat' }, ''); backToChat = true; } catch (error) { backToChat = false; }
+      // (1.22: this step is also Notes' own, at its address, so opening Notes makes no second one over it)
+      try { history.pushState({ vault: 'from-chat' }, '', V.addressFor ? V.addressFor('notes') : undefined); backToChat = true; } catch (error) { backToChat = false; }
       V.notes.open(n.id);
       V.toast(`Opened ${shownTitle(V.noteTitle(row)) || 'the note'}`, { action: 'Back to Chat', onAction: () => {
         if (backToChat && history.state && history.state.vault === 'from-chat') history.back(); else V.go('claude');
@@ -2093,7 +2099,19 @@ V.chat = (() => {
     const actions = (turn.actions || []).filter((a) => a && a.id && a.label);
     if (!actions.length || !V.chatTools) return null;
     return V.chatTools.list(actions, { key: `${chat.id}:${turn.id}`, onChange: (changed) => keepActions(chat.id, turn.id, changed),
-      fresh: (action) => freshAction(chat.id, turn.id, action) });
+      fresh: (action) => freshAction(chat.id, turn.id, action), onShow: showFrom });
+  }
+
+  /* A Show me row tapped (1.22, js/chattools.js): on a phone, an open chat covers Chat's own list, where its things are
+     (New chat), so for one of those it goes back to the list first; then Show me opens the place and points at it.
+     Anywhere else Show me opens its own screen over Chat, and coming back to Chat finds the chat as it was left. */
+  const inChat = (action) => /^chat(?:-|$)/.test(String(action.feature || '')) || /^chat\b/i.test(String(action.where || ''));
+  async function showFrom(action) {
+    if (!V.wide() && showingChat && inChat(action)) {
+      showingChat = false;
+      draw();
+    }
+    return V.chatTools.show(action);
   }
 
   /* An action as the chat holds it after a look at the cloud (another device may have settled an ask meanwhile). */
@@ -2611,6 +2629,45 @@ V.chat = (() => {
 
   V.editor.addTool({ name: 'claude', label: 'Ask in Chat', icon: () => V.icon('spark'), keepCaret: false, onClick: askAboutOpenNote });
 
+  /* ---------------------------------------------------------------- a question from Help (1.22)
+
+     Help's "Ask Chat" (js/help.js): Chat opens on a new chat with their question in the box, not sent, so they can
+     change it and send it (Chat then looks it up in Help itself: how_to, js/chattools.js). Nothing is attached: no note
+     of theirs goes with it unless they add one. Where Chat can't answer here (no free Gemini key, and no Claude), the
+     box says so with Chat's own "Set up free Gemini", as an empty chat does, and the keyboard goes to that button. */
+
+  /* Whether Chat can answer here now: the free Gemini set up, or Claude switched on with its key (as the key check
+     knows: before it has answered, not known, so false). */
+  const canAnswer = () => !!(V.ai.has('gemini') || V.ai.has('claude'));
+
+  async function askHelp(question) {
+    if (!V.data.user) return false;
+    const words = String(question || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    await load().catch(() => {});
+    if (V.editor.covering()) V.editor.close();  // (a note over everything on a phone)
+    const chat = blank() || newChat();  // (a blank chat has nothing in its box, notes and files included)
+    drafts.set(chat.id, { text: words, notes: [], files: [] });
+    openId = chat.id;
+    showingChat = true;
+    auto = false;
+    if (trouble && trouble.chatId !== chat.id) trouble = null;
+    V.go('claude');
+    // The keyboard: on the words (their end) where it doesn't bring up a phone's keyboard over them, or on the set-up
+    // button when Chat can't answer here. The key check may still be on its way: looked at again once it answers.
+    const place = () => {
+      if (!parts || openId !== chat.id || V.tab() !== 'claude') return;
+      const setUp = parts.trouble && !parts.trouble.hidden ? parts.trouble.querySelector('.btn') : null;
+      if (setUp && !canAnswer()) setUp.focus({ preventScroll: true });
+      else if (V.device !== 'phone' && parts.input && document.activeElement !== parts.input) {
+        parts.input.focus({ preventScroll: true });
+        parts.input.setSelectionRange(parts.input.value.length, parts.input.value.length);
+      }
+    };
+    requestAnimationFrame(place);
+    if (!V.ai.state()) V.ai.check().then(() => requestAnimationFrame(place)).catch(() => {});
+    return true;
+  }
+
   /* ---------------------------------------------------------------- outside the tab */
 
   /* A chat as Markdown (for Download everything, and "Save the whole chat as a note"). */
@@ -2621,7 +2678,7 @@ V.chat = (() => {
       lines.push('**You:**', '', turn.text || '', ...(extras.length ? ['', `(Attached: ${extras.join(', ')})`] : []), '');
       const who = isGemini(turn.model) ? 'Gemini' : 'Claude';
       const words = turn.state === 'refused' ? `(${who} declined to answer this one.)` : textOf(turn) || '(No answer.)';
-      const done = (turn.actions || []).map((a) => `- ${a.label}${a.undone ? ' (undone)' : ''}`);
+      const done = changesOf(turn).map((a) => `- ${a.label}${a.undone ? ' (undone)' : ''}`);
       lines.push(`**${who}** (${nameOf(turn.model)}):`, '', words, ...(done.length ? ['', '(Done in Wefty:)', ...done] : []), '', '---', '');
     }
     return lines.join('\n');
@@ -2695,6 +2752,8 @@ V.chat = (() => {
     ASK_LABEL,
     open,
     askAbout: askAboutOpenNote,
+    askHelp,     // (1.22: Help's "Ask Chat": a new chat with the question in the box, not sent)
+    canAnswer,   // (whether Chat can answer here: a Gemini key, or Claude on with its key)
     MODELS,
     takeDrop: (list) => {
       if (V.tab() !== 'claude' || !openId || tooOld(chatOf(openId))) return false;

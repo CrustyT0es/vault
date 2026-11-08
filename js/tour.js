@@ -496,6 +496,11 @@ V.tour = (() => {
       // Small enough, in the wrong place (a big card on a small screen): its list scrolled so it's above or below the card.
       Math.abs(hole.top - (T + h + gap)) <= Math.abs(hole.bottom - (B - h - gap)) ? hole.top - (T + h + gap) : hole.bottom - (B - h - gap))) {
       return;
+    } else if (els.length > 1) {
+      // Several things that don't fit beside the card together (a small phone with bigger text): the first one alone.
+      run.els = [els[0]];
+      place();
+      return;
     } else {
       // Taller than what's left: the card at the foot, the light on the part above it (or the other way round).
       const below = { top: Math.max(hole.top, T + h + gap), bottom: hole.bottom };
@@ -565,7 +570,10 @@ V.tour = (() => {
     try { putBack(was.from); } catch (error) { console.error('Wefty: the tour', error); } finally { puttingBack = false; }
     remember(how === 'done' ? 'done' : 'skipped');
     if (how !== 'done' && was.why === 'new') V.toast('Take the tour any time: tap your picture.', { ms: 5000 });
-    const focus = was.from.focus;
+    let focus = was.from.focus;
+    // (Today is drawn again when data comes in, and its top row's picture button with it: the keyboard goes back to the
+    // one that is there now.)
+    if (focus && !focus.isConnected && focus.matches && focus.matches('button.me')) focus = document.querySelector('.view button.me');
     if (focus && focus.isConnected && shown(focus) && focus !== document.body) focus.focus({ preventScroll: true });
   }
 

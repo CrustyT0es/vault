@@ -4042,6 +4042,12 @@ html:has(#app.gate) .nt-strip { display: none; }
 }
 .chat-actions-more .icon { width: 15px; height: 15px; }
 .chat-actions-more:hover { background: var(--accent-soft); }
+/* Show me under a how-to answer (1.22, js/chattools.js showRow): "Show me: Make flash cards", where it is under it,
+   and one soft accent button that opens the place when tapped. */
+.chat-actions-card.shows { background: var(--surface); }
+.chat-action.show .chat-action-label { color: var(--text); }
+.chat-action-btn.chat-show-btn { background: var(--accent-soft); }
+.chat-action-btn.chat-show-btn:hover { background: color-mix(in oklab, var(--accent-soft) 84%, var(--accent-line)); }
 @media (pointer: coarse) { .chat-action-btn { min-height: 36px; } .chat-action, .chat-actions-head, .chat-actions-more { min-height: 44px; } }
 /* The calendar ask under an answer that set a reminder (1.19.10, js/chattools.js calendarAsk): a soft accent card
    ("Add it to your calendar so your phone rings, even when Wefty is closed."), the reminder (or a row each with its
@@ -4894,3 +4900,208 @@ textarea.field.cap-words { min-height: 200px; max-height: 50vh; resize: vertical
 .tour-offer-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .tour-offer-buttons .btn { min-height: 44px; }
 @media (min-width: 900px) { .tour-offer { left: auto; right: 24px; width: 400px; margin: 0; bottom: calc(24px + var(--safe-bottom)); } }
+
+/* Show me (1.22, js/showme.js): a ring round the real thing for 3 seconds, pulsing (steady when motion is turned down),
+   above everything but never in the way: taps go through it. The page's own colour first, then the accent, so it shows
+   on light, dark and Pure black screens and on a busy card alike. */
+.showme-ring {
+  position: fixed; left: 0; top: 0; width: 100px; height: 40px; z-index: 96; pointer-events: none; box-sizing: border-box;
+  border: 3px solid var(--accent); border-radius: 12px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 6px color-mix(in oklab, var(--accent) 32%, transparent);
+  transition: opacity .18s var(--ease-out);
+}
+.showme-ring[hidden] { display: none; }
+/* (The line a screen reader hears: sits at the body's end, so absolute put it a pixel under a full-height page and made
+   the whole page scroll by one.) */
+.showme-live { position: fixed; top: 0; left: 0; }
+.showme-ring.leaving { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .showme-ring { animation: showme-pulse 1s var(--ease-out) infinite; }
+}
+@keyframes showme-pulse {
+  0% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 12px color-mix(in oklab, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+}
+@media (forced-colors: active) { .showme-ring { border-color: Highlight; box-shadow: none; outline: 2px solid Canvas; } }
+
+/* Help (1.22, js/help.js): a sheet with a search box and the questions, the whole screen on a phone (its answers are
+   long enough to need the room), a dialog from 700 px. A question opens its answer in place: two to four sentences, then
+   Show me (and Ask Chat where Chat can answer). "Still stuck?" at the foot. */
+.help-sheet { max-width: 640px; }
+.help-sheet:focus { outline: none; }
+.help-sheet .sheet-head h2 { font: 600 20px/26px var(--font); }
+.help-search { position: relative; display: flex; align-items: center; margin: 4px 0 6px; flex: none; }
+.help-search .help-search-ic { position: absolute; left: 14px; width: 20px; height: 20px; color: var(--muted); pointer-events: none; }
+.help-box.field { width: 100%; min-height: 48px; padding: 0 48px 0 44px; font-size: 16px; border-radius: 14px; background: var(--surface-2); }
+.help-clear { position: absolute; right: 4px; }
+.help-body { padding-top: 4px; }
+.help-count { margin: 6px 4px 8px; color: var(--muted); font: 500 13px/18px var(--font); overflow-wrap: anywhere; }
+.help-count:empty { display: none; }
+.help-group { margin: 0 0 14px; }
+.help-group-name { margin: 10px 4px 6px; color: var(--muted); font: 600 12.5px/16px var(--font); letter-spacing: .04em; text-transform: uppercase; }
+.help-card { margin: 0 0 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.help-card.open { border-color: var(--accent-line); }
+.help-q-head { margin: 0; font: inherit; }
+.help-q {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 12px 14px; border: none; border-radius: 12px;
+  background: none; color: var(--text); text-align: left; font: 600 15px/21px var(--font); cursor: pointer;
+}
+.help-q-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.help-chev { flex: none; width: 20px; height: 20px; color: var(--muted); transition: transform var(--d-2); }
+.help-card.open .help-chev { transform: rotate(180deg); }
+.help-q:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+@media (hover: hover) { .help-q:hover { background: var(--surface-2); } }
+.help-a { padding: 0 14px 14px; }
+.help-a > p { margin: 0 0 10px; color: var(--text-2); font: 400 15px/22px var(--font); overflow-wrap: anywhere; }
+.help-a > .steps { margin: 0 0 12px; overflow-wrap: anywhere; }
+.help-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-acts .btn { min-height: 44px; }
+.help-stuck { margin: 18px 0 4px; padding: 14px; border-radius: 12px; background: var(--surface-2); }
+.help-stuck h3 { margin: 0; font: 600 15px/21px var(--font); }
+.help-stuck p { margin: 4px 0 10px; color: var(--text-2); font: 400 14.5px/21px var(--font); overflow-wrap: anywhere; }
+.help-stuck .btn { min-height: 44px; }
+@media (max-width: 699px) {
+  .layer.help-layer { align-items: stretch; }
+  .help-sheet { max-width: none; height: 100%; max-height: none; border-radius: 0; padding-top: calc(10px + var(--safe-top));
+    padding-left: calc(16px + env(safe-area-inset-left, 0px)); padding-right: calc(16px + env(safe-area-inset-right, 0px)); }
+  .help-sheet::before { display: none; }
+  .help-sheet .sheet-head { min-height: 48px; }
+}
+@media (min-width: 700px) { .help-sheet { height: min(760px, 86vh); } }
+@media (prefers-reduced-motion: reduce) { .help-chev { transition: none; } }
+
+/* Settings: what each page is for, in a line under its title; and Help from a search that found no setting. */
+.set-about { margin: 0 4px 14px; color: var(--muted); font: 400 14px/20px var(--font); overflow-wrap: anywhere; }
+.settings-sub > .set-about { margin-top: -4px; }
+.settings-wide .set-title + .set-about { margin-top: -8px; margin-bottom: 18px; }
+.set-help-link {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin: 12px 0 4px; padding: 10px 14px;
+  border: 1px dashed var(--line-strong); border-radius: 12px; background: none; color: var(--accent-ink); text-align: left;
+  font: 600 14.5px/20px var(--font); cursor: pointer;
+}
+.set-help-link span { min-width: 0; overflow-wrap: anywhere; }
+@media (hover: hover) { .set-help-link:hover { background: var(--surface-2); } }
+
+/* What's new: the first note's Show me (version.json's `show`). */
+.news-show-row { margin-top: 6px; }
+.news-show-row .btn { min-height: 40px; }
+.help-box::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+
+/* ==== 1.22: Wefty on the home screen (js/homescreen.js) and the first week (js/starthere.js) ==== */
+/* The popup: one card, made for this device. The words first, then the steps (or the one big Add Wefty), then
+   Not now. A computer's card has the phone's QR code beside its own install. */
+.hs { display: grid; gap: 12px; padding-top: 2px; }
+.hs-gets { margin: 0; color: var(--text-2); font: 400 15px/22px var(--font); overflow-wrap: anywhere; }
+.hs .steps { margin: 0; overflow-wrap: anywhere; }
+.hs > .hint, .hs-here > .hint { margin: 0; }
+.hs > .btn.wide-btn, .hs-here > .btn.wide-btn { white-space: normal; text-align: center; }
+.hs-later { justify-self: center; padding: 8px 6px; }
+@media (pointer: coarse) { .hs-later { padding: 12px 10px; min-height: 44px; } }
+.hs-two { display: grid; gap: 16px; }
+@media (min-width: 700px) { .hs-two { grid-template-columns: minmax(0, 1fr) minmax(0, 236px); align-items: start; gap: 24px; } }
+.hs-here, .hs-phone { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.hs-here h3, .hs-phone h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font: 600 15px/22px var(--font); }
+.hs-here h3 .icon, .hs-phone h3 .icon { flex: none; width: 20px; height: 20px; color: var(--accent-ink); }
+.hs-phone { justify-items: center; text-align: center; padding: 14px; border-radius: var(--r-lg); background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.hs-phone h3 { justify-content: center; }
+.hs-phone .qr { padding: 10px; }
+.hs-phone .qr svg { display: block; max-width: 100%; height: auto; }
+.hs-phone > .hint { margin: 0; }
+/* An iPhone's or iPad's Safari: the three steps, lit in turn (Share, Add to Home Screen, Add); still when motion is
+   reduced. */
+.hs-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hs-step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 12px;
+  border-radius: var(--r-md); border: 1px solid var(--line); background: var(--card); }
+.hs-pic { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--accent-wash);
+  color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.hs-pic .icon { width: 24px; height: 24px; }
+.hs-words { display: grid; gap: 2px; min-width: 0; }
+.hs-words strong { color: var(--text); font: 600 15px/20px var(--font); overflow-wrap: anywhere; }
+.hs-words span { color: var(--muted); font: 400 13.5px/19px var(--font); overflow-wrap: anywhere; }
+.hs-addpic { display: grid; justify-items: center; gap: 2px; }
+.hs-addpic .icon { width: 24px; height: 16px; }
+.hs-addpic .icon svg { overflow: visible; }
+.hs-add { font: 700 10px/1 var(--font); letter-spacing: .02em; }
+@keyframes hs-light {
+  0%, 30% { border-color: var(--accent); background: var(--accent-wash); }
+  36%, 100% { border-color: var(--line); background: var(--card); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hs-play .hs-step { animation: hs-light 6s var(--ease-out) infinite; animation-delay: calc(var(--i) * 2s); }
+}
+/* The arrow where Safari's Share button is: under the card, at the bottom middle, on an iPhone; at the top right on an
+   iPad. It bobs (still when motion is reduced), and taps go through it. */
+.hs-arrow { position: fixed; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 6px 14px 6px 10px;
+  border-radius: var(--r-full); background: var(--card); color: var(--accent-ink); box-shadow: var(--shadow-2);
+  font: 600 14px/20px var(--font); pointer-events: none; }
+.hs-arrow .icon { width: 22px; height: 22px; }
+.hs-down .hs-arrow { left: 50%; bottom: calc(10px + var(--safe-bottom)); transform: translateX(-50%); }
+.hs-up .hs-arrow { top: calc(10px + var(--notch)); right: 16px; }
+.hs-up .hs-arrow .icon { transform: rotate(180deg); }
+.hs-down .sheet.hs-sheet { margin-bottom: calc(58px + var(--safe-bottom)); max-height: calc(88dvh - 58px); }
+@media (max-width: 699px) { .hs-down .sheet.hs-sheet { border-radius: var(--r-xl); padding-bottom: 16px; } }
+@keyframes hs-bob-down { 0%, 100% { translate: 0 0; } 50% { translate: 0 6px; } }
+@keyframes hs-bob-up { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+@media (prefers-reduced-motion: no-preference) {
+  .hs-down .hs-arrow { animation: hs-bob-down 1.4s ease-in-out infinite; }
+  .hs-up .hs-arrow { animation: hs-bob-up 1.4s ease-in-out infinite; }
+}
+@media (forced-colors: active) { .hs-play .hs-step { animation: none; } .hs-arrow { border: 1px solid CanvasText; } }
+
+/* The first week: a short list that ticks itself, each item to do with its one button. Inside Start here: beside the
+   step when wide, folded under one line on a phone. On its own once the study loop is done. */
+.start-cols { display: grid; gap: 16px; }
+@media (min-width: 900px) {
+  .start-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 28px; align-items: start; }
+}
+.start-main > .start-ai-note { margin: 8px 0 0; }
+.fw-side { padding-left: 24px; border-left: 1px solid var(--line-soft); min-width: 0; }
+.fw-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px;
+  color: var(--text); font: 600 15px/22px var(--font); }
+.fw-count { flex: none; color: var(--muted); font: 500 13px/18px var(--font); font-variant-numeric: tabular-nums; }
+.fw-bar { flex: none; margin: 0 0 4px; }
+/* (a phone: one chip in Start here's top row, "First week 1/4", opening the list in a sheet) */
+.fw-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin-left: auto; padding: 0 8px 0 10px;
+  border: 1px solid var(--line); border-radius: var(--r-full); background: var(--card); color: var(--text);
+  font: 600 13px/18px var(--font); white-space: nowrap; }
+.fw-chip:hover { border-color: var(--line-strong); }
+@media (pointer: coarse) { .fw-chip { min-height: 44px; } }
+.fw-chip-n { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.fw-chip-ring { flex: none; width: 16px; height: 16px; border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--done, 0) * 360deg), var(--line-strong) 0);
+  -webkit-mask: radial-gradient(circle, transparent 4.5px, #000 5px); mask: radial-gradient(circle, transparent 4.5px, #000 5px); }
+.fw-chev { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.start-top:has(.fw-chip) { position: relative; flex-wrap: wrap; justify-content: flex-start; row-gap: 4px; column-gap: 10px;
+  padding-right: 48px; min-height: 40px; }
+.start-top:has(.fw-chip) .start-close { position: absolute; top: 50%; right: 0; transform: translateY(-50%); }
+.start-top:has(.fw-chip) .fw-chip { margin-left: auto; }
+.fw-in-sheet > .fw-count { margin: 0 0 6px; }
+.fw-in-sheet .fw-list { margin-top: 6px; }
+.fw-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.fw-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; padding: 6px 0;
+  border-top: 1px solid var(--line-soft); }
+.fw-item:first-child { border-top: 0; }
+.fw-mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px solid var(--control); color: var(--on-accent); }
+.fw-item.done .fw-mark { background: var(--accent); border-color: var(--accent); }
+.fw-mark .icon { width: 14px; height: 14px; }
+.fw-mark .icon svg { stroke-width: 2.6; }
+.fw-text { flex: 1 1 110px; min-width: 0; color: var(--text); font: 500 14.5px/20px var(--font); overflow-wrap: anywhere; }
+.fw-item.done .fw-text { color: var(--muted); font-weight: 400; }
+.fw-go { flex: none; margin-left: auto; min-height: 36px; padding: 0 12px; }
+.fw-go .icon { width: 16px; height: 16px; }
+@media (pointer: coarse) { .fw-go { min-height: 44px; } }
+.fw-go.quiet { border-color: var(--line); }
+.first-week { margin-top: 16px; }
+.fw-box { padding: 14px 16px 10px; }
+.fw-head { margin: 0 0 8px; color: var(--text); font: 600 18px/24px var(--font); letter-spacing: -.01em; }
+.fw-box .fw-list { margin-top: 6px; }
+
+/* Empty screens that teach (1.22): one sentence, then the one button that fills it. */
+.empty .empty-go { min-height: 44px; }
+.dp-none-go { margin: 4px 0 0; }
+.install-how .install-open { margin-top: 8px; }
+.review-empty .review-make { flex-wrap: wrap; gap: 8px; }
+.review-make .btn.tonal { color: light-dark(var(--on-primary), var(--accent-ink)); }

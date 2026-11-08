@@ -168,12 +168,29 @@
       words: ['update', 'version', 'what\'s new', 'new', 'check'] },
     { page: 'about', key: 'take-the-tour', name: 'Take the tour', hint: 'Two minutes: where everything is in Wefty, and what the switches do.',
       words: ['tour', 'tutorial', 'walkthrough', 'walk through', 'guide', 'help', 'how to', 'learn', 'start', 'new'], shown: () => !!V.tour },
+    // (1.22, js/help.js: Help itself opens from here, as it isn't a setting; its row is on About & feedback)
+    { page: 'about', key: 'help', name: 'Help', hint: 'Answers to common questions, each with Show me to point at the place.',
+      words: ['help', 'how to', 'how do i', 'stuck', 'question', 'questions', 'faq', 'support', 'guide', 'tips', 'problem'],
+      shown: () => !!V.help, open: () => V.help.open() },
     { page: 'about', key: 'send-feedback', name: 'Send feedback', hint: 'Found a bug, or have an idea?', words: ['feedback', 'bug', 'idea', 'problem', 'report', 'help'] },
     { page: 'about', key: 'announcements', name: 'Announcements', hint: 'Read the updates you were sent again.', words: ['announcement', 'poll', 'news'],
       shown: () => !isOwner() },
     { page: 'about', key: 'use-the-built-in-copy', name: 'Use the built-in copy', hint: 'Go back to the version installed on this PC.', more: true,
       words: ['built-in', 'rollback', 'older version', 'go back'], shown: () => V.desktop && V.update.state().downloaded },
   ];
+
+  /* What each page is for, in a line under its title (1.22: every page says it, so nobody wonders why they're there). */
+  const PAGE_LINES = {
+    account: 'Your sign-in and password, and a copy of everything you keep in Wefty.',
+    appearance: 'How Wefty looks on this device, and reading aids that go with you everywhere.',
+    ai: 'The free Gemini that writes your notes, makes flash cards and answers in Chat, and what AI may do for you.',
+    devices: () => (V.desktop ? 'This PC\'s own settings, and bringing in your phone and Chromebook.'
+      : 'Bringing in your other devices, putting Wefty on this one, and sharing between them.'),
+    notifications: 'Reminders, a daily study nudge and a heads-up before tests, even when Wefty is closed.',
+    notes: 'Your locked notes\' PIN, backups, and extras you can switch on.',
+    friends: 'Invite people, post announcements, and see how Wefty is used.',
+    about: 'Wefty\'s version and updates, Help, the tour, and feedback.',
+  };
 
   const said = (value) => (typeof value === 'function' ? value() : value);
   const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -315,7 +332,10 @@
       tip ? V.h('p.set-tip', {}, V.icon('pin'), V.h('span', {}, V.h('strong', { text: 'Looking for pinned notes? ' }),
         'Pin a note from its ⋯ menu in Notes. Pinned notes stay at the top.')) : null,
       mentions.length ? [V.h('p.set-count', { text: `Also mentions “${query.trim()}”` }),
-        V.h('div.card.set-group', {}, mentions.map((entry) => row(entry, false)))] : null);
+        V.h('div.card.set-group', {}, mentions.map((entry) => row(entry, false)))] : null,
+      // (1.22: never a dead end. Help answers what Settings can't, with the words typed here)
+      V.help ? V.h('button.set-help-link', { type: 'button', onclick: () => V.help.open({ query: query.trim() }) },
+        V.icon('help'), V.h('span', { text: `Search Help for “${query.trim()}”` })) : null);
   }
 
   let listBox = null;
@@ -335,6 +355,12 @@
     if (!listBox) return;
     V.clear(listBox, query.trim() ? results() : homeList(V.wide()));
   }
+
+  const pageLine = (cat) => {
+    let text = '';
+    try { text = said(PAGE_LINES[cat.id]) || ''; } catch (error) { text = ''; }
+    return text ? V.h('p.set-about', { id: `set-about-${cat.id}`, text }) : null;
+  };
 
   function pageBody(cat) {
     pageTitle = cat.title;
@@ -361,10 +387,11 @@
     if (wide) {
       body = V.h('div.page.settings.settings-wide', {},
         V.h('div.set-side', {}, V.appHead({ title: 'Settings', me: false, cls: 'settings-head' }), searchBox(), listBox),
-        V.h('div.set-main', { dataset: { page: cat.id } }, V.h('h1.set-title', { text: cat.title }), pageBody(cat)));
+        V.h('div.set-main', { dataset: { page: cat.id } }, V.h('h1.set-title', { text: cat.title }), pageLine(cat), pageBody(cat)));
     } else if (cat) {
       body = V.h('div.page.settings.settings-sub', { dataset: { page: cat.id } },
-        V.appHead({ title: cat.title, back: back, backLabel: 'Back to Settings', me: false, cls: 'settings-head' }), pageBody(cat));
+        V.appHead({ title: cat.title, back: back, backLabel: 'Back to Settings', me: false, cls: 'settings-head' }), pageLine(cat),
+        pageBody(cat));
     } else {
       body = V.h('div.page.settings.settings-home', {},
         V.appHead({ title: 'Settings', back: () => V.leaveSettings(), backLabel: 'Back', me: false, cls: 'settings-head' }),
@@ -403,13 +430,19 @@
     if (row) lit = { key: row };
     const was = page;
     page = id;
+    // (1.22: each page has its own address, /settings/<page>/: js/start.js's V.addressOf)
+    const url = V.addressOf && V.address && !V.desktop && /^https?:$/.test(location.protocol) ? V.addressOf('settings', id) : '';
     if (V.wide()) {
       store(id);
+      if (url) V.address('settings', id);
     } else if (!was && !pageStep && !(V.tour && V.tour.holds && V.tour.holds())) {  // (the tour adds no step: js/tour.js)
       try {
-        history.pushState({ vault: 'settings-page', boot: V.pageLife }, '');
+        if (url) history.pushState({ vault: 'settings-page', boot: V.pageLife }, '', url);
+        else history.pushState({ vault: 'settings-page', boot: V.pageLife }, '');
         pageStep = true;
       } catch (error) { /* (its arrow still goes back) */ }
+    } else if (url) {
+      V.address('settings', id);
     }
     draw();
     if (!row) {
@@ -520,5 +553,6 @@
     page: () => page,
     search,
     SEARCH,
+    PAGE_LINES,
   });
 })();

@@ -253,20 +253,30 @@ V.update = (() => {
 
   /* -- what's new */
 
-  async function notes() {
+  /* version.json's notes, and (1.22) its optional `show`: a V.showMe id for the first note's main thing. */
+  async function listing() {
     try {
-      const listing = await (await fetch('version.json', { cache: 'no-cache' })).json();
-      return Array.isArray(listing.notes) ? listing.notes.map(String) : [];
+      const got = await (await fetch('version.json', { cache: 'no-cache' })).json();
+      return { lines: Array.isArray(got.notes) ? got.notes.map(String) : [], show: typeof got.show === 'string' ? got.show : '' };
     } catch (error) {
-      return [];
+      return { lines: [], show: '' };
     }
   }
+  async function notes() { return (await listing()).lines; }
 
+  /* The first note gets a Show me when version.json names a feature this device has (js/showme.js): the sheet goes,
+     then the ring points at it. */
   async function whatsNew() {
-    const lines = await notes();
-    V.sheet({
+    const { lines, show } = await listing();
+    let sheet = null;
+    const pointing = show && V.showMe && V.showMe.has && V.showMe.has(show);
+    const showMe = pointing ? V.button('Show me', { icon: 'target', aria: `Show me: ${V.showMe.titleOf(show) || 'the new thing'}`,
+      onClick: () => { if (sheet) sheet.close(); setTimeout(() => V.showMe(show, { from: 'whatsnew' }), 200); } }) : null;
+    if (showMe) showMe.classList.add('news-show');
+    sheet = V.sheet({
       title: `What's new in Wefty ${V.VERSION}`,
-      content: lines.length ? V.h('ul.news', {}, lines.map((line) => V.h('li', { text: line })))
+      content: lines.length ? V.h('ul.news', {}, lines.map((line, i) => V.h('li', {}, V.h('span', { text: line }),
+        i === 0 && showMe ? V.h('div.news-show-row', {}, showMe) : null)))
         : V.h('p.muted', { text: 'Nothing to tell about this version.' }),
       actions: [{ label: 'OK', kind: 'primary' }],
     });

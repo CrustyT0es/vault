@@ -250,8 +250,12 @@ V.notes = (() => {
     for (const [name, icon] of Array.isArray(list) && list.length ? list : V.STARTER_FOLDERS) {
       await V.cloud.save('folders', { id: V.uuid(), name, icon, sort: sort++, deleted: false, extra: {} });
     }
+    // (Someone new since 1.22 gets js/welcome.js's own note instead, "Start here: how Wefty works", made with the plan.)
+    if (V.welcome && V.welcome.guided && V.welcome.guided()) return;
     const home = inbox();
     await V.cloud.save('notes', blankNote({
+      // (`starter`: made by Wefty, not written: js/homescreen.js and the first week don't count it as a note written)
+      extra: { starter: 'welcome' },
       folder_id: home && home.id, pinned: true, title: 'Welcome to Wefty',
       body: 'Your notes, on your PC and your phone.\n\n- [ ] Open Wefty on your phone (Settings > Devices, on the PC)\n'
         // (An iPhone can't share into a web app: there it's Share > Send.)
@@ -1189,17 +1193,29 @@ V.notes = (() => {
       parts.select,
     ] : [searchButton(), moreButton()]);
     drawSelect();
+    // An empty list teaches (1.22): one sentence, then the one button that fills it (or gets out of it).
     const empty = () => {
       const say = (text, ...more) => V.h('div.empty', {}, V.mark(40), V.h('p', { text }), more);
+      const go = (label, icon, onClick, kind = 'tonal') => V.button(label, { kind: `${kind} empty-go`, icon, onClick });
+      const allNotes = () => go('Show all your notes', 'notes', () => setFilter('all'), '');
       if (query) {
         const { missing } = O.foldersFor(q);
-        return say(missing ? `No folder is called "${missing}".` : `Nothing matches "${query}".`);
+        return say(missing ? `No folder is called "${missing}".` : `Nothing matches "${query}". Try fewer or other words.`,
+          go('Clear the search', 'x', () => (V.wide() ? clearSearch() : closeSearch()), ''));
       }
-      if (filter === 'trash') return say('The Trash is empty.');
-      if (filter === 'due') return say('Nothing coming up. Type a day in a note, like "test fri 9am", or give it a due date.');
-      if (filter === 'pinned') return say('Pin a note to keep it at the top.');
-      if (filter === 'archive') return say('Nothing archived. Archive notes you\'re done with: they leave your lists but stay here, and in search with is:archived.');
-      if (isTag(filter)) return say(`No notes have ${tagLabel(tagKey(filter))} any more.`);
+      if (filter === 'trash') return say('The Trash is empty. Notes you delete wait here, so you can put them back.', allNotes());
+      if (filter === 'due') {
+        return say('Nothing coming up. Type a day in a note, like "test fri 9am", or give it a due date.',
+          go('Add a reminder', 'calendar', async () => {
+            const note = await create(V.TEMPLATES[0], {}, { fresh: true }).catch((error) => { V.problem(error); return null; });
+            if (note && V.reminders && V.reminders.edit) V.reminders.edit(note.id, { remind: true });
+          }));
+      }
+      if (filter === 'pinned') return say('Pin a note from its ⋯ menu to keep it here, at the top.', allNotes());
+      if (filter === 'archive') return say('Nothing archived. Archive notes you\'re done with: they leave your lists but stay here, and in search with is:archived.', allNotes());
+      if (isTag(filter)) {
+        return say(`No notes have ${tagLabel(tagKey(filter))} any more. Type it in a note to bring it back.`, allNotes());
+      }
       // A folder with nothing in it (no notes, no folders): the loom, and the two ways to fill it. Its New note is the
       // screen's main iris button on a phone (the round + steps aside for it); wide, New note above the list is.
       if (folder && !O.children(folder.id).length) {

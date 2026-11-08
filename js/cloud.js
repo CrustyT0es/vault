@@ -616,7 +616,8 @@ V.cloud = (() => {
     }
     console.warn('Vault: the cloud refused a row', table, row.id, err.message);
     V.toast(table === 'notes' ? `"${row.title || 'A note'}" couldn't be saved to the cloud: it's too big. ` +
-      'Make it shorter and it goes up.' : 'Something couldn\'t be saved to the cloud.', { kind: 'err', ms: 8000 });
+      'Make it shorter and it goes up.' : 'Something couldn\'t be saved to the cloud.', { kind: 'err', ms: 8000,
+      help: table === 'notes' ? 'too-big' : '' });  // (1.22: Help says what to do, js/help.js)
   }
 
   /* One bulk upsert; if the cloud refuses it (not a network or sign-in problem), each row on its own, so a row it

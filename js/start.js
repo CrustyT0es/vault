@@ -31,6 +31,64 @@
   let settingsFrom = 'today';  // where Settings was opened from: its back arrow and Back go there again
   let settingsStep = false;    // Settings has a step in history (on a phone): Back leaves it
 
+  /* ---------------------------------------------------------------- each screen's own address (1.22)
+
+     The owner: "for tabs could we do a slightly different wefty web address for each?" (tabs and Settings' pages
+     only, never single folders or notes). Today is <app>/today/, Notes /notes/, Share /share/ (its Clipboard and
+     Files parts /share/clipboard/ and /share/files/), Chat /chat/, Settings /settings/ (a page /settings/<page>/) and
+     Help /help/, where <app> is this app's own address (wefty.org/, or an old address's folder). vault/publish.py
+     puts a copy of index.html at each, with a <base> pointing back at <app>, as GitHub Pages only serves files that
+     are there; sw.js serves the kept copy for an address offline. Going from one screen to another makes a step in
+     history (Back and Forward go between them), except where Settings has its own steps (a phone's Settings and its
+     pages, which now carry their addresses) and while the tour or a step back is moving things. The first screen
+     never makes one. The PC app (vault://app/) has no address bar: nothing here touches it. */
+  const APP = (() => { try { return new URL('.', document.baseURI).href; } catch (error) { return location.href; } })();
+  V.appBase = APP;  // this app's own address, whichever screen's address the page was opened at
+  const ROUTES = { today: 'today/', notes: 'notes/', send: 'share/', clips: 'share/clipboard/', files: 'share/files/',
+    claude: 'chat/', settings: 'settings/' };
+  const SETTINGS_PAGES = ['account', 'appearance', 'ai', 'devices', 'notifications', 'notes', 'friends', 'about'];
+  V.routes = { ROUTES, SETTINGS_PAGES, HELP: 'help/' };  // (vault/publish.py makes the same: a test keeps them equal)
+  const addressed = () => !V.desktop && /^https?:$/.test(location.protocol);
+  const addressOf = (view, page = '') => APP + (view === 'settings' && SETTINGS_PAGES.includes(page)
+    ? `settings/${page}/` : ROUTES[view] || '');
+  V.addressOf = addressOf;
+  // The address to give a history step made together with a V.go (js/chat.js's from-chat step), so V.go makes none of its
+  // own: the step is the screen's. Undefined where screens have no addresses (the PC app, a file).
+  V.addressFor = (view, page = '') => (addressed() && ROUTES[view] ? addressOf(view, page) : undefined);
+  /* What this page's address names: { view, page } or { view: 'today', help: true }, else null (the app's own
+     address, or anything else). */
+  function routeHere() {
+    if (!addressed()) return null;
+    let rest = location.href.split(/[?#]/)[0];
+    if (!rest.startsWith(APP)) return null;
+    rest = rest.slice(APP.length).replace(/index\.html$/, '');
+    if (rest && !rest.endsWith('/')) rest += '/';
+    if (rest === 'help/') return { view: 'today', help: true };
+    const page = /^settings\/([a-z-]+)\/$/.exec(rest);
+    if (page && SETTINGS_PAGES.includes(page[1])) return { view: 'settings', page: page[1] };
+    const view = Object.keys(ROUTES).find((id) => ROUTES[id] === rest);
+    return view ? { view } : null;
+  }
+  const here = () => location.href.split('#')[0].split('?')[0];
+  let stepping = 0;  // a step back or forward is being taken: what it opens makes no step of its own
+  let holding = false;  // the first screen at the app's own address: that address stays (the front page's, later)
+  /* This screen's address: a new step in history (`push`), this step's address changed (`replace`: its ?search and
+     #hash kept, as a link's own part may still be read), or this step made the screen's own (`swap`: Settings left on
+     a phone by a tab, whose step then needs no stepping over). */
+  function address(view, how = 'push', page = '') {
+    if (!addressed() || !ROUTES[view] || holding) return;
+    const url = addressOf(view, page);
+    const mine = { vault: 'tab', view, page, boot: BOOT };
+    try {
+      const state = history.state;
+      if (how === 'swap') history.replaceState(mine, '', url);
+      else if (url === here()) return;
+      else if (how === 'push') history.pushState(mine, '', url);
+      else history.replaceState(state && state.vault === 'tab' ? { ...state, view, page } : state, '', url + location.search + location.hash);
+    } catch (error) { /* (a browser that won't: the screen still changed) */ }
+  }
+  V.address = (view, page) => address(view, 'replace', page);  // (js/settingsui.js: a wide screen's page switched)
+
   /* ---------------------------------------------------------------- the app's frame */
 
   V.tab = () => current;  // the screen's own id: 'today', 'notes', 'send', 'files', 'clips', 'claude' or 'settings'
@@ -43,13 +101,21 @@
     if (view === 'files' && V.share && V.share.shows && !V.share.shows('files')) view = 'send';  // (Files is off: 1.19)
     if (!VIEWS[view]) view = 'notes';  // (an id this version doesn't know)
     const was = current;
+    const ownStep = settingsStep;  // (a phone's Settings, with its own step in history)
     if (shell && shown && was) keepPlace(was);  // (before anything is drawn over it)
     current = view;
     if (!shell) return;
     if (!shown) { askedFirst = view; return; }  // (main() shows it, once this device's notes are loaded)
-    if (view === 'settings' && was !== 'settings') openedSettings(was);
+    if (view === 'settings' && was !== 'settings') openedSettings(was, opts || {});
     else if (view !== 'settings' && was === 'settings') leftSettings();
     show(view, opts || {});
+    // (its address: a step of its own, unless Back or Forward brought it, the tour is moving things, or it's still the
+    // same screen; Settings makes its own on a phone, openedSettings)
+    // (a step back or forward, or the first screen, already has its address; one the app is taking itself, like a note
+    // closing, lands first and then reconciles with the screen, `reconcile` below)
+    if (view !== 'settings' && view !== was && !stepping && !hopping.length) {
+      address(view, tourHolds() ? 'replace' : was === 'settings' && ownStep ? 'swap' : 'push');
+    }
   };
 
   /* ---------------------------------------------------------------- each screen's place (1.18)
@@ -264,12 +330,15 @@
   const settingsState = (state) => !!state && /^settings(-page)?$/.test(state.vault || '') && state.boot === BOOT;
   // (the tour, js/tour.js, opening and leaving Settings touches neither: Back after it goes where it went before)
   const tourHolds = () => { try { return !!(V.tour && V.tour.holds && V.tour.holds()); } catch (error) { return false; } };
-  function openedSettings(from) {
-    if (tourHolds()) return;
+  function openedSettings(from, opts = {}) {
+    const page = typeof opts.page === 'string' ? opts.page : '';
+    if (tourHolds()) { if (!stepping) address('settings', 'replace', page); return; }
     settingsFrom = from;
-    if (V.wide()) return;
+    if (V.wide()) { if (!stepping) address('settings', 'push', page); return; }
     try {
-      history.pushState({ vault: 'settings', boot: BOOT }, '');
+      if (stepping) return;  // (Forward into it: its step is already there)
+      if (addressed()) history.pushState({ vault: 'settings', boot: BOOT }, '', addressOf('settings'));
+      else history.pushState({ vault: 'settings', boot: BOOT }, '');
       settingsStep = true;
     } catch (error) { /* (its arrow still leaves it) */ }
   }
@@ -285,10 +354,46 @@
     if (settingsStep && settingsState(history.state)) { history.back(); return; }  // (popstate below does the rest)
     V.go(settingsFrom || 'today');
   };
+  /* Steps the app takes itself (a note closing, Settings leaving, "Back to Chat": history.back() and go()) are told
+     apart from a person's Back or Forward: they land without navigating, and whatever screen was opened meanwhile
+     (V.editor.close() then V.go('send') is the usual pair) then gets its own step on top of where they landed. */
+  const hopping = [];  // the app's own steps not landed yet (a timer each, in case one lands nowhere)
+  const stepOver = history.back.bind(history);  // (a dead step stepped over for a person's Back: that Back goes on)
+  for (const name of ['back', 'forward', 'go']) {
+    const native = history[name].bind(history);
+    history[name] = (...args) => {
+      const timer = setTimeout(() => { const at = hopping.indexOf(timer); if (at >= 0) hopping.splice(at, 1); }, 800);
+      hopping.push(timer);
+      return native(...args);
+    };
+  }
+  function reconcile() {
+    if (!shell || !shown || !addressed() || current === 'settings') return;
+    const state = history.state;
+    if (state && state.vault && state.vault !== 'tab') return;  // (a layer's step: its own code's)
+    if (state && state.vault === 'tab' && state.view === current) return;  // (landed on the screen that shows)
+    address(current, 'push');
+  }
   window.addEventListener('popstate', () => {
+    stepping++;
+    setTimeout(() => { stepping = Math.max(0, stepping - 1); }, 0);  // (whatever this step opens makes none of its own)
+    const own = hopping.length > 0;
+    if (own) { clearTimeout(hopping.shift()); setTimeout(reconcile, 0); }  // (after every other listener has had its say)
+    if (own || !shell || !shown || !addressed()) return;
+    const state = history.state;
+    if (state && state.vault && state.vault !== 'tab') return;  // (Settings', a layer's, a note's: their own code's)
+    if (current === 'settings') return;  // (Settings' own listener, below, goes back to where it was opened from)
+    const route = state && state.vault === 'tab' && ROUTES[state.view] ? { view: state.view, page: state.page || '' }
+      : routeHere() || { view: 'today' };
+    if (route.view === current) return;
+    V.go(route.view, route.view === 'settings' && route.page ? { page: route.page } : {});
+  });
+  window.addEventListener('popstate', () => {
+    // (1.22: a wide screen's Settings has a screen's step of its own, gone forward into above: it stays)
+    if (history.state && history.state.vault === 'tab' && history.state.view === 'settings') return;
     // A Settings step left behind (Settings left from one of its pages: only the top step was made a dead one) is
     // stepped over, so that Back press does something and the next Settings leaves with one.
-    if (current !== 'settings' && settingsState(history.state)) { history.back(); return; }
+    if (current !== 'settings' && settingsState(history.state)) { stepOver(); return; }
     // (Back from a note shown over Settings lands on Settings' own step: Settings stays.)
     if (current !== 'settings' || settingsState(history.state)) return;
     settingsStep = false;
@@ -1136,10 +1241,14 @@
       let given = null;  // the sign-in handed over (memory only), for Try again / Copy it again
       let state = '';  // '', 'moving', 'slow', 'blocked', 'retry', 'moved', 'used', 'copied'
       const said = V.h('p.moved-done', { role: 'status', hidden: true });
+      // (1.22: a move that didn't work offers Help, js/help.js: what to do next, never a dead end)
+      const helpLink = V.h('button.link-btn.moved-help', { type: 'button', hidden: true, text: 'Help with moving',
+        onclick: () => { if (V.help) V.help.open({ card: 'move' }); } });
       const say = (text, trouble = false) => {
         said.textContent = text;
         said.hidden = !text;
         said.classList.toggle('trouble', trouble);
+        helpLink.hidden = !(trouble && V.help && V.help.forError && V.help.forError({ message: text, move: true }) === 'move');
       };
       const KEEP_DATA = 'If it offers to clear data too, it doesn\'t matter now: your notes are in your cloud.';
       const what = V.moved.vault ? 'Vault' : 'Wefty';
@@ -1314,6 +1423,7 @@
             ? `Same notes, a new name and a new home: ${host}. Your notes are all in your cloud, so nothing is lost.`
             : `Same notes, same everything, at a shorter address. Your notes are all in your cloud, so nothing is lost.` }),
           said,
+          helpLink,
           buttons,
           V.h('ol.steps.moved-steps', {}, steps.filter(Boolean).map((text) => V.h('li', { text }))),
           given && icon ? V.h('p.hint.moved-hint', { text: PASS_WORDS.once }) : null,
@@ -1687,6 +1797,8 @@
     // Every device opens on Today, unless an update (or a device change) kept a place, or a shortcut asks for one.
     // (A kept place from 1.15 is one of its six tabs, all still screens here.)
     let first = 'today';
+    const route = routeHere();  // (1.22: the screen this page's address names)
+    if (route) first = route.view;
     if (kept && typeof kept.tab === 'string' && Object.prototype.hasOwnProperty.call(VIEWS, kept.tab)) first = kept.tab;
     if (asked === '#send') first = 'send';
     if (asked === '#clip') first = 'clips';
@@ -1698,7 +1810,11 @@
     if (askedFirst) first = askedFirst;  // (a tab tapped, or a note's link opened, while this device's notes loaded)
     current = '';  // (so the first screen is opened like any other: Settings gets its step in history)
     shown = true;
-    V.go(first, first === 'settings' && kept && typeof kept.page === 'string' ? { page: kept.page } : {});
+    const page = kept && typeof kept.page === 'string' ? kept.page : route && route.page ? route.page : '';
+    stepping++;  // (the first screen makes no step in history: it's where the page was opened)
+    holding = !route;  // (opened at the app's own address: it stays the address of whatever opens first)
+    try { V.go(first, first === 'settings' && page ? { page } : {}); } finally { stepping--; holding = false; }
+    if (route && route.help && V.help && V.help.open) setTimeout(() => V.help.open(), 0);  // (/help/: Help, over Today)
     // The note that was open goes back too, over whatever screen it was on (a phone opens notes over Today, Share and
     // Chat; a wide screen shows Notes for it), unless a shortcut or a tab tapped meanwhile asked for something else.
     if (kept && kept.note && first !== 'settings' && (first === kept.tab || first === 'notes')
@@ -1836,8 +1952,7 @@
         // or the new one when js/moved.js found it up ('ask': the old installed app). Never the new one before it
         // answers: a link to a site that isn't there yet would be a dead end, while the old address always opens and
         // sends people on once the new one is up.
-        V.config = { ...saved, phoneUrl: moving === 'ask' ? V.moved.address(location.origin + location.pathname)
-          : location.origin + location.pathname };
+        V.config = { ...saved, phoneUrl: moving === 'ask' ? V.moved.address(APP) : APP };
         V.cloud.client(saved);
         let user = await V.cloud.user();
         if (!user && join) {  // a join code: their own name, e-mail and password make their account

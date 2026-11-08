@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <base href="../">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0d17" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.supabase.co http://127.0.0.1:*; media-src 'self' blob: https://*.supabase.co; connect-src 'self' https://wefty.org https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* ws://127.0.0.1:* https://api.anthropic.com https://generativelanguage.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <script src="js/moved.js"></script>
+  <script src="js/theme.js"></script>
+  <title>Wefty</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/wefty-apple-180.png">
+  <link rel="preload" href="fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/Inter-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="booting">
+    <div id="boot"><svg class="wordmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352.93 96.37" role="img" aria-label="Wefty"><defs><linearGradient id="wm-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d50f0"/><stop offset="1" stop-color="#493cdd"/></linearGradient><mask id="wm-m" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><path d="M8 35.5 Q20 30.5 32 35.5 T56 35.5" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/></mask></defs><g class="wm-mark" transform="scale(1.22772)"><path d="M18 0 H46 C56 0 64 8 64 18 V46 C64 56 56 64 46 64 H18 C8 64 0 56 0 46 V18 C0 8 8 0 18 0 Z" fill="url(#wm-g)"/><path d="M8 35.5 Q20 30.5 32 35.5 T56 35.5" fill="none" stroke="#e6e3ff" stroke-width="4.4" stroke-linecap="round"/><path d="M14 20 L23 46 L32 26 L41 46 L50 20" mask="url(#wm-m)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke="#fff" stroke-width="6"/><path d="M23 46 L32 26 L41 46" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke="#fff" stroke-width="6"/></g><path class="wm-text" d="M344 0H604L734 -440C763 -538 789 -641 815 -744C842 -641 868 -538 896 -440L1024 0H1286L1613 -1056H1345L1236 -655C1203 -530 1172 -396 1142 -265C1109 -396 1077 -530 1043 -655L932 -1056H699L587 -655C552 -529 520 -394 487 -263C455 -394 425 -529 392 -655L283 -1056H18ZM2153.4 24C2400.4 24 2596.4 -119 2636.4 -326H2400.4C2371.4 -236 2286.4 -175 2159.4 -175C1989.4 -175 1891.4 -290 1885.4 -462H2649.4V-531C2649.4 -855 2447.4 -1080 2143.4 -1080C1847.4 -1080 1638.4 -848 1638.4 -527C1638.4 -207 1836.4 24 2153.4 24ZM1887.4 -636C1904.4 -787 2001.4 -880 2147.4 -880C2293.4 -880 2391.4 -787 2407.4 -636ZM3358.8 -1056H3143.8V-1168C3143.8 -1254 3175.8 -1287 3261.8 -1287H3358.8V-1490H3211.8C3002.8 -1490 2890.8 -1392 2890.8 -1210V-1056H2700.8V-853H2890.8V0H3143.8V-853H3358.8ZM3962.3 -1056H3747.3V-1344H3494.3V-1056H3310.3V-853H3494.3V-266C3494.3 -85 3595.3 0 3810.3 0H3962.3V-203H3854.3C3772.3 -203 3747.3 -228 3747.3 -303V-853H3962.3ZM4168.7 418H4333.7C4486.7 418 4590.7 339 4653.7 174L5125.7 -1056H4861.7L4668.7 -506C4641.7 -428 4616.7 -350 4592.7 -272C4568.7 -350 4542.7 -428 4516.7 -506L4322.7 -1056H4055.7L4462.7 -6L4423.7 96C4393.7 179 4361.7 213 4293.7 213H4168.7Z" transform="translate(102.15 75.66) scale(0.048828)"/></svg></div>
+  </div>
+  <div id="layers"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="drop-hint" hidden><div><span class="icon big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5v-11M7 9l5-5 5 5M5 20h14"/></svg></span><p>Drop to send to your phone</p></div></div>
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script src="vendor/fsrs.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/reading.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/lock.js"></script>
+  <script src="js/cloud.js"></script>
+  <script src="js/drag.js"></script>
+  <script src="js/organise.js"></script>
+  <script src="js/notes.js"></script>
+  <script src="js/format.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/send.js"></script>
+  <script src="js/clips.js"></script>
+  <script src="js/arrive.js"></script>
+  <script src="js/files.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/profile.js"></script>
+  <script src="js/share.js"></script>
+  <script src="js/settingsui.js"></script>
+  <script src="js/update.js"></script>
+  <script src="js/welcome.js"></script>
+  <script src="js/doors.js"></script>
+  <script src="js/start.js"></script>
+  <script src="js/ink.js"></script>
+  <script src="js/reminders.js"></script>
+  <script src="js/study.js"></script>
+  <script src="js/review.js"></script>
+  <script src="js/learn.js"></script>
+  <script src="js/exams.js"></script>
+  <script src="js/history.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/attachsearch.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/aicards.js"></script>
+  <script src="js/capture.js"></script>
+  <script src="js/chattools.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/notetaker.js"></script>
+  <script src="js/dictation.js"></script>
+  <script src="js/arrivals.js"></script>
+  <script src="js/access.js"></script>
+  <script src="js/pair.js"></script>
+  <script src="js/news.js"></script>
+  <script src="js/today.js"></script>
+  <script src="js/starthere.js"></script>
+  <script src="js/homescreen.js"></script>
+  <script src="js/subs.js"></script>
+  <script src="js/push.js"></script>
+  <script src="js/streak.js"></script>
+  <script src="js/week.js"></script>
+  <script src="js/checkin.js"></script>
+  <script src="js/coach.js"></script>
+  <script src="js/tour.js"></script>
+  <script src="js/showme.js"></script>
+  <script src="js/help.js"></script>
+</body>
+</html>
