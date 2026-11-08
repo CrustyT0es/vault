@@ -17,7 +17,7 @@
 V.files = (() => {
   const PROTOCOL = 'vault-files';
   const HOST_ROW = 'vault-files-host';
-  const MAX = 50 * 1024 * 1024;
+  const MAX = V.FILE_MOST;   // (js/util.js: the one number for the biggest file)
   const FREE_SPACE = 1024 * 1024 * 1024;
   const FRESH = 7 * 60 * 1000;            // a host seen longer ago than this is off, asleep, or Vault isn't running
   const STALE = 90 * 1000;                // a request older than this is refused, never run late
@@ -407,7 +407,7 @@ V.files = (() => {
         if (!path.length) throw refusal('That\'s a folder: open it instead.');
         const dir = await walkHere(path.slice(0, -1));
         const file = await (await dir.getFileHandle(checked(path[path.length - 1]))).getFile();
-        if (file.size > MAX) throw refusal(`${file.name} is ${Math.round(file.size / 1048576)} MB, over the 50 MB the free cloud takes.`);
+        if (file.size > MAX) throw refusal(`${file.name} is ${Math.round(file.size / 1048576)} MB, over the ${V.FILE_MOST_WORDS} Wefty takes.`);
         await V.cloud.sb.from('transfers').update({ extra: { ...(row.extra || {}), files: { ...request, state: 'working', size: file.size } } })
           .eq('id', row.id).is('received_at', null);
         stored = `${V.data.user.id}/phonefiles/${row.id}/${V.storageName(file.name)}`;
@@ -489,7 +489,7 @@ V.files = (() => {
     if (!picked.length) return;
     if (!navigator.onLine) return V.toast(OFFLINE, { kind: 'err' });
     for (const file of picked) {
-      if (file.size > MAX) { V.toast(`${file.name} is over 50 MB, the most the free cloud takes.`, { kind: 'err', ms: 6000 }); continue; }
+      if (file.size > MAX) { V.toast(V.fileOver(file.name), { kind: 'err', ms: 6000 }); continue; }
       // (1.21: the person's own room as the cloud counts it, V.storage; a cloud that doesn't count: the plan's 1 GB)
       const full = V.storage.before();
       if (full) { V.problem(full); break; }
@@ -678,7 +678,7 @@ V.files = (() => {
         V.h('div.files-sheet-head', {},
           thumb ? V.h('span.files-thumb.big', {}, V.h('img', { src: thumb, alt: '' })) : V.h('span.files-icon.big', {}, V.icon(PICTURE.test(name) ? 'image' : 'file')),
           V.h('div.files-sheet-name', {}, name.length > 32 ? V.h('strong', { text: name }) : null, V.h('span', { text: meta }))),
-        big ? V.h('p.hint', { text: 'Over 50 MB: too big to go through your free cloud. Copy it with a USB cable or Phone Link instead.' }) : null,
+        big ? V.h('p.hint', { text: `Over ${V.FILE_MOST_WORDS}: too big for Wefty to send. Copy it with a USB cable or Phone Link instead.` }) : null,
         cloudOnly ? V.h('p.hint', {}, V.icon('cloud'), ' Only in OneDrive online: your PC downloads it first, so it takes a little longer.') : null,
         status,
         V.h('div.files-actions', {}, actions),
@@ -799,7 +799,7 @@ V.files = (() => {
     const main = V.h('button.files-open', { type: 'button', onclick: open, title: name, 'aria-label': dir ? `${name}, folder` : name }, face,
       V.h('span.files-name', { text: name }),
       V.h('span.files-meta', {},
-        V.h('span.files-size' + (size > MAX ? '.too-big' : ''), { text: dir ? '' : V.size(size), title: size > MAX ? 'Over 50 MB: too big to send' : null }),
+        V.h('span.files-size' + (size > MAX ? '.too-big' : ''), { text: dir ? '' : V.size(size), title: size > MAX ? `Over ${V.FILE_MOST_WORDS}: too big to send` : null }),
         V.h('span.files-date', { text: when(mtime) }),
         cloudOnly ? V.h('span.files-cloud', { title: 'Only in OneDrive online' }, V.icon('cloud'), 'Online only') : null));
     const more = menu ? V.iconButton('more', 'More', (event) => menu(event.currentTarget), 'quiet') : V.h('span.files-go', {}, dir ? V.icon('back') : null);
@@ -1207,7 +1207,7 @@ V.files = (() => {
         (s.folders || []).length ? s.folders.map(folderLine) : V.h('p.hint', { text: 'This PC has none of Windows\' usual folders.' })),
       V.h('section.card.settings-card', {}, V.h('h2', { text: 'What your phone can do' }),
         V.h('ul.files-rules', {},
-          V.h('li', { text: 'Look in the folders ticked above, and take copies of files (up to 50 MB each).' }),
+          V.h('li', { text: `Look in the folders ticked above, and take copies of files (up to ${V.FILE_MOST_WORDS} each).` }),
           V.h('li', { text: 'Never change, move or delete anything on this PC.' }),
           V.h('li', { text: 'Never see hidden files, programs\' own folders or password and key files.' }),
           V.h('li', { text: 'Only while this PC is on with Wefty by the clock. You get a notice when the phone takes a file.' })))));

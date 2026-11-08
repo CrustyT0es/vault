@@ -12,7 +12,6 @@ V.editor = (() => {
   const HEADING = V.format.HEADING;   // "# Plan", "## Monday" (and "### ")
   const FENCE = /^\s*```/;            // a ``` code block starts or ends
   const MAX_SIDE = 1600;
-  const MAX_FILE = 50 * 1024 * 1024;  // the cloud's most for one file (vault/schema.sql)
   const MEMO_MOST = 20 * 60;          // a voice memo stops by itself after 20 minutes
   const LET_GO_AFTER = 6000;          // a removed file leaves the cloud once its Undo has gone
   const UNDO_STEPS = 60;              // Undo goes this far back...
@@ -2448,9 +2447,9 @@ V.editor = (() => {
     const list = [...(files || [])];
     if (!list.length) return;
     if (note.locked) return V.toast('Locked notes keep words only, not pictures or files.');
-    const big = list.filter((f) => f.size > MAX_FILE);
-    if (big.length) V.toast(`${big[0].name} is over 50 MB, the most the free cloud takes.`, { kind: 'err', ms: 6000 });
-    const items = list.map((file, i) => ({ file, extra: extras[i] || {} })).filter((item) => item.file.size <= MAX_FILE);
+    const big = list.filter((f) => f.size > V.FILE_MOST);
+    if (big.length) V.toast(V.fileOver(big[0].name), { kind: 'err', ms: 6000 });
+    const items = list.map((file, i) => ({ file, extra: extras[i] || {} })).filter((item) => item.file.size <= V.FILE_MOST);
     if (!items.length) return;
     if (!navigator.onLine) return V.toast('Adding pictures and files needs the internet.', { kind: 'err' });
     adding++;

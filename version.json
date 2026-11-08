@@ -1,8 +1,9 @@
 {
  "format": 1,
- "version": "1.22.0",
+ "version": "1.22.1",
  "min_shell": 1,
  "notes": [
+  "You can now send and attach files up to 500 MB (it was 50 MB).",
   "Help is here: tap your picture, then Help, and search for how to do anything. Every answer has a Show me button that opens the right screen and circles the right button. Ask Chat \"how do I...?\" and it answers from the same Help, with its own Show me.",
   "Add Wefty to your home screen: after your first note, Wefty shows how for your phone or computer (a one-tap button where your browser allows it, and the steps for an iPhone). New accounts get a \"how Wefty works\" note and a first-week checklist on Today.",
   "Every screen has its own web address now (wefty.org/notes, /chat, /settings/ai and so on), so Back and Forward move between tabs, and you can bookmark or share any of them.",
@@ -25,8 +26,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "show": "help",
- "build": "1.22.0-a0be3e10ba13",
+ "build": "1.22.1-4e96ef269163",
  "files": {
   "chat/index.html": {
    "sha256": "5c593bfae66b7e8ba91c6e038f4cca957dfc731a073f24c261be0ac4cee03979",
@@ -177,8 +177,8 @@
    "size": 7173
   },
   "js/capture.js": {
-   "sha256": "64c5cf81e4b9a8ae172ea22b45a47a8957144e593199aab8c125d4f8e52c45f0",
-   "size": 50065
+   "sha256": "974dac786cba291710ace9fd013f1e2570ad49f6697e33e41fd855f17f4ba842",
+   "size": 49956
   },
   "js/chat.js": {
    "sha256": "b281b459adacc632743b0c7f482be185c77b311efe20f57920baac181b22b311",
@@ -197,8 +197,8 @@
    "size": 56736
   },
   "js/cloud.js": {
-   "sha256": "81669904bbb425f79bdaa82f7979a31aa09bc2c74a01f7e94084252ec7c64e3a",
-   "size": 52950
+   "sha256": "7fb37fe77f9908ddaa214a2c52cc54aca214d19de7a91eb5f9687b2126a37ffc",
+   "size": 52967
   },
   "js/coach.js": {
    "sha256": "12b410fcac7e93b0e61cbd87a37da1621184220e1a48a2970e8527c2533e6143",
@@ -221,8 +221,8 @@
    "size": 17479
   },
   "js/editor.js": {
-   "sha256": "dee5f93a19a0a29eccc9978b8d30e3ddcc983497b58b18278e51cba6a108f8be",
-   "size": 214237
+   "sha256": "3c401a9075607cc69b4aea8396f7412f85aa5a0f59cb2f9cdf83bff485244d6c",
+   "size": 214114
   },
   "js/exams.js": {
    "sha256": "8573cdb3499258aa1bed883bfa812e7aa0f03e6c82e0fce0fda953bf19bbc9f4",
@@ -233,8 +233,8 @@
    "size": 24497
   },
   "js/files.js": {
-   "sha256": "c8cf3acab3989819f7839cf38e323e1f122a9d1306bf9225196e56d4d278fd90",
-   "size": 66503
+   "sha256": "c8612e58bc9a8a382404a5f38fd35d43d61ecbdd4ac178df63fdd8ade861b760",
+   "size": 66553
   },
   "js/format.js": {
    "sha256": "8dd3359c918bd1c20e3d7635842edf77b66f9ef31d0d79cb01026fec850e7849",
@@ -253,8 +253,8 @@
    "size": 23277
   },
   "js/ink.js": {
-   "sha256": "3d71e5a536299b551f333d624ae8d631fd9aace36e66f39b8eb374334f8f9878",
-   "size": 46806
+   "sha256": "93ba011b03b04d6c2ceb2a178fe3e3b18a35923e9753e95281115d23fabf192d",
+   "size": 46738
   },
   "js/learn.js": {
    "sha256": "cf4230c797e65ba917460a39419590728fec05822016a0b288966dc2ba1f21f2",
@@ -309,8 +309,8 @@
    "size": 86303
   },
   "js/send.js": {
-   "sha256": "5f4044e7d7e8748601687a47b95e33c32f1eeef2a122e19f4b02b90f9c50938f",
-   "size": 69322
+   "sha256": "5f6a23efc9b5e40ff3aa4eaa6a95fb0abe22885ce9158546ba2e65446eb77ec2",
+   "size": 69301
   },
   "js/settings.js": {
    "sha256": "bab760936d4b3aff16ef0d534b23e3aa0edc998a93bfb5d667079babc13cfb43",
@@ -365,8 +365,8 @@
    "size": 16759
   },
   "js/util.js": {
-   "sha256": "9954e56c5b91d464dc1843b91c1b943720db11393b42833c996ad8374cde85ee",
-   "size": 77478
+   "sha256": "c8df2d0a38202b90d026b4de874d173b5ad7592477884b6680894b4042cadc3c",
+   "size": 78388
   },
   "js/week.js": {
    "sha256": "fc7876e2759528ccc85183afdb8286c4b25cef84418187deb68130d16d8e3c6f",
@@ -445,7 +445,7 @@
    "size": 354330
   },
   "sw.js": {
-   "sha256": "c990510c5fb8d02fe294dbfdd71e6a87d09bfddb5a861ad2f2d8e89f10d35b17",
+   "sha256": "127fa1a77d5ae2dc3bf5dcabf65e955d341329094bc112c241d82f6e987b04de",
    "size": 12908
   },
   "terms.html": {

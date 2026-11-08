@@ -17,7 +17,7 @@
 'use strict';
 
 V.send = (() => {
-  const MAX = 50 * 1024 * 1024;
+  const MAX = V.FILE_MOST;   // (js/util.js: the one number for the biggest file)
   const THUMB_SIDE = 320;          // a preview's longest side, in pixels
   const THUMB_NAME = '_thumb.jpg';
   const THUMB_GUESS = 20000;       // what a preview takes when its row doesn't say
@@ -184,7 +184,7 @@ V.send = (() => {
     if (to && V.DEVICES.includes(to) && to !== V.device) target = to;
     const picked = [...(list || [])];
     const big = picked.filter((f) => f.size > MAX);
-    if (big.length) V.toast(`${big[0].name} is over 50 MB, the most the free cloud takes.`, { kind: 'err', ms: 6000 });
+    if (big.length) V.toast(V.fileOver(big[0].name), { kind: 'err', ms: 6000 });
     for (const file of picked.filter((f) => f.size <= MAX)) {
       const item = { id: V.uuid(), file, name: file.name || 'file', size: file.size,
         mime: file.type || 'application/octet-stream', url: '', thumb: null, w: 0, h: 0, seconds: 0, making: true };
@@ -281,7 +281,7 @@ V.send = (() => {
               sent.get(item.to).push(item.name);
             }
           } catch (error) {
-            if (/50 MB/.test(error.message)) {
+            if (V.fileTooBig(error)) {
               await V.db.del('outgoing', item.id);
               V.emit('outgoing');
               V.problem(error);
@@ -371,7 +371,7 @@ V.send = (() => {
     if (!V.DEVICES.includes(to) || to === V.device) throw new Error('That isn\'t one of your other devices.');
     const picked = [...(list || [])];
     const big = picked.find((f) => f.size > MAX);
-    if (big) throw new Error(`${big.name} is over 50 MB, the most the free cloud takes.`);
+    if (big) throw new Error(V.fileOver(big.name));
     const items = picked.map((file) => ({ id: V.uuid(), file, name: file.name || 'file', size: file.size, to,
       mime: file.type || 'application/octet-stream', url: '', thumb: null, w: 0, h: 0, seconds: 0, making: true }));
     preparing.push(...items);
@@ -1144,7 +1144,7 @@ V.send = (() => {
     if (V.desktop) {
       choose = V.h('button.drop-zone', { type: 'button', onclick: () => picker.click() },
         V.icon('upload', 'big'), V.h('strong', { text: 'Choose files' }),
-        V.h('span', { text: 'or drop them anywhere in Wefty (up to 50 MB each)' }));
+        V.h('span', { text: `or drop them anywhere in Wefty (up to ${V.FILE_MOST_WORDS} each)` }));
     } else {
       // Photos from the gallery, any file, or (on the phone) a photo taken now.
       const photos = V.h('input', { type: 'file', multiple: true, accept: 'image/*,video/*', hidden: true });

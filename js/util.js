@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.22.0';
+V.VERSION = '1.22.1';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -1085,6 +1085,16 @@ V.size = (bytes) => {
   if (bytes < 1000 * 1000 * 1000) return (bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0) + ' MB';
   return (bytes / 1e9).toFixed(2) + ' GB';
 };
+
+/* The biggest single file Wefty takes (1.22.1: 500 MB, it was 50). The one number every screen uses: Send, notes' files and
+   pictures, drawings, Wefty Drive, Snap a page. vault/cloud.py's MAX_FILE is its PC twin, and the cloud's own limits (the
+   Supabase project's global file limit and the "vault" bucket's) have to be at least as big. */
+V.FILE_MOST = 500 * 1024 * 1024;
+V.FILE_MOST_WORDS = (V.FILE_MOST / (1024 * 1024)) + ' MB';
+V.fileOver = (name) => `${name || 'That file'} is over ${V.FILE_MOST_WORDS}, the most Wefty takes.`;
+/* When the cloud itself turns a file down as too big although it is within V.FILE_MOST (its limit isn't raised yet). */
+V.FILE_REFUSED = 'The cloud refused that file as too big. If it is over 50 MB, the cloud\'s limit may not be raised yet.';
+V.fileTooBig = (error) => !!error && /the most Wefty takes|refused that file as too big/.test(String(error.message || error));
 
 const pad = (n) => String(n).padStart(2, '0');
 V.dateText = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

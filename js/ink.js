@@ -24,7 +24,6 @@ V.ink = (() => {
   const MARGIN = 110;
   const SIZES = { pen: [5, 9, 16], hi: [22, 34, 52], eraser: [16, 32, 64] };
   const SIZE_NAMES = ['Thin', 'Medium', 'Thick'];
-  const MOST_FILE = 50 * 1024 * 1024;
   const LET_GO_AFTER = 6000;   // a deleted drawing leaves the cloud once its Undo has gone
   const PREVIEW_WIDTH = 800;
   const PREVIEW_MOST = 4000;   // the preview's longest side, in pixels
@@ -951,7 +950,7 @@ V.ink = (() => {
       let item;
       if (ui.markup) {
         const picture = await flatten();
-        if (picture.blob.size > MOST_FILE) throw new Error('That picture is over 50 MB, the most the free cloud takes.');
+        if (picture.blob.size > V.FILE_MOST) throw new Error(V.fileOver('That picture'));
         const path = base + id + '.jpg';
         await V.cloud.upload(path, picture.blob, { mime: 'image/jpeg' });
         made.push(path);
@@ -962,7 +961,7 @@ V.ink = (() => {
         const data = { format: 1, app: 'vault-ink', w: W, h: Math.round(ui.sheet.h), paper: ui.sheet.paper, strokes: ui.sheet.strokes };
         const packed = await gzip(JSON.stringify(data));
         const shown = await preview(ui.sheet);
-        if (packed.blob.size + shown.blob.size > MOST_FILE) throw new Error('That drawing is too big to save.');
+        if (packed.blob.size + shown.blob.size > V.FILE_MOST) throw new Error('That drawing is too big to save.');
         const path = base + id + (packed.gz ? '.ink.json.gz' : '.ink.json');
         const look = base + id + '.png';
         await V.cloud.upload(path, packed.blob, { mime: packed.gz ? 'application/gzip' : 'application/json' });

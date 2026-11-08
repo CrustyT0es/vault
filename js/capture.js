@@ -31,7 +31,6 @@ V.capture = (() => {
   const QUALITY = 0.85;
   const MOST_PAGES = 10;                 // photos one Snap reads together
   const PDF_MOST = 20 * 1024 * 1024;     // a PDF Read it sends (what Gemini and Claude both take in one request)
-  const FILE_MOST = 50 * 1024 * 1024;    // the cloud's most for one file (vault/schema.sql)
   const TITLE_MOST = 120;
   const FOLDER_KEY = 'vault-capture-folder';  // the folder a capture went into last, on this device
   const CARDS_KEY = 'vault-capture-cards';    // "Also make flash cards" as it was left, on this device
@@ -773,13 +772,13 @@ V.capture = (() => {
   /* The shared things as a note now (its files go up now or when online), then what's next. */
   async function saveShared(t, folderId) {
     const at = new Date().toISOString();
-    const big = t.files.filter((f) => f.size > FILE_MOST);
-    if (big.length) V.toast(`${big[0].name} is over 50 MB, the most the free cloud takes, so it's left out.`, { kind: 'err', ms: 7000 });
+    const big = t.files.filter((f) => f.size > V.FILE_MOST);
+    if (big.length) V.toast(`${V.fileOver(big[0].name).slice(0, -1)}, so it's left out.`, { kind: 'err', ms: 7000 });
     // A picture as a page photo (a screenshot can be read), a PDF as it is (read too, up to PDF_MOST), others as they are.
     const files = [];
     let page = 0;
     for (const f of t.files) {
-      if (f.size > FILE_MOST) continue;
+      if (f.size > V.FILE_MOST) continue;
       let made = null;
       if (isPicture(f)) made = await prepare(f).catch(() => null);
       if (!made) made = { blob: f, type: f.type || V.format.typeOf(f.name) || 'application/octet-stream', name: f.name || 'file' };

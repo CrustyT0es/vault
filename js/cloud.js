@@ -770,7 +770,7 @@ V.cloud = (() => {
         if (xhr.status >= 200 && xhr.status < 300) return resolve();
         let message = 'The upload didn\'t work (' + xhr.status + ').';
         try { message = JSON.parse(xhr.responseText).message || message; } catch (e) { /* not JSON */ }
-        if (/maximum allowed size|too large|payload/i.test(message)) message = 'That file is over 50 MB, the most the free cloud takes.';
+        if (/maximum allowed size|too large|payload/i.test(message)) message = blob && blob.size > V.FILE_MOST ? V.fileOver('That file') : V.FILE_REFUSED;
         // (1.21: turned down because the person's own room for files is full? js/send.js's V.storage asks the cloud)
         if (V.storage && V.storage.isRefusal(xhr.status, message)) {
           V.storage.refused(new Error(message)).then(reject, () => reject(new Error(message)));
