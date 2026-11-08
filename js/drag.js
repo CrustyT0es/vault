@@ -40,6 +40,7 @@ V.drag = (() => {
                      where the list's own top edge is, when something sticks over it; pastTop: how far above that
                      still scrolls it, 88 px unless said)
      mouse           false: a mouse never drags it
+     touch           false: a finger or a pen never drags it (its long press stays the thing's menu: Today's rows)
      handle          a selector inside `el` where a finger drags at once, without holding */
   // While a finger is held on something that can be dragged, nothing starts picking words.
   document.addEventListener('selectstart', (event) => {
@@ -62,6 +63,7 @@ V.drag = (() => {
     // The S Pen's side button (or a Chromebook stylus's) is a right-click, not the browser's long press: it holds at
     // once, as before 1.19.8 (its tap is shorter than HOLD).
     el.addEventListener('contextmenu', (event) => {
+      if (opts.touch === false) return;  // (a finger's long press: the thing's own menu, js/util.js V.contextMenu)
       const pen = event.pointerType === 'pen';
       const finger = !pen && (event.pointerType === 'touch'
         || !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents));
@@ -86,6 +88,7 @@ V.drag = (() => {
     if (active || !event.isPrimary) return;
     const touchy = event.pointerType !== 'mouse';
     if (!touchy && (event.button !== 0 || opts.mouse === false)) return;
+    if (touchy && opts.touch === false) return;
     clearPending();
     const quick = touchy && !!opts.handle && !!event.target.closest(opts.handle);
     pending = { el, opts, id: event.pointerId, touchy, x0: event.clientX, y0: event.clientY, x: event.clientX,

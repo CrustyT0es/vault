@@ -725,6 +725,9 @@ V.organise = (() => {
       } } : null,
       // (js/aicards.js: cards made with AI from everything in it, into a "Study cards" note there)
       V.aiCards ? { label: 'Make flash cards', icon: 'cards', onClick: () => V.aiCards.forFolder(folder.id) } : null,
+      // (1.19.11, js/review.js: its cards resting after a test, back on their own days)
+      V.review && V.review.restingIn && V.review.restingIn(folder.id) ? { label: 'Keep reviewing its flash cards', icon: 'restore',
+        onClick: () => { V.review.keepDeck(folder.id).catch(V.problem); } } : null,
       // (1.19.3: Learn's quiz on its cards, the folders inside it too)
       V.learn && V.learn.hasCards(folder.id) ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe(folder.id) } : null,
       home ? null : { label: 'Move folder to...', icon: 'folder-move', onClick: async () => {
@@ -954,7 +957,7 @@ V.organise = (() => {
   }
 
   return {
-    isArchived, isTemplate, stamped, tagsOf, allTags, parseQuery, foldersFor, matcher, terms, marked, snippet,
+    isArchived, isTemplate, stamped, TAG, tagsOf, allTags, parseQuery, foldersFor, matcher, terms, marked, snippet,
     SORTS, sort, view, setSort: (value) => setPref('vault-sort', value), setView: (value) => setPref('vault-view', value),
     comparator, newFolder, folderSheet, folderMenu, folderItems, chooseFolder, isInbox, move, pin, archive, trash, restore, change,
     DEPTH, TOP, parentId, children, ancestors, pathOf, depthOf, inside, tree, saveFolder, moveFolder, cantMove,

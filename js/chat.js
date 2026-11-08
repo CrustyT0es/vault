@@ -1868,20 +1868,111 @@ V.chat = (() => {
     return img;
   }
 
-  const fileChip = (f, onRemove) => V.h('span.chat-chip' + (f.state === 'up' ? '.going' : ''), { title: f.name },
-    f.kind === 'image' ? pictureEl(f) : V.h('span.chat-chip-kind', { text: f.kind === 'pdf' ? 'PDF' : ending(f.name).toUpperCase() || 'TXT' }),
-    V.h('span.chat-chip-name', { text: f.kind === 'image' ? '' : f.name }),
-    f.state === 'up' ? V.h('div.spinner') : null,
-    onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${f.name}`, onclick: onRemove }, V.icon('x')) : null);
+  /* A file sent with a message (1.19.11): a tap opens it, a picture big here, the rest as the device opens such a file
+     (on the PC, Python saves it in Downloads\Vault and opens it, as a note's files do). */
+  async function openSentFile(f) {
+    try {
+      if (V.desktop) {
+        const saved = (await V.pc.call('saveFile', { id: '', url: await V.cloud.link(f.path), name: f.name || 'file' })).path;
+        if (saved) await V.pc.call('openFile', { path: saved });
+      } else {
+        window.open(await V.cloud.link(f.path), '_blank', 'noopener');
+      }
+    } catch (error) {
+      V.problem(error);
+    }
+  }
+  function viewSentPicture(f) {
+    const img = pictureEl(f);
+    V.sheet({
+      title: f.name || 'Picture', wide: true,
+      content: V.h('div.viewer.chat-viewer', {}, img),
+      actions: [
+        { label: 'Save a copy', icon: 'download', onClick: async () => {
+          try {
+            const url = await V.cloud.link(f.path, { download: f.name || 'picture.jpg' });
+            if (V.desktop) await V.pc.call('saveFile', { id: '', url, name: f.name || 'picture.jpg' });
+            else window.open(url, '_blank', 'noopener');
+          } catch (error) { V.problem(error); }
+          return true;
+        } },
+        { label: 'Done', kind: 'primary' },
+      ],
+    });
+  }
 
-  const noteChip = (n, onRemove) => V.h('span.chat-chip.note', { title: shownTitle(n.title) },
-    V.icon(n.locked ? 'lock' : 'notes'), V.h('span.chat-chip-name', { text: shownTitle(n.title) }),
-    onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${shownTitle(n.title)}`, onclick: onRemove }, V.icon('x')) : null);
+  const fileChip = (f, onRemove) => {
+    const inside = [
+      f.kind === 'image' ? pictureEl(f) : V.h('span.chat-chip-kind', { text: f.kind === 'pdf' ? 'PDF' : ending(f.name).toUpperCase() || 'TXT' }),
+      V.h('span.chat-chip-name', { text: f.kind === 'image' ? '' : f.name }),
+      f.state === 'up' ? V.h('div.spinner') : null];
+    // (sent with a message: the whole chip opens it; in the box it's still being sent, and its x takes it out)
+    if (!onRemove && f.path && f.state !== 'up') {
+      return V.h('button.chat-chip.opens', { type: 'button', title: f.name, 'aria-label': `Open ${f.name}`,
+        onclick: () => (f.kind === 'image' ? viewSentPicture(f) : openSentFile(f)) }, inside);
+    }
+    return V.h('span.chat-chip' + (f.state === 'up' ? '.going' : ''), { title: f.name }, inside,
+      onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${f.name}`, onclick: onRemove }, V.icon('x')) : null);
+  };
+  /* A picture sent with a message: a tap shows it big. */
+  const sentPicture = (f) => (f.path ? V.h('button.chat-sent-pic', { type: 'button', title: f.name, 'aria-label': `Open picture: ${f.name}`,
+    onclick: () => viewSentPicture(f) }, pictureEl(f)) : V.h('div.chat-sent-pic', {}, pictureEl(f)));
+
+  /* A note attached to a message, or waiting in the box (1.19.11, the owner: "allow me to click on the note I have
+     attached to go to that note from the chat"): a tap opens it, as a note opens anywhere (over the chat on a phone,
+     Back comes back here; in Notes' side pane when wide, and Back, or the toast's "Back to Chat", comes back to this
+     chat where it was). One in the Trash says so (with the way there), one deleted for good says that, and one this
+     device hasn't had yet says it will open once Wefty has synced. */
+  let backToChat = false;  // a wide screen's step in history made when a note was opened from here
+  function openAttachedNote(n) {
+    const row = V.data.notes.get(n.id);
+    const title = shownTitle(n.title) || 'That note';
+    if (!row || row._purge) {
+      const synced = V.streak && V.streak.synced ? V.streak.synced() : V.cloud.status === 'synced';
+      if (synced) V.toast(`${title} was deleted, so it can't be opened.`);
+      else V.toast(`${title} isn't on this ${V.wide() ? 'device' : 'phone'} yet. It opens once Wefty has synced${navigator.onLine === false ? ' (you\'re offline)' : ''}.`);
+      return;
+    }
+    if (row.deleted) {
+      V.toast(`${title} is in the Trash.`, { action: 'Show the Trash', onAction: () => { V.go('notes'); V.notes.setFilter('trash'); } });
+      return;
+    }
+    if (V.wide()) {
+      try { history.pushState({ vault: 'from-chat' }, ''); backToChat = true; } catch (error) { backToChat = false; }
+      V.notes.open(n.id);
+      V.toast(`Opened ${shownTitle(V.noteTitle(row)) || 'the note'}`, { action: 'Back to Chat', onAction: () => {
+        if (backToChat && history.state && history.state.vault === 'from-chat') history.back(); else V.go('claude');
+      } });
+      return;
+    }
+    V.notes.open(n.id);
+  }
+  window.addEventListener('popstate', () => {
+    if (!backToChat || (history.state && history.state.vault === 'from-chat')) return;
+    backToChat = false;
+    if (V.tab() === 'notes') V.go('claude');
+  });
+  // (the screen left another way: that step is made a dead one, so a later Back never jumps here)
+  V.on('tab', (tab) => {
+    if (!backToChat || tab === 'notes') return;
+    backToChat = false;
+    if (history.state && history.state.vault === 'from-chat') history.replaceState({ vault: 'from-chat-left' }, '');
+  });
+
+  const noteChip = (n, onRemove) => {
+    const name = shownTitle(n.title);
+    const row = V.data.notes.get(n.id);
+    const locked = !!(n.locked || (row && row.locked));
+    return V.h('span.chat-chip.note', { title: name },
+      V.h('button.chat-chip-open', { type: 'button', 'aria-label': `Open note: ${name}`, dataset: { note: n.id },
+        onclick: () => openAttachedNote(n) }, V.icon(locked ? 'lock' : 'notes'), V.h('span.chat-chip-name', { text: name })),
+      onRemove ? V.h('button.chat-chip-x', { type: 'button', 'aria-label': `Remove ${name}`, onclick: onRemove }, V.icon('x')) : null);
+  };
 
   function turnEl(chat, turn, last) {
     const you = youMenu(chat, turn, V.h('div.chat-you', {},
       (turn.files || []).length || (turn.notes || []).length ? V.h('div.chat-attached', {},
-        (turn.files || []).filter((f) => f.kind === 'image').map((f) => V.h('div.chat-sent-pic', {}, pictureEl(f))),
+        (turn.files || []).filter((f) => f.kind === 'image').map(sentPicture),
         (turn.files || []).filter((f) => f.kind !== 'image').map((f) => fileChip(f)),
         (turn.notes || []).map((n) => noteChip(n))) : null,
       turn.text ? V.h('div.chat-you-line', {}, moreButton('Your message: options'), V.h('div.chat-you-text', { text: turn.text })) : null));

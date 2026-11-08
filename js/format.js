@@ -682,27 +682,42 @@ V.format = (() => {
      text node -> {line, col}), so a tap in the Read view can put the caret on the same spot to write. With `withBlanks`
      a {{blank}} shows as its word, softly underlined. (The editor shows a box's words this way too while it isn't
      being written in: js/editor.js, preview.) */
-  function inline(str, line, col, map, withBlanks = false) {
+  function inline(str, line, col, map, withBlanks = false, tagged = null) {
     const link = (href, kids) => V.h('a.read-link', { href, target: '_blank', rel: 'noopener noreferrer', title: href }, kids);
-    const draw = (list, from, to) => {
+    // #tags (`tagged(name)` makes each one's button: the Read view's, 1.19.11), found in the whole line so "C#" or a
+    // link's #part never counts, and drawn wherever they fall in plain or marked words (never in a link or code: a
+    // [link's words](address) are drawn `inLink`, marks inside them too, as a button inside a link would open both).
+    const tags = tagged && V.organise && V.organise.TAG ? [...str.matchAll(V.organise.TAG)] : [];
+    const draw = (list, from, to, inLink = false) => {
       const out = [];
-      const words = (a, b) => {
-        if (b <= a) return;
+      const text = (a, b) => {
         const node = document.createTextNode(str.slice(a, b));
         map.set(node, { line, col: col + a });
-        out.push(node);
+        return node;
+      };
+      const words = (a, b) => {
+        if (b <= a) return;
+        for (const tag of inLink ? [] : tags) {
+          const end = tag.index + tag[0].length;
+          if (tag.index < a || end > b) continue;
+          if (tag.index > a) out.push(text(a, tag.index));
+          const made = tagged(tag[1]);
+          if (made) { made.append(text(tag.index, end)); out.push(made); } else out.push(text(tag.index, end));
+          a = end;
+        }
+        if (b > a) out.push(text(a, b));
       };
       let at = from;
       for (const piece of list) {
         words(at, piece.start);
-        out.push(made(piece));
+        out.push(made(piece, inLink));
         at = piece.end;
       }
       words(at, to);
       return out;
     };
-    const made = (piece) => {
-      const kids = () => draw(piece.kids, piece.from, piece.to);
+    const made = (piece, inLink) => {
+      const kids = () => draw(piece.kids, piece.from, piece.to, inLink || piece.kind === 'link');
       if (piece.kind === 'code') return V.h('code.read-code-span', {}, inline.text(str.slice(piece.from, piece.to), line, col + piece.from, map));
       if (piece.kind === 'url') return link(piece.href, inline.text(str.slice(piece.from, piece.to), line, col + piece.from, map));
       if (piece.kind === 'link') return link(piece.href, kids());
@@ -719,7 +734,7 @@ V.format = (() => {
 
   /* The whole note (its plain text) as formatted text. `tick(line)` ticks the item on that line of the note and says
      whether it's done now; `blanks` shows {{blanks}} as cards (a note's own Read view). Returns { el, map }. */
-  function render(text, { tick, blanks: withBlanks = false } = {}) {
+  function render(text, { tick, blanks: withBlanks = false, tag = null } = {}) {
     const map = new WeakMap();
     const el = V.h('div.read-body');
     let para = null;
@@ -750,7 +765,7 @@ V.format = (() => {
       const head = HEADING.exec(raw);
       if (head) {
         done();
-        el.append(V.h(`h${head[1].length + 1}.read-heading`, { dataset: { line: i } }, inline(head[2], i, head[1].length + 1, map, withBlanks)));
+        el.append(V.h(`h${head[1].length + 1}.read-heading`, { dataset: { line: i } }, inline(head[2], i, head[1].length + 1, map, withBlanks, tag)));
         return;
       }
       if (!raw.trim()) {
@@ -773,7 +788,7 @@ V.format = (() => {
           list = { ordered, el: V.h(ordered ? 'ol.read-list' : 'ul.read-list') };
           el.append(list.el);
         }
-        const li = V.h('li', { dataset: { line: i, level: String(level) } }, inline(raw.slice(item[0].length), i, item[0].length, map, withBlanks));
+        const li = V.h('li', { dataset: { line: i, level: String(level) } }, inline(raw.slice(item[0].length), i, item[0].length, map, withBlanks, tag));
         if (ordered) li.value = Number(item[3]);  // the number as written
         list.el.append(li);
         return;
@@ -783,13 +798,13 @@ V.format = (() => {
         para = null;
         list = null;
         if (!quote) { quote = V.h('blockquote.read-quote'); el.append(quote); } else quote.append(V.h('br'));
-        quote.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw.slice(said[0].length), i, said[0].length, map, withBlanks)));
+        quote.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw.slice(said[0].length), i, said[0].length, map, withBlanks, tag)));
         return;
       }
       list = null;
       quote = null;
       if (!para) { para = V.h('p.read-para'); el.append(para); } else para.append(V.h('br'));
-      para.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw, i, 0, map, withBlanks)));
+      para.append(V.h('span.read-line', { dataset: { line: i } }, inline(raw, i, 0, map, withBlanks, tag)));
     });
     if (!lines.some((line) => line.trim())) {
       V.clear(el, V.h('p.read-empty', { dataset: { line: String(lines.length - 1) }, text: 'Nothing written yet. Tap here to start.' }));
@@ -809,7 +824,7 @@ V.format = (() => {
           button.setAttribute('aria-label', now ? 'Not done' : 'Done');
         },
       }, V.icon('check'));
-      row.append(button, V.h('span.read-text', {}, inline(box[3], i, raw.length - box[3].length, map, withBlanks)));
+      row.append(button, V.h('span.read-text', {}, inline(box[3], i, raw.length - box[3].length, map, withBlanks, tag)));
       return row;
     }
   }

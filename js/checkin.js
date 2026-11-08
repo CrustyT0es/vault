@@ -125,9 +125,73 @@ V.checkin = (() => {
     return null;
   }
 
+  /* -- "Keep reviewing its flash cards?" (1.19.11, js/review.js's "after a test"): asked once the test is over, after
+     how it went (in the same card), or as a small card of its own on the days after; not answered within REST_DAYS
+     days of first being shown (kept by RV().markAsked, so every device counts from the same day), its cards rest. */
+  const restItem = (id, today = V.today()) => {
+    try { return (RV().restAsk ? RV().restAsk(today) : []).find((r) => r.note.id === id) || null; } catch (error) { console.error(error); return null; }
+  };
+  // (a check-in answered or let go today, its X "Not this one" or Done, isn't asked about again until another day:
+  // Today stays calm)
+  const letGoToday = (note, today) => {
+    const c = checkinOf(note);
+    return !!(c && c.mood && c.at && V.dateText(new Date(c.at)) === today);
+  };
+  const nextRest = (today = V.today()) => {
+    try {
+      return (RV().restAsk ? RV().restAsk(today) : []).find((r) => !letGoToday(V.data.notes.get(r.note.id) || r.note, today)) || null;
+    } catch (error) { console.error(error); return null; }
+  };
+  const restQuestion = (name) => `${TEST_END.test(name) ? name : `“${name}”`} is done. Keep reviewing its flash cards?`;
+  function restLine(item, today) {
+    const names = item.decks.length > 2 ? `${item.decks.slice(0, 2).join(', ')} and more` : item.decks.join(' and ');
+    const starts = item.starts || V.addDays(item.asked || today, RV().REST_DAYS);
+    const when = starts === V.addDays(today, 1) ? 'tomorrow'
+      : V.parseDate(starts).toLocaleDateString([], { weekday: 'long' });
+    return `${plural(item.count, 'flash card')}${names ? ` in ${names}` : ''}. If you don't choose, they rest from ${when}.`;
+  }
+  async function restAnswer(note, keep) {
+    const item = restItem(note.id);
+    const repeats = !!(R() && R().repeatOf && R().repeatOf(note));
+    const wasDone = !!(V.data.notes.get(note.id) || note).done;
+    try {
+      // (the test is behind you: ticked done, as an answer to how it went does; never a repeating one)
+      await RV().setAfter(note.id, keep, (row) => { if (!repeats) row.done = true; });
+    } catch (error) {
+      V.problem(error);
+      return;
+    }
+    if (after && after.id === note.id) after.rest = keep ? 'keep' : 'rest';
+    const n = item ? item.count : 0;
+    const words = keep ? 'They\'ll keep coming back on their own days.'
+      : `${n ? `Its ${plural(n, 'card')} rest` : 'They rest'} until you study them again. Nothing is deleted.`;
+    V.toast(words, { action: 'Undo', onAction: () => {
+      RV().setAfter(note.id, null, (row) => { if (!repeats) row.done = wasDone; }).catch(V.problem)
+        .then(() => { if (after && after.id === note.id) after.rest = 'ask'; if (V.today.redraw) V.today.redraw(); });
+    } });
+    if (V.today.redraw) V.today.redraw();
+  }
+  function restButtons(note) {
+    return V.h('div.checkin-rest-go', { role: 'group', 'aria-label': 'Keep reviewing its flash cards?' },
+      V.button('Keep them coming', { kind: 'tonal', icon: 'cards', key: 'ci:keep', onClick: () => restAnswer(note, true) }),
+      V.button('Stop for now', { key: 'ci:rest', onClick: () => restAnswer(note, false) }));
+  }
+  /* The small card of its own: the question alone. */
+  function restCard(item, today) {
+    const note = item.note;
+    restShown(item, today);
+    return V.h('section.today-sec.today-checkin-sec.today-rest-sec', { dataset: { section: 'rest' } },
+      V.h('div.today-box.today-rest', { dataset: { id: note.id, rest: 'ask' } },
+        V.h('div.checkin-text', {}, V.h('h2', { text: restQuestion(item.name) }), V.h('p', { text: restLine(item, today) })),
+        restButtons(note)));
+  }
+
+  // (the first day the question is shown is kept: "If you don't choose, they rest from <day>" counts from it)
+  const restShown = (item, today) => { if (!item.asked && RV().markAsked) RV().markAsked(item.note.id, today); };
+
   async function answer(note, mood) {
     const words = kindWords(mood, studiedFor(note));
-    after = { id: note.id, mood, words, next: nextUnit(note), name: RV().testName(note) };
+    after = { id: note.id, mood, words, next: nextUnit(note), name: RV().testName(note), rest: restItem(note.id) ? 'ask' : null };
     const repeats = !!(R() && R().repeatOf && R().repeatOf(note));
     try {
       await put(note.id, (row) => {
@@ -165,10 +229,16 @@ V.checkin = (() => {
       const shown = after;
       const face = (MOODS.find((m) => m[0] === shown.mood) || MOODS[0])[1];
       const done = V.button('Done', { kind: shown.next ? 'quiet' : '', key: 'ci:done', onClick: () => { after = null; if (V.today.redraw) V.today.redraw(); } });
+      // (then whether its cards keep coming, while that's still to be answered: its own buttons, above Done)
+      const rest = shown.rest === 'ask' ? restItem(shown.id) : null;
+      if (rest) restShown(rest, V.today());
       return V.h('section.today-sec.today-checkin-sec', { dataset: { section: 'checkin' } },
-        V.h('div.today-box.today-checkin.answered', { dataset: { id: shown.id, mood: shown.mood }, role: 'status' },
-          V.h('div.checkin-top', {}, V.h('span.checkin-big', { text: face, 'aria-hidden': 'true' }),
+        V.h('div.today-box.today-checkin.answered', { dataset: { id: shown.id, mood: shown.mood, ...(rest ? { rest: 'ask' } : {}) },
+          role: rest ? null : 'status' },
+          V.h('div.checkin-top', { role: rest ? 'status' : null }, V.h('span.checkin-big', { text: face, 'aria-hidden': 'true' }),
             V.h('p.checkin-said', { text: shown.words })),
+          rest ? [V.h('div.checkin-text.checkin-rest', {}, V.h('h3', { text: restQuestion(rest.name) }),
+            V.h('p', { text: restLine(rest, V.today()) })), restButtons(note)] : null,
           V.h('div.checkin-go', {}, shown.next ? V.button(shown.next.label, { kind: 'tonal', icon: 'spark', title: shown.next.title, key: 'ci:next',
             onClick: () => { after = null; shown.next.run(); if (V.today.redraw) V.today.redraw(); } }) : null, done)));
     }
@@ -192,8 +262,21 @@ V.checkin = (() => {
         V.h('div.checkin-moods', { role: 'group', 'aria-label': question }, MOODS.map((m) => moodButton(note, m)))));
   }
 
-  V.on('tab', (tab) => { if (tab !== 'today') after = null; });
-  if (V.today && V.today.addSection) V.today.addSection({ id: 'checkin', order: 15, column: 'left', build: card });
+  /* Today's small card of its own for "Keep reviewing its flash cards?": once how it went isn't being asked or shown
+     (a phone shows it after the other cards that come and go, js/today.js ONE_OFFS). */
+  function restSection() {
+    if (after || !V.streak || !V.streak.synced()) return null;
+    const today = V.today();
+    if (due(today)) return null;
+    const item = nextRest(today);
+    return item ? restCard(item, today) : null;
+  }
 
-  return { due, studiedFor, kindWords, nextUnit, answer, letGo, card, isTest, ASK_DAYS };
+  V.on('tab', (tab) => { if (tab !== 'today') after = null; });
+  if (V.today && V.today.addSection) {
+    V.today.addSection({ id: 'checkin', order: 15, column: 'left', build: card });
+    V.today.addSection({ id: 'rest', order: 15.5, column: 'left', build: restSection });
+  }
+
+  return { due, studiedFor, kindWords, nextUnit, answer, letGo, card, isTest, restAnswer, ASK_DAYS };
 })();

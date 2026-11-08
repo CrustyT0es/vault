@@ -2526,10 +2526,14 @@ V.editor = (() => {
           { label: 'Remove', icon: 'trash', danger: true, onClick: () => removeFile(a) },
         ], { label: 'Drawing: options' }) : made;
       }
-      const img = V.h('img', { alt: a.name || 'Picture', loading: 'lazy' });
+      const img = V.h('img', { alt: a.name || 'Picture', loading: 'lazy', draggable: 'false' });
       V.cloud.blob(a.path).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.classList.add('broken'));
-      return V.contextMenu(V.h('button.thumb', { type: 'button', onclick: () => viewPicture(a, img), 'aria-label': 'Open picture' }, img),
-        () => pictureItems(a, img), { label: `${a.name || 'Picture'}: options` });
+      // (only a mouse drags it out, as the browser's own picture drag: a finger's hold stays its menu, 1.19.8)
+      const mouse = (event) => { img.draggable = event.pointerType === 'mouse'; };
+      const thumb = V.h('button.thumb', { type: 'button', onclick: () => viewPicture(a, img), 'aria-label': 'Open picture',
+        onpointerdown: mouse, onpointerenter: mouse, ondragstart: (event) => dragPictureOut(event, a, img),
+        ondragend: () => { draggingOut = null; } }, img);
+      return V.contextMenu(thumb, () => pictureItems(a, img), { label: `${a.name || 'Picture'}: options` });
     }));
     parts.pictures.hidden = !list.length && !going.length;
     drawFiles();
@@ -2542,6 +2546,38 @@ V.editor = (() => {
     V.clear(parts.files, list.map(fileRow), going);
     parts.files.hidden = !list.length && !going.length;
   }
+
+  /* A picture dragged out of the note with a mouse (1.19.11) onto the Files app, the desktop or a folder. It is the
+     browser's own picture drag (the picture's file, its address and a copy of it as a web page's picture: what
+     Chrome puts in for any picture dragged out, and what other programs read), plus Chrome's DownloadURL with the
+     picture's own name and type (Windows and macOS Chrome save that one under its name). Which of those a Chromebook's
+     Files app, the PC app (Qt WebEngine) or Windows' Explorer really takes was never tried on the real ones.
+     Dropped anywhere in Wefty itself it does nothing (see refuseOwnPicture): never its blob: address typed into the
+     note's words or a box, never the picture added to the note again or sent (the drop anywhere hint, js/start.js). */
+  let draggingOut = null;  // the thumb a picture is being dragged out of
+  function dragPictureOut(event, a, img) {
+    if (event.target !== img) return;
+    if (!img.src || img.classList.contains('broken')) { event.preventDefault(); return; }
+    draggingOut = event.currentTarget;
+    const dt = event.dataTransfer;
+    if (!dt) return;
+    const type = /^image\/[\w.+-]+$/.test(a.mime || '') ? a.mime : 'image/jpeg';
+    const name = String(a.name || '').replace(/[:\\/\r\n]+/g, ' ').trim() || (type === 'image/png' ? 'picture.png' : 'picture.jpg');
+    try {
+      dt.setData('DownloadURL', `${type}:${name}:${img.src}`);
+    } catch (error) { /* a browser that doesn't take it: its own picture drag goes on */ }
+  }
+
+  function refuseOwnPicture(event) {
+    if (!draggingOut) return;
+    if (!draggingOut.isConnected) { draggingOut = null; return; }  // (its note redrawn: its dragend may never come here)
+    event.stopPropagation();
+    if (event.type === 'dragenter') return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+  }
+  for (const type of ['dragenter', 'dragover', 'drop']) document.addEventListener(type, refuseOwnPicture, true);
+  document.addEventListener('pointerdown', () => { draggingOut = null; }, true);  // (a drag long over)
 
   /* A picture's menu (1.19.1: a right-click, a long press, the menu key): what its viewer does, and Remove (with an
      Undo, as a file's x). */
@@ -3010,7 +3046,10 @@ V.editor = (() => {
   }
 
   function drawRead() {
-    const shown = V.format.render(serialize(), { tick: tickLine, blanks: true });
+    // (a #tag is a button: a tap shows the notes with it, 1.19.11; never in a locked note's words)
+    const tag = note.locked ? null : (name) => V.h('button.read-tag', { type: 'button', title: `Show notes with #${name}`,
+      onclick: () => V.notes.showTag(name) });
+    const shown = V.format.render(serialize(), { tick: tickLine, blanks: true, tag });
     readMap = shown.map;
     // Quick read's pieces (never a locked note's), each keeping its place in the note for a tap (js/reading.js), and the
     // reading ruler (shown while dyslexia-friendly text has it on)

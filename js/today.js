@@ -44,8 +44,9 @@
      shows one at a time, the first in ONE_OFFS with something to say (the others wait for a later draw), never above
      the picked day (PHONE_ORDER), and beside a new person's Start here only the check-in, as it's asked on one day only.
      Wide shows each where its part put it. */
-  const ONE_OFFS = ['checkin', 'push', 'week'];
-  const PHONE_ORDER = { checkin: 22, push: 42, week: 43 };
+  // (1.19.11, js/checkin.js: "Keep reviewing its flash cards?" after a test, last: it's asked on 3 days)
+  const ONE_OFFS = ['checkin', 'push', 'week', 'rest'];
+  const PHONE_ORDER = { checkin: 22, push: 42, week: 43, rest: 22 };
   const MOST_SHOWN = 5;    // rows of the picked day before "Show all N" (1.19.2: never a page-long list)
   const MOST_PER_NOTE = 5; // a note's to-dos on its day before "+N more"
   const MOST_WRITTEN = 4;  // notes written on a day gone by, before "+N"
@@ -860,8 +861,30 @@
         chip(row.chip)),
       quiz ? quizButton('test:' + note.id, row.text) : null,
       moreButton(row.key, row.text, () => noteActions(note, { key: `m:${row.key}` })));
-    return withMenu(li, () => [{ label: ticks, icon: 'check', onClick: onTick }, { sep: true }, ...noteActions(note, { key: `m:${row.key}` })],
+    const menu = withMenu(li, () => [{ label: ticks, icon: 'check', onClick: onTick }, { sep: true }, ...noteActions(note, { key: `m:${row.key}` })],
       `${row.text}: options`);
+    return row.done || test ? menu : rowDrag(menu, note, row.text);
+  }
+
+  /* A to-do's row dragged with a mouse (a Chromebook, the PC: 1.19.11) onto a day in the strip: its note moved to that
+     day, with an Undo (moveTo), as its ⋯'s Tomorrow and Pick a day... do. Not a test (what it covers is planned up to
+     its day) or a repeating note (only its next one moves, in its sheet); a finger's long press stays the row's menu. */
+  function rowDrag(li, note, text) {
+    if (!V.drag || isTest(note) || (R().repeatOf && R().repeatOf(note))) return li;
+    return V.drag.source(li, {
+      touch: false,
+      data: () => (latest(note.id) ? { label: text, icon: R().icon('calendar') } : null),
+      resolve: (under) => {
+        const cell = under && under.closest ? under.closest('.today-week-days .wday[data-day]') : null;
+        const now = latest(note.id);
+        if (!cell || !root || !root.contains(cell) || !now) return null;
+        const day = cell.dataset.day;
+        if (day < V.dateText(new Date())) return { ok: false, el: cell, into: true, why: 'That day has gone by: pick today or a day after it.' };
+        if (R().dayOf(now) === day) return null;  // (its own day)
+        return { ok: true, el: cell, into: true, run: () => moveTo(note.id, day) };
+      },
+      scroll: () => { const strip = root && root.querySelector('.today-week-days'); return strip ? [{ el: strip, axis: 'x' }] : []; },
+    });
   }
 
   /* A note on one of the coming days (or a day gone by): ticked from here (its first to-do, or the note), like Today's. */
@@ -1073,6 +1096,24 @@
 
   /* A day from another part (js/util.js V.contextMenu's day menu, a reminder): picked, in sight, the keyboard there. */
   const goToDay = (day) => pick(day, { reveal: true, focus: true });
+
+  /* The counts beside the greeting (wide), each a way to what it counts. */
+  function showToday() {
+    const today = V.dateText(new Date());
+    const strip = root && root.querySelector('.today-week-days');
+    if (strip) stripTo(strip, today, true);
+    goToDay(today);
+  }
+  function studyCards() {
+    if (cardsDue()) RV().start('all'); else toNotes('review');
+  }
+  function showTests() {
+    const sec = root && root.querySelector('.today-sec[data-section="tests"]');
+    if (!sec) return;
+    sec.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    const first = sec.querySelector('.today-test button');
+    if (first) first.focus({ preventScroll: true });
+  }
 
   /* A strip day's own menu (a right-click or a long press, where V.contextMenu is there): it, a note due then, Upcoming. */
   function dayMenu(day, today) {
@@ -1525,16 +1566,20 @@
         const week = at.plans.filter((p) => p.days <= 6 - offset).length;
         const cards = at.list.filter((c) => RV().isDue(c, at)).length;
         const todo = openCount(due || []);
-        if (week) counts.push(['target', `${plural(week, 'test')} this week`]);
-        if (cards) counts.push(['cards', plural(cards, 'card')]);
-        if (todo) counts.push(['checklist', `${todo} to do today`]);
+        if (week) counts.push(['target', `${plural(week, 'test')} this week`, 'tests', 'Show the tests coming up', showTests]);
+        if (cards) counts.push(['cards', plural(cards, 'card'), 'cards', `Study ${plural(cards, 'card')} due today`, studyCards]);
+        if (todo) counts.push(['checklist', `${todo} to do today`, 'todo', `Show today's ${todo} to do`, showToday]);
       } catch (error) { console.error(error); }
     }
     // (the study streak, "🔥 6 days", js/streak.js: first among the counts when wide, else beside the greeting)
     const streak = V.streak ? V.streak.chip() : null;
+    // Each count is a way to what it counts (1.19.11, the owner: "if everything that shows up can be clickable"): the
+    // tests below, the cards due (as the Flash cards tile), today's to-dos in the picked day.
     const greet = V.h('div.today-greet', {},
       V.h('div.today-hello', {}, V.h('h1', { text: greeting(now) }), V.h('p.today-date', { text: date })),
-      counts.length ? V.h('p.today-counts', {}, streak, counts.map(([name, text]) => V.h('span', {}, name === 'cards' ? R().icon('cards') : V.icon(name), text))) : streak);
+      counts.length ? V.h('p.today-counts', {}, streak, counts.map(([name, text, key, said, go]) => V.h('button.today-count', {
+        type: 'button', title: said, 'aria-label': `${text}. ${said}`, onclick: go, dataset: { key: `count:${key}` },
+      }, name === 'cards' ? R().icon('cards') : V.icon(name), V.h('span', { text })))) : streak);
     // The days at the top, on every device since 1.17 (a phone too), once there's something to show in them.
     // (the day the strip was at, put back after the redraw unless the day has turned over since; the strip's title
     // starts on its week)
@@ -1585,7 +1630,7 @@
   const menuOpen = () => !!(root && root.querySelector('[aria-expanded="true"]'));  // (a row's ⋯ menu too, 1.19.2)
   const redrawSoon = V.debounce(() => {
     if (!showing() || covered()) return;
-    if (performance.now() - stripMoved < 700 || menuOpen()) { redrawSoon(); return; }
+    if (performance.now() - stripMoved < 700 || menuOpen() || (V.drag && V.drag.busy())) { redrawSoon(); return; }
     redraw();
   }, 300);
 

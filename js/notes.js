@@ -608,7 +608,23 @@ V.notes = (() => {
     if (event.shiftKey) return pickRange(note.id);
     if (picking || event.ctrlKey || event.metaKey) return toggle(note.id);
     if (filter === 'trash') return trashMenu(note);
+    if (chipTap(event, note)) return;
     open(note.id);
+  }
+
+  /* A tap on one of a card's chips (1.19.11, the owner: "if everything that shows up can be clickable"): its folder
+     opens that folder, a #tag its notes, its date or reminder the date sheet, a test's countdown what's on the test.
+     Anywhere else on the card opens the note, as ever. (A card is one button, so these are a pointer's shortcuts: the
+     keyboard reaches the same through the side list's folders and tags, and the card's menu's reminder item.) Says
+     whether it took the tap. */
+  function chipTap(event, note) {
+    const chip = event.target && event.target.closest ? event.target.closest('.card-go') : null;
+    if (!chip || !event.currentTarget.contains(chip) || !event.detail) return false;  // (Enter or Space: the note)
+    if (chip.dataset.folder && V.data.folders.has(chip.dataset.folder)) { setFilter(chip.dataset.folder); return true; }
+    if (chip.dataset.tag) { setFilter('tag:' + chip.dataset.tag); return true; }
+    if (chip.classList.contains('exam-tag') && V.exams && V.exams.picker) { V.exams.picker(note.id); return true; }
+    if (chip.classList.contains('due') && V.reminders && V.reminders.edit) { V.reminders.edit(note.id); return true; }
+    return false;
   }
 
   /* -- "more options" (1.19.1): a note's menu wherever it shows
@@ -867,6 +883,17 @@ V.notes = (() => {
     if (parts) showHelp();
   }
 
+  /* A list of Notes from elsewhere (a #tag in a note's Read view, 1.19.11): a phone's open note closes first, wide it
+     stays open beside the list. */
+  function showList(value) {
+    if (V.editor.covering()) V.editor.close();
+    if (V.tab() !== 'notes') V.go('notes');
+    setFilter(value);
+  }
+
+  /* A #tag's key, as tagsOf makes it (js/organise.js). */
+  const tagKeyOf = (name) => String(name || '').slice(0, 60).replace(/[-_]+$/, '').toLowerCase();
+
   function tagLabel(key) {
     const tag = O.allTags(live()).find((t) => t.key === key);
     return '#' + (tag ? tag.name : key);
@@ -1012,16 +1039,18 @@ V.notes = (() => {
       // The note-taker is writing into it right now (js/notetaker.js): a tap opens its live screen, not the note.
       V.notetaker && V.notetaker.listeningTo && V.notetaker.listeningTo() === note.id
         ? V.h('span.nt-card-chip', {}, V.h('span.nt-card-dot', { 'aria-hidden': 'true' }), V.h('span', { text: 'Listening' })) : null,
-      showFolder && folder ? V.h('span.tag', {}, folderBadge(folder), V.h('span', { text: folder.name })) : null,
+      showFolder && folder ? V.h('span.tag.card-folder.card-go', { title: `Open ${folder.name}`, dataset: { folder: folder.id } },
+        folderBadge(folder), V.h('span', { text: folder.name })) : null,
       O.isTemplate(note) ? V.h('span.tag', {}, V.icon('notes'), V.h('span', { text: 'Template' })) : null,
-      due ? V.h('span.due.' + (due.cls || 'later'), {}, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
+      due ? V.h('span.due.card-go.' + (due.cls || 'later'), { title: 'Change the date' }, V.icon(due.cls === 'done' ? 'check' : 'calendar'), shortDue(due.label)) : null,
       V.reminders ? V.reminders.cardChip(note) : null,
       V.exams ? V.exams.cardChip(note) : null,  // a test's countdown
       prog ? V.h('span.progress', {}, V.h('span.bar', {}, V.h('i', { style: { width: (100 * prog.done / prog.all) + '%' } })),
         V.h('span', { text: `${prog.done}/${prog.all}` })) : null,
       pictures ? V.h('span.tag', {}, V.icon('image'), String(pictures)) : null,
       look.terms.length && V.attachSearch ? V.attachSearch.chip(note, look.terms) : null,  // "in a photo" / "in a PDF"
-      tags.length ? V.h('span.note-tags', {}, tags.slice(0, 3).map((t) => V.h('span.note-tag', {}, O.marked('#' + t.name, look.terms))),
+      tags.length ? V.h('span.note-tags', {}, tags.slice(0, 3).map((t) => V.h('span.note-tag.card-go', { title: `Show notes with #${t.name}`,
+        dataset: { tag: t.key } }, O.marked('#' + t.name, look.terms))),
         tags.length > 3 ? V.h('span.note-tag.more', { text: `+${tags.length - 3}` }) : null) : null,
       V.h('span.when', { text: filter === 'trash' ? 'Deleted ' + V.ago(note.deleted_at) : V.ago(edited(note)) }))), note), note);
   }
@@ -1048,9 +1077,13 @@ V.notes = (() => {
       .sort((a, b) => a.due.localeCompare(b.due));
     if (!pinned.length && !soon.length) return null;
     const rest = list.filter((n) => !n.pinned && !soon.includes(n));
-    const part = (title, notes, fold = false) => (notes.length ? [V.h('h2.list-section', {}, V.h('span', { text: title }),
+    // (Pinned and Due soon are each a way to the whole list they come from: Pinned, Upcoming)
+    const part = (title, notes, fold = false, to = '', said = '') => (notes.length ? [V.h('h2.list-section', {},
+      to ? V.h('button.list-go', { type: 'button', title: said, 'aria-label': `${title}: ${said}`, dataset: { to },
+        onclick: () => setFilter(to) }, V.h('span', { text: title }), V.icon('next', 'list-go-chev')) : V.h('span', { text: title }),
       V.h('span.count', { text: String(notes.length) })), fold ? folded(notes, make) : notes.map(make)] : null);
-    return [part('Pinned', pinned), part('Due soon', soon), part('Other notes', rest, true)];
+    return [part('Pinned', pinned, false, 'pinned', 'Show all pinned notes'), part('Due soon', soon, false, 'due', 'Open Upcoming'),
+      part('Other notes', rest, true)];
   }
 
   /* A long list shows its first few notes, then folds the rest away by age (by "More notes" when sorted another way):
@@ -1529,5 +1562,6 @@ V.notes = (() => {
   });
 
   return { render, again, create, chooseTemplate, ensureStarterFolders, blankNote, open, search, folders, inbox, setFilter, plain,
+    showList, showTag: (name) => showList('tag:' + tagKeyOf(name)),
     folderBadge, noteItems, emptyTrash, picking: () => picking, showing: () => showing() };
 })();

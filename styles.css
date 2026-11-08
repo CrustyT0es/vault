@@ -765,6 +765,20 @@ textarea.field { resize: vertical; min-height: 48px; }
 .list-section { margin: 14px 4px 2px; }
 .list-section:first-child { margin-top: 4px; }
 .list-section .count { margin-left: auto; font-weight: 500; }
+/* Pinned and Due soon above All notes' cards: each opens its whole list (1.19.11) */
+.list-go {
+  display: inline-flex; align-items: center; gap: 2px; margin: -6px -6px -6px -6px; padding: 6px; border: 0;
+  border-radius: var(--r-sm); background: none; color: inherit; font: inherit;
+}
+.list-go .list-go-chev { width: 14px; height: 14px; opacity: .7; }
+.list-go:hover { color: var(--text); background: var(--surface-2); }
+@media (pointer: coarse) { .list-go { min-height: 36px; margin: -9px -6px; } }
+/* A card's chips (its folder, #tags, date, reminder, a test's countdown): each a tap of its own (js/notes.js chipTap) */
+button.card .card-go { cursor: pointer; border-radius: var(--r-sm); }
+@media (hover: hover) {
+  button.card .tag.card-go:hover > span:last-child, button.card .note-tag.card-go:hover { text-decoration: underline; text-underline-offset: 2px; }
+  button.card .due.card-go:hover, button.card .exam-tag.card-go:hover { box-shadow: inset 0 0 0 1px currentColor; }
+}
 .list-bar { display: flex; justify-content: flex-end; }
 
 button.card {
@@ -1343,6 +1357,8 @@ button.send-to-row:active { background: var(--surface-2); }
   justify-self: start; margin-top: 4px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2);
   color: var(--text-2) !important; font: 500 13px/18px var(--font) !important;
 }
+button.sync-chip { border: 0; cursor: pointer; }
+button.sync-chip:hover { box-shadow: inset 0 0 0 1px currentColor; }
 .sync-chip[data-state=offline], .sync-chip[data-state=held] { background: var(--warn-soft); color: var(--warn) !important; }
 .sync-chip[data-state=error], .sync-chip[data-state=asleep], .sync-chip[data-state=signed-out] { background: var(--danger-soft); color: var(--danger) !important; }
 
@@ -1689,6 +1705,12 @@ h4.read-heading { font: 600 16px/26px var(--font); color: var(--text-2); }
 .read-check.done .read-text { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 .read-link { color: var(--accent-ink); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
 .read-link:hover { text-decoration-color: currentColor; }
+/* A #tag in the Read view: a button that shows the notes with it, drawn as the words it is (1.19.11) */
+.read-tag {
+  display: inline; margin: 0; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--accent-ink);
+  font: inherit; letter-spacing: inherit; line-height: inherit; text-align: inherit; white-space: normal; cursor: pointer;
+}
+.read-tag:hover { text-decoration: underline; text-underline-offset: 3px; }
 .read-body u, .block-preview u { text-underline-offset: 3px; }
 .read-body s, .block-preview s { text-decoration-color: color-mix(in srgb, currentColor 75%, transparent); }
 mark.read-hl { padding: 0 2px; margin: 0 -2px; border-radius: 3px; background: var(--highlight); color: inherit; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
@@ -1856,6 +1878,9 @@ html.dragging, html.dragging * { cursor: grabbing !important; -webkit-user-selec
 :is(.nav-item, .chip, .crumb, .subfolder, .arrange-row, .arrange-end).drop-no {
   background: var(--danger-soft); border-color: var(--danger); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger);
 }
+/* Today's to-dos dragged onto a day of the week strip (1.19.11, a mouse) */
+.wday.drop-on { background: var(--accent-soft); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.wday.drop-no { background: var(--danger-soft); border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
 /* things a finger holds to drag: never their words selected or the phone's own menu */
 :is(.chips .chip, .folders .nav-item, .subfolder, .arrange-row) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 /* On a phone (and a narrow window) the chips stay at the top of the list while something's dragged, so a folder is
@@ -3009,6 +3034,12 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .today-date { margin: 4px 0 0; color: var(--muted); font: 500 14px/20px var(--font); }
 .today-counts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; color: var(--text-2); font: 500 14px/20px var(--font); }
 .today-counts > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.today-count {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; margin: -4px -6px; padding: 4px 6px;
+  border: 0; border-radius: var(--r-sm, 8px); background: none; color: inherit; font: inherit;
+}
+.today-count:hover { color: var(--text); background: var(--surface-2); }
+.today-count:hover .icon { color: var(--accent-ink, var(--accent)); }
 .today-counts .icon { width: 16px; height: 16px; color: var(--muted); }
 /* the thread under the greeting: the logo's wave, over and over (one of its four places) */
 .today-line {
@@ -3707,6 +3738,22 @@ button.today-row-text {
 .nt-layer[data-tabs=below] { --safe-bottom: 0px; }
 .nt-bg { display: flex; align-items: flex-start; gap: 8px; flex: none; margin: 0; color: var(--text-2); font: 500 13.5px/19px var(--font); }
 .nt-bg .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--accent-ink); }
+/* Pocket mode (js/notetaker.js pocket): the live screen's offer on a phone, and the black screen itself. Pure black
+   (an OLED screen's pixels off) whatever the theme, one faint line that's still readable up close, nothing a pocket's
+   touches can scroll, zoom, select or open a menu on. Over everything, toasts too. */
+.nt-pocket-tip { display: flex; align-items: center; gap: 12px; flex: none; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.nt-pocket-tip p { flex: 1; min-width: 0; margin: 0; color: var(--text-2); font: 400 13px/18px var(--font); }
+.nt-pocket-tip .btn { flex: none; }
+.nt-pocket {
+  position: fixed; inset: 0; z-index: 1000; background: #000; outline: none; cursor: none;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overscroll-behavior: none;
+}
+.nt-pocket-text { position: absolute; left: 16px; right: 16px; top: var(--pocket-y, 46%); text-align: center; pointer-events: none; }
+.nt-pocket-line { margin: 0; color: #5f5f5f; font: 500 14px/20px var(--font); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.nt-pocket-note { margin: 8px auto 0; max-width: 320px; color: #5f5f5f; font: 400 13px/18px var(--font); overflow-wrap: anywhere; }
+.nt-pocket-note:empty { display: none; }
+.nt-pocket-wake { top: 0; left: 0; padding: 0; border: 0; margin: 0; min-width: 0; min-height: 0; }  /* (.sr-only: for a screen reader) */
+@media (forced-colors: active) { .nt-pocket { background: Canvas; } .nt-pocket-line, .nt-pocket-note { color: CanvasText; } }
 
 /* -- listening with its screen hidden (js/notetaker.js drawStrip): the "call in progress" bar across the top. It sits
    in #layers over the full-screen note (55), under the note-taker (58), sheets and menus (60) and toasts. Under 900 px
@@ -4007,8 +4054,20 @@ html:has(#app.gate) .nt-strip { display: none; }
 }
 .chat-chip-name { min-width: 0; padding-right: 6px; color: var(--text-2); font: 500 13px/18px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-chip-name:empty { display: none; }
-.chat-chip.note { padding-left: 10px; }
-.chat-chip.note > .icon { width: 16px; height: 16px; color: var(--muted); }
+.chat-chip.note { padding-left: 0; }
+/* (1.19.11: a note, file or picture sent with a message opens with a tap) */
+.chat-chip-open {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 100%; padding: 0 0 0 10px; border: none;
+  border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.chat-chip-open .icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
+button.chat-chip.opens { color: inherit; font: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) {
+  .chat-chip-open:hover .chat-chip-name, button.chat-chip.opens:hover .chat-chip-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+  button.chat-chip.opens:hover, .chat-chip.note:has(.chat-chip-open:hover) { border-color: var(--line-strong); }
+}
+button.chat-sent-pic { display: block; padding: 0; border: none; border-radius: 14px; background: none; cursor: zoom-in; }
+.chat-viewer img { max-height: 70vh; }
 .chat-chip.going { opacity: .7; }
 .chat-chip .spinner { margin-right: 6px; }
 .chat-chip-x {
@@ -4536,6 +4595,14 @@ html[data-quick-plain] :is(.quick-lead, .blank-shade .shade-q) { background: non
 .checkin-go { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .checkin-go .btn { min-height: 44px; white-space: normal; text-align: center; }
 @media (max-width: 419px) { .checkin-go .btn { flex: 1 1 auto; } }
+/* After a test (1.19.11): whether its flash cards keep coming. On its own, or under how it went. */
+.today-rest { padding: 14px 16px; }
+.today-sec.today-rest-sec { margin-top: 20px; }
+.checkin-text.checkin-rest { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.checkin-text h3 { margin: 0; color: var(--text); font: 600 15px/21px var(--font); overflow-wrap: anywhere; }
+.checkin-rest-go { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.checkin-rest-go .btn { min-height: 44px; white-space: normal; text-align: center; }
+@media (max-width: 419px) { .checkin-rest-go .btn { flex: 1 1 0; } }
 
 /* The week's picture in its sheet (js/week.js): the picture itself, which week, a first name or not. */
 .week-frame { display: grid; place-items: center; margin: 4px 0 12px; }

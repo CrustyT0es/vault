@@ -213,10 +213,8 @@ V.review = (() => {
      and ones FSRS would bring back after it that haven't been gone over since the plan began), about how many a day
      that is (`perDay`), and the ones pulled forward for today (`today`, card ids): a share that keeps the day's
      covered reviews at about left / days. */
-  function planFor(note, list = null, today = V.today()) {
-    if (!note || !note.due || note.done || !studied(note) || note.due < today) return null;
-    const covers = coversOf(note);
-    if (!covers.length) return null;
+  /* What a test covers, as a test on a card: { folders (with the folders inside them), tags, covered }. */
+  function coverage(covers) {
     const folders = new Set();
     const tags = new Set();
     for (const item of covers) {
@@ -226,6 +224,14 @@ V.review = (() => {
     const tagged = new Map();  // note id -> whether it has one of the tags
     const covered = (c) => folders.has(c.folder) || (tags.size > 0 && (tagged.has(c.note) ? tagged.get(c.note)
       : tagged.set(c.note, O.tagsOf(V.data.notes.get(c.note) || {}).some((t) => tags.has(t.key))).get(c.note)));
+    return { folders, tags, covered };
+  }
+
+  function planFor(note, list = null, today = V.today()) {
+    if (!note || !note.due || note.done || !studied(note) || note.due < today) return null;
+    const covers = coversOf(note);
+    if (!covers.length) return null;
+    const { folders, tags, covered } = coverage(covers);
     const cards = (list || all()).filter(covered);
     const day = note.due;
     const days = daysBetween(today, day);
@@ -257,14 +263,83 @@ V.review = (() => {
   let cache = null;
   V.on('data', (table) => { if (table === 'notes' || table === 'folders') version++; });
 
-  /* Every card, the tests coming up (soonest first) and the cards pulled forward for them on `today`. */
+  /* -- after a test (1.19.11; the owner: "flashcards stay on the dashboard even after the test ends")
+
+     Once a test's day has passed its plan is over (planFor gives null: nothing is pulled forward, no countdown). Its
+     cards still have their own days, though, and cramming for it left many of them due again soon, so they kept filling
+     Today. The day after, Today asks once (js/checkin.js): "Biology unit test is done. Keep reviewing its flash cards?"
+     "Keep them coming" leaves them on their own days; "Stop for now" lets them rest: they're not due anywhere (Today,
+     the Flash cards page's count, Study) until they're studied again or kept from their deck's or folder's menu. Not
+     answered within REST_DAYS days, they rest too. Nothing is deleted, and their FSRS state is never touched.
+
+     Kept on the test note, quietly (js/cloud.js QUIET_KEYS): extra.after_test = { day: the test day it's for, asked:
+     the day "Keep reviewing" was first shown, keep: true | false (unset: not answered), on: the day it was answered,
+     woke: { deck: day } (decks kept from their menu, or whose resting card was studied: merged deck by deck like
+     extra.cards) }. A card follows the latest test that covers it (by its day): one coming up (or today) means it's
+     being studied for that test, never resting. A resting test rests the cards it covers that have been studied
+     (cards never studied weren't crammed: new ones, the next unit's added to an old note too, are left alone),
+     unless that card has been studied since the rest began, or a woken deck holds it. Studying a resting card wakes
+     its own folder's deck (`wake`, from grade): only a card that was really resting does, so the next unit's new cards
+     in the same folder never bring the old ones back. Not answered, a test rests only REST_DAYS days after the
+     question was first shown (`asked`), so what the question says ("they rest from Monday") is what happens, and a
+     test that ended before 1.19.11 (never asked) is asked once instead of resting silently. vault/store.py
+     study_today does the same for Jarvis's briefing. */
+  const REST_DAYS = 3;
+  const afterOf = (note) => {
+    const a = note && note.extra && note.extra.after_test;
+    return isObject(a) && a.day === note.due ? a : null;
+  };
+
+  /* { resting: card ids, rests: [{ note, day, from, keep, asked, cards: ids it rests, own: ids whose latest test it
+     is, could: those of them that could rest (studied) }] }; `from`: the day its rest began (null: not resting) */
+  function restsFor(list, today) {
+    const tests = [...V.data.notes.values()].filter((n) => studied(n) && isDay(n.due) && coversOf(n).length)
+      .map((note) => ({ note, day: note.due, covered: coverage(coversOf(note)).covered }))
+      .sort((a, b) => order2(a.day, b.day) || order2(a.note.id, b.note.id));  // (as vault/store.py sorts them)
+    const resting = new Set();
+    const rests = [];
+    if (!tests.some((t) => t.day < today)) return { resting, rests };
+    const latest = new Map();  // card id -> the latest test covering it
+    for (const card of list) {
+      for (let i = tests.length - 1; i >= 0; i--) if (tests[i].covered(card)) { latest.set(card.id, tests[i]); break; }
+    }
+    for (const t of tests) {
+      if (t.day >= today) continue;
+      const own = list.filter((c) => latest.get(c.id) === t);
+      if (!own.length) continue;
+      const a = afterOf(t.note);
+      const keep = a && typeof a.keep === 'boolean' ? a.keep : null;
+      const asked = a && isDay(a.asked) && a.asked > t.day ? a.asked : null;
+      // (answered "Stop for now": from that day; not answered: REST_DAYS days after it was first asked)
+      const from = keep === false ? (isDay(a.on) && a.on > t.day ? a.on : t.day)
+        : keep === null && asked && daysBetween(asked, today) >= REST_DAYS ? V.addDays(asked, REST_DAYS) : null;
+      const could = own.filter((c) => memory(c.state));
+      const info = { note: t.note, day: t.day, from, keep, asked, cards: new Set(), own: new Set(own.map((c) => c.id)),
+        could: new Set(could.map((c) => c.id)) };
+      rests.push(info);
+      if (keep === true || !from) continue;
+      // (studied since: on the day it began too when it began by itself, as nothing was answered that day)
+      const since = keep === false ? from : V.addDays(from, -1);
+      const woke = a && isObject(a.woke) ? Object.keys(a.woke).filter((d) => !d.startsWith('test:')).map(inDeck) : [];
+      for (const c of could) {
+        if (memory(c.state).last > since || woke.some((test) => test(c))) continue;
+        info.cards.add(c.id);
+        resting.add(c.id);
+      }
+    }
+    return { resting, rests };
+  }
+
+  /* Every card, the tests coming up (soonest first), the cards pulled forward for them on `today`, and the ones
+     resting after a test. */
   function compute(today) {
     const list = all();
     const plans = [...V.data.notes.values()].map((note) => planFor(note, list, today)).filter(Boolean)
       .sort((a, b) => a.day.localeCompare(b.day) || a.name.localeCompare(b.name));
     const pulled = new Set();
     for (const plan of plans) for (const id of plan.today) pulled.add(id);
-    return { today, list, plans, pulled };
+    const { resting, rests } = restsFor(list, today);
+    return { today, list, plans, pulled, resting, rests };
   }
   function now(today = V.today()) {
     const key = `${today}|${version}`;
@@ -273,7 +348,11 @@ V.review = (() => {
     return cache;
   }
 
-  const isDue = (card, at = now()) => { const due = dueOn(card.state); return !due || due <= at.today || at.pulled.has(card.id); };
+  const isDue = (card, at = now()) => {
+    if (at.resting && at.resting.has(card.id)) return false;
+    const due = dueOn(card.state);
+    return !due || due <= at.today || at.pulled.has(card.id);
+  };
   const dueIn = (deck = 'all') => { const at = now(); const test = inDeck(deck); return at.list.filter((c) => test(c) && isDue(c, at)); };
   const dueCount = () => { const at = now(); return at.list.filter((c) => isDue(c, at)).length; };
 
@@ -293,6 +372,99 @@ V.review = (() => {
     return { day: today, cards, tests };
   }
 
+  /* The finished tests to ask about now (js/checkin.js): each one whose day has passed, not answered and not resting
+     yet (asked on fewer than REST_DAYS days ago, or never asked: one that ended before 1.19.11 is asked too, never
+     rested silently), with cards that follow it and could rest; newest first. [{ note, name, count, decks: folder and
+     tag names, asked: the day first asked (null: not yet), starts: the day they'd rest if it isn't answered }] */
+  function restAsk(today = V.today()) {
+    const at = now(today);
+    return at.rests.filter((r) => r.keep === null && !r.from && r.could.size && daysBetween(r.day, today) >= 1)
+      .sort((a, b) => order2(b.day, a.day) || order2(a.note.id, b.note.id))
+      .map((r) => ({ note: r.note, name: testName(r.note), count: r.could.size, asked: r.asked,
+        starts: V.addDays(r.asked || today, REST_DAYS), decks: coversOf(r.note).map(deckName).filter(Boolean) }));
+  }
+
+  /* "Keep reviewing its flash cards?" shown: the first day is kept (quietly), and its cards rest REST_DAYS days later
+     if it isn't answered, on every device. */
+  const asking = new Set();
+  function markAsked(id, today = V.today()) {
+    const row = V.data.notes.get(id);
+    const a = afterOf(row);
+    if (!row || asking.has(id) || (a && (a.asked || typeof a.keep === 'boolean'))) return;
+    asking.add(id);
+    setTimeout(() => {
+      quietChange(id, (copy) => {
+        const was = afterOf(copy) || {};
+        if (was.asked || typeof was.keep === 'boolean') return;
+        copy.extra.after_test = { ...was, day: copy.due, asked: today };
+      }).catch((error) => console.warn('Wefty: after a test:', error)).finally(() => asking.delete(id));
+    }, 0);
+  }
+
+  /* A resting card studied (grade): its own folder's deck wakes, so the cards resting with it come back too. Only a
+     card that was really resting does this: new cards in the same folder never wake the old ones. */
+  const waking = new Set();
+  function wake(card, at, today) {
+    if (!at.resting || !at.resting.has(card.id)) return;
+    const deck = liveFolder(card.folder) ? 'own:' + card.folder : 'none';
+    for (const r of at.rests) {
+      if (!r.cards.has(card.id)) continue;
+      const key = `${r.note.id}|${deck}`;
+      if (waking.has(key)) continue;
+      waking.add(key);
+      quietChange(r.note.id, (row) => {
+        const was = afterOf(row) || { day: row.due };
+        if (isObject(was.woke) && was.woke[deck]) return;
+        row.extra.after_test = { ...was, woke: { ...(isObject(was.woke) ? was.woke : {}), [deck]: today } };
+      }).catch((error) => console.warn('Wefty: after a test:', error)).finally(() => waking.delete(key));
+    }
+  }
+
+  /* How many of a deck's cards are resting after a test. */
+  const restingIn = (deck, at = now()) => (at.resting.size ? at.list.filter((c) => at.resting.has(c.id) && inDeck(deck)(c)).length : 0);
+
+  /* A note changed quietly: through the editor when it's open there, else its row. */
+  function quietChange(id, change) {
+    if (V.editor.openId() === id && V.editor.current()) {
+      return V.editor.update((row) => { row.extra = { ...(row.extra || {}) }; change(row); }, { quiet: true });
+    }
+    const row = V.data.notes.get(id);
+    if (!row || row._purge || row.deleted) return Promise.resolve();
+    const copy = { ...row, extra: { ...(row.extra || {}) } };
+    change(copy);
+    return V.cloud.save('notes', copy, { quiet: true });
+  }
+
+  /* The answer to "Keep reviewing its flash cards?" (`keep` true or false; null takes it back, for Undo), with `more`
+     changing the note in the same save. */
+  function setAfter(id, keep, more = null) {
+    return quietChange(id, (row) => {
+      if (more) more(row);
+      const was = isObject(row.extra.after_test) && row.extra.after_test.day === row.due ? row.extra.after_test : {};
+      const next = { ...was, day: row.due };
+      if (keep === null) { delete next.keep; delete next.on; delete next.at; } else Object.assign(next, { keep: !!keep, on: V.today(), at: new Date().toISOString() });
+      row.extra.after_test = next;
+    });
+  }
+
+  /* "Keep reviewing" from a deck's or a folder's menu: its resting cards come back (on their own days), each test that
+     rested them told so. Returns how many came back. */
+  async function keepDeck(deck) {
+    const at = now();
+    const test = inDeck(deck);
+    const back = at.list.filter((c) => at.resting.has(c.id) && test(c));
+    const notes = at.rests.filter((r) => back.some((c) => r.cards.has(c.id)));
+    const day = V.today();
+    for (const r of notes) {
+      await quietChange(r.note.id, (row) => {
+        const was = isObject(row.extra.after_test) && row.extra.after_test.day === row.due ? row.extra.after_test : { day: row.due };
+        row.extra.after_test = { ...was, woke: { ...(isObject(was.woke) ? was.woke : {}), [deck]: day } };
+      });
+    }
+    if (back.length) V.toast(`${deckName(deck)}: ${back.length} card${back.length === 1 ? '' : 's'} back on their own days.`);
+    return back.length;
+  }
+
   /* -- answers, saved in batches */
 
   const timing = { every: 20000 };   // ms: answers wait at most this long to be saved
@@ -305,6 +477,7 @@ V.review = (() => {
     const before = current(card);
     const after = next(before, rating, today);
     if (after === before) return before;
+    try { wake(card, now(today), today); } catch (error) { console.error('Wefty: after a test:', error); }
     if (!pending.has(card.note)) pending.set(card.note, {});
     pending.get(card.note)[card.key] = after;
     version++;
@@ -434,7 +607,9 @@ V.review = (() => {
   function deckItems(row) {
     const cards = now().list.filter(inDeck(row.deck));
     const live = row.folder && V.data.folders.get(row.folder.id);
+    const resting = restingIn(row.deck);
     return [
+      resting ? { label: 'Keep reviewing these', icon: 'restore', onClick: () => { keepDeck(row.deck).catch(V.problem); } } : null,
       { label: row.due ? `Study ${row.due} now` : `Practise all ${row.count}`, icon: 'cards', onClick: () => start(row.deck) },
       V.learn && cards.length ? { label: 'Test me', icon: 'learn', onClick: () => V.learn.testMe(row.deck) } : null,
       { sep: true },
@@ -447,7 +622,9 @@ V.review = (() => {
   /* A deck: its button (its cards due today, else all of them as practice), and Test me beside it (1.19.3: Learn's
      quiz on its cards, straight away). */
   function deckRow(row) {
-    const what = `${row.count} card${row.count === 1 ? '' : 's'}${row.due ? '' : ' · all done today'}`;
+    const resting = restingIn(row.deck);
+    const what = `${row.count} card${row.count === 1 ? '' : 's'}${resting ? ` · ${resting === row.count ? 'resting' : `${resting} resting`} after a test`
+      : row.due ? '' : ' · all done today'}`;
     return V.contextMenu(V.h('div.deck-row' + (row.due ? '' : '.idle') + (V.learn ? '.with-quiz' : ''), { dataset: { deck: row.deck, depth: String(Math.min(row.depth, 4)) } },
       V.h('button.deck-main', { type: 'button', title: row.due ? `Study ${row.name}` : `Practise ${row.name}`,
         'aria-label': row.due ? `Study ${row.name}: ${row.due} today` : `Practise ${row.name}`, onclick: () => start(row.deck) },
@@ -506,6 +683,8 @@ V.review = (() => {
       V.h('section.review-head', {},
         V.h('p.review-today', {}, V.h('strong', { text: due ? `${due} card${due === 1 ? '' : 's'} to study today` : 'All done for today' })),
         due ? null : V.h('p.hint.review-later', { text: nextDue(at) }),
+        // (after a test, 1.19.11: its cards resting, and where to bring them back)
+        at.resting.size ? V.h('p.hint.review-resting', { text: `${at.resting.size} card${at.resting.size === 1 ? ' is' : 's are'} resting after a test. To bring them back, choose "Keep reviewing these" in a deck's menu, or study it.` }) : null,
         V.h('div.review-go', {},
           // ('tonal': the screen's main iris button is the new-note one beside it; in light it looks the same)
           V.button(due ? `Study ${due}` : `Practise all ${at.list.length}`, { kind: 'tonal', icon: 'cards', onClick: () => start('all') }),
@@ -521,7 +700,7 @@ V.review = (() => {
 
   /* When the next cards come back ("5 cards come back tomorrow"), for a day with none left. */
   function nextDue(at) {
-    const days = at.list.map((c) => dueOn(c.state)).filter((d) => d && d > at.today).sort();
+    const days = at.list.filter((c) => !at.resting.has(c.id)).map((c) => dueOn(c.state)).filter((d) => d && d > at.today).sort();
     if (!days.length) return 'Every card is known for now.';
     const n = days.filter((d) => d === days[0]).length;
     const label = R.dayLabel(days[0]);
@@ -1355,7 +1534,7 @@ V.review = (() => {
 
   return { AGAIN, GOOD, EASY, timing, memory, next, preview, known, dueOn, all, current, inDeck, deckName, coversOf,
     looksLikeTest, testName, planFor, now, isDue, dueIn, dueCount, grade, flush, decks, todayLine, countdown, page,
-    dueByFolder, nextDue, ahead,
+    dueByFolder, nextDue, ahead, restAsk, markAsked, restingIn, setAfter, keepDeck, REST_DAYS,
     start, study, session, screen, question, answerOf, shuffle, cardsOf, editCard, pending: () => pending, shown: () => shown,
     setState, topicOf, undoToast, shape };
 })();

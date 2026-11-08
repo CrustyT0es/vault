@@ -219,7 +219,8 @@ V.cloud = (() => {
      the title and the words, so cards moving on never make a copy either. */
   // (checkin: after a test, how it went, js/checkin.js: asked and answered quietly, never an edit)
   // (quiz: Test me's wrong choices made by the AI, js/learn.js: kept quietly, never an edit)
-  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print', 'checkin', 'quiz']);
+  // (after_test: whether a finished test's cards keep coming or rest, js/review.js: kept quietly, never an edit)
+  const QUIET_KEYS = new Set(['cards', 'edited_at', 'edited_print', 'checkin', 'quiz', 'after_test']);
   const prints = new WeakMap();
   function notePrint(row) {
     if (prints.has(row)) return prints.get(row);
@@ -287,6 +288,15 @@ V.cloud = (() => {
       if (top && (key === 'cards' || key === 'quiz') && isObject(now[key]) && isObject(out[key])) out[key] = mergeExtra(was[key], now[key], out[key], false);
       // (after a test, js/checkin.js: an answer given on the other device beats "asked" from this one)
       else if (top && key === 'checkin' && isObject(out.checkin) && out.checkin.mood && !(isObject(now.checkin) && now.checkin.mood)) continue;
+      // (after a test, js/review.js: the answer as this device changed it, the decks kept from a menu deck by deck)
+      else if (top && key === 'after_test' && isObject(now[key]) && isObject(out[key]) && now[key].day === out[key].day) {
+        const base = isObject(was[key]) && was[key].day === now[key].day ? was[key] : {};
+        const merged = mergeExtra({ ...base, woke: null }, { ...now[key], woke: null }, out[key], false);
+        const woke = mergeExtra(isObject(base.woke) ? base.woke : {}, isObject(now[key].woke) ? now[key].woke : {},
+          isObject(out[key].woke) ? out[key].woke : {}, false);
+        if (Object.keys(woke).length) merged.woke = woke; else delete merged.woke;
+        out[key] = merged;
+      }
       else if (key in now) out[key] = now[key];
       else delete out[key];
     }

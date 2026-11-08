@@ -1141,9 +1141,10 @@ V.reminders = (() => {
   function cardChip(note) {
     const at = remindAt(note);
     const rule = !note.done && repeatOf(note);
-    if (rule && !at) return V.h('span.due.remind.repeats', { title: repeatLine(note) }, icon('repeat'), repeatText(rule));
+    // (`card-go`: a tap on it in a card opens the note's date and reminder sheet, js/notes.js chipTap)
+    if (rule && !at) return V.h('span.due.remind.repeats.card-go', { title: repeatLine(note) }, icon('repeat'), repeatText(rule));
     if (!at || note.done) return null;
-    return V.h('span.due.remind' + (at < new Date() ? '.late' : '') + (rule ? '.repeats' : ''), { title: rule ? repeatLine(note) : 'Reminder' },
+    return V.h('span.due.remind.card-go' + (at < new Date() ? '.late' : '') + (rule ? '.repeats' : ''), { title: rule ? repeatLine(note) : 'Reminder: change it' },
       icon('bell'), remindLabel(note), rule ? icon('repeat', 'repeat-mark-icon') : null);
   }
 

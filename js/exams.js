@@ -89,7 +89,8 @@ V.exams = (() => {
   function cardChip(note) {
     const made = plan(note);
     if (!made) return null;
-    return V.h('span.exam-tag' + (made.days <= 1 ? '.soon' : ''), { title: RV.countdown(made) }, V.icon('target'),
+    // (`card-go`: a tap on it in a card opens what's on the test, js/notes.js chipTap)
+    return V.h('span.exam-tag.card-go' + (made.days <= 1 ? '.soon' : ''), { title: RV.countdown(made) }, V.icon('target'),
       V.h('span', { text: RV.countdown(made, false) }));
   }
 

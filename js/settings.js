@@ -136,6 +136,16 @@ V.settings = (() => {
     return { said, short, urgent: ['held', 'error', 'asleep', 'signed-out'].includes(state), warn: state === 'offline' };
   }
 
+  async function syncNow() {
+    if (V.cloud.status === 'signed-out') { V.toast('Sign in again to sync.'); return; }
+    try {
+      await V.cloud.sync();
+      V.toast(syncing().said || 'Synced');
+    } catch (error) {
+      V.problem(error);
+    }
+  }
+
   function accountPage(ui) {
     const user = V.data.user || {};
     const letter = (Array.from(String(user.name || user.email || '').trim())[0] || '?').toUpperCase();
@@ -147,7 +157,9 @@ V.settings = (() => {
         V.h('div.setting-text', {}, V.h('strong', { text: user.email || 'Signed in' }),
           V.h('span', { text: user.invited ? 'Your notes, files and clipboard are yours alone: nobody else using Wefty can see them.'
             : 'Your notes, files and clipboard are only in your own cloud.' }),
-          sync.short ? V.h('span.sync-chip', { dataset: { state: V.cloud.status }, text: sync.short }) : null)),
+          // (a tap syncs now, as the Sync line's button does: 1.19.11)
+          sync.short ? V.h('button.sync-chip', { type: 'button', dataset: { state: V.cloud.status }, text: sync.short,
+            title: 'Sync now', 'aria-label': `${sync.short}. Sync now`, onclick: () => syncNow() }) : null)),
       // (Always here for a friend, so those who joined before the owner's Stats existed are told too.)
       user.invited ? V.h('p.hint.account-stats', { text: `Whoever runs this Wefty's cloud can see what's stored in it. ${V.welcome.STATS_WORDS}` }) : null,
       ui.line('Change password', 'For signing in on a new device. It isn\'t your locked-notes PIN (that\'s in Notes & files).',
