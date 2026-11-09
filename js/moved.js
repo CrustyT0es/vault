@@ -65,18 +65,23 @@
     const session = kept('vault-auth');
     return !!(session && typeof session.refresh_token === 'string' && session.refresh_token);
   };
-  /* A #connect= link for the new address: the saved cloud and e-mail (what the sign-in screen needs), or ''. */
-  const connect = () => {
+  /* A #connect= link for the new address: the saved cloud and e-mail (what the sign-in screen needs), or ''. With
+     `moving` (1.22.2: from the move screen, the move popup or Settings), it also says "this person may have their
+     sign-in copied", so wefty.org's sign-in screen leads with Paste my sign-in (m: 1, nothing secret), and whether it
+     came from a browser tab ('tab': h: 1, so an iPhone's Safari takes it there without asking whether it's for the
+     home screen icon) or an installed app ('app'). */
+  const connect = (moving = '') => {
     const saved = kept('vault-config');
     if (!saved || !saved.url || !saved.key) return '';
     const email = saved.email || (kept('vault-user') || {}).email || '';
-    return '#connect=' + b64url(JSON.stringify({ u: saved.url, k: saved.key, e: email }));
+    const how = moving ? { m: 1, ...(moving === 'tab' ? { h: 1 } : {}) } : {};
+    return '#connect=' + b64url(JSON.stringify({ u: saved.url, k: saved.key, e: email, ...how }));
   };
 
-  /* Whether the new address is up: its version.json answers. Never waits more than WAIT. */
-  function up() {
+  /* Whether the new address is up: its version.json answers. Never waits more than `ms` (WAIT at the start). */
+  function up(ms = WAIT) {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), WAIT);
+      const timer = setTimeout(() => resolve(false), ms);
       try {
         fetch(to + 'version.json', { cache: 'no-store' })
           .then((reply) => { clearTimeout(timer); resolve(reply.ok); })
@@ -111,5 +116,8 @@
     /* The new address of this very page, ?search and #hash kept: "Open Wefty" on the move screen. */
     target: () => address(location.origin + location.pathname) + location.search + location.hash,
     connect,
+    /* (1.22.2) Whether wefty.org answers now, given `ms` (the move popup asks again on a slow network: at the start it
+       only waited WAIT, and a dead end is never offered). */
+    answers: (ms) => (old ? up(ms) : Promise.resolve(false)),
   };
 })();

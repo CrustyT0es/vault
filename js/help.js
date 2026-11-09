@@ -256,6 +256,13 @@ V.help = (() => {
       a: 'The cloud only takes notes up to a size. The note is safe on this device: make its words shorter, or move big '
         + 'pictures into a file, and it goes up by itself. Your picture\'s menu shows which notes are waiting.',
       words: ['too big', 'not synced', 'wont sync', 'held', 'size', 'large note', 'long note'] },
+    // (1.22.2: a file, not a note: Share > Send keeps it with Try again and Remove, js/send.js)
+    { id: 'file-too-big', group: 'trouble', q: 'A file is too big for my cloud', show: 'share-send', when: () => !!V.send,
+      a: () => `Wefty takes files up to ${V.FILE_MOST_WORDS}, but your cloud has its own limit: ${V.FILE_CLOUD_WAS / (1024 * 1024)} MB `
+        + 'until it\'s raised. A file sent with Share > Send waits there: remove it, or press Try again once the limit is '
+        + 'higher. A smaller copy goes, like a shorter video or a photo shared at a smaller size.',
+      words: ['file too big', 'too big for my cloud', 'refused', 'turned down', 'wont upload', 'big file', 'big video',
+        'maximum allowed size', 'limit raised'] },
     { id: 'asleep', group: 'trouble', q: 'It says the cloud is asleep, or Wefty can\'t reach it', show: 'profile',
       a: () => (who() === 'owner'
         ? 'Free Supabase clouds go to sleep after a week with no use; everything is still there. Open supabase.com/dashboard, '
@@ -274,8 +281,9 @@ V.help = (() => {
         + 'with a code from another device instead.',
       words: ['captcha', 'robot', 'not a robot', 'check', 'verification', 'turnstile', 'cant sign up', 'sign up', 'blocked'] },
     { id: 'move', group: 'trouble', q: 'Moving to wefty.org didn\'t work', show: null, when: () => !V.desktop && !!V.moved && (V.moved.old || location.origin === V.moved.toOrigin),
-      a: 'Your notes are safe in your cloud. Open your old Wefty again and tap Move to wefty.org once more, or tap Copy my sign-in '
-        + 'there, then Paste my sign-in at wefty.org. Your e-mail and password work there too.',
+      a: 'Your notes are safe in your cloud. In your old Wefty, tap Copy my sign-in (on its "Wefty has moved" popup, or in '
+        + 'Settings > Devices > Sign in on wefty.org), then open wefty.org and tap Paste my sign-in. Or at wefty.org tap Use a '
+        + 'code from another device and type its code in the old one. Your e-mail and password work there too.',
       words: ['move', 'moving', 'wefty.org', 'old wefty', 'old address', 'vault', 'new address', 'moved', 'github'] },
     { id: 'update', group: 'trouble', q: 'How do I update Wefty?', show: 'update',
       a: 'Wefty updates itself, next time it\'s in the background. Settings > About & feedback has Check for updates, and What\'s new '
@@ -525,6 +533,7 @@ V.help = (() => {
     else if (['busy', 'quota', 'limit'].includes(k) || (k === 'offline' && /claude|gemini/i.test(text))
       || /(gemini|claude) (is busy|can't be reached|is taking)|free gemini limit/i.test(text)) id = 'ai-trouble';
     else if (/notifications are blocked|notification.*(denied|blocked)/i.test(text) || k === 'denied') id = 'notifications';
+    else if ((V.fileTooBig && V.fileTooBig(error)) || /too big for your cloud/i.test(text)) id = 'file-too-big';  // (a file: 1.22.2)
     else if (/too big|isn't saved to the cloud|couldn't be saved to the cloud/i.test(text)) id = 'too-big';
     else if (k === 'asleep' || status === 540 || /\basleep\b|paused|\b540\b/i.test(text)) id = 'asleep';
     else if (['signed-out', 'signed_out', 'signedOut'].includes(k) || status === 401 || /signed out|sign in again/i.test(text)) id = 'signed-out';

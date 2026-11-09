@@ -265,10 +265,10 @@ V.chat = (() => {
       loading = (async () => {
         const kept = (await V.db.meta('chats').catch(() => null)) || {};
         const map = new Map();
-        for (const id of kept.ids || []) {
-          const chat = await V.db.meta('chat:' + id).catch(() => null);
-          if (valid(chat)) map.set(id, chat);
-        }
+        // (all read at once, 1.22.2: one after the other, 25 chats took a moment of their own on a phone)
+        const ids = kept.ids || [];
+        const read = await Promise.all(ids.map((id) => V.db.meta('chat:' + id).catch(() => null)));
+        ids.forEach((id, i) => { if (valid(read[i])) map.set(id, read[i]); });
         index = { prints: kept.prints || {}, waiting: new Set(kept.waiting || []), gone: new Set(kept.gone || []) };
         chats = map;
       })().finally(() => { loading = null; });
@@ -1841,7 +1841,10 @@ V.chat = (() => {
       pre.replaceWith(box);
       box.append(pre, copy);
     }
-    return V.reading.area(el);  // (reading text: Quick read's pieces go in when it's on, never in code: js/reading.js)
+    // (reading text: Quick read's pieces go in when it's on, never in code: js/reading.js; for an older turn drawn
+    // ahead of being seen, once it's near the screen: `quickLater`, below)
+    if (quickLater) { el.setAttribute('data-quick-area', ''); return el; }
+    return V.reading.area(el);
   }
 
   /* Whether the turn is running Wefty's tools now (a round with a call still to come back). */
@@ -2198,6 +2201,294 @@ V.chat = (() => {
       : V.h('div.empty.small', {}, V.h('p', { text: chats ? 'No chats yet.' : 'Loading...' })));
   }
 
+  /* ---- a long chat, opened at once (1.22.2)
+
+     The owner, on a Samsung phone: tapping Chat showed Today for 3 to 4 seconds before a long chat ("Life of Pi", long
+     answers, Quick read on) appeared. Every time Chat was opened (and twice more as its copy and the cloud's answered),
+     every answer was built again from its words (js/format.js, then Quick read's pieces round each word: js/reading.js)
+     and the whole chat laid out, though only its end was on screen. Now:
+     - An answer drawn once is kept (`drawn`, per turn, with what it was drawn from: `sigOf`) and put back as it was the
+       next time, unless it changed. Only settled turns are kept (done, cut, stopped, failed, refused, with no Wefty
+       changes listed under them): one being answered, waiting or with its list of changes is drawn afresh, as before.
+     - A kept turn that's off screen isn't laid out (content-visibility: auto, at the height it had there, `fit`), so
+       putting back a long chat costs about what its end does.
+     - A long chat drawn for the first time draws its newest answers (about two screens) at once, and the older ones a
+       moment later, one at a time from the newest (`fillSoon`; one a frame, the nearest first, when scrolled near), in
+       stand-ins of about their height; the place being read stays put as each comes in (`fill`). Quick read's pieces
+       go into those older ones only as they come near the screen (`quickSync`). A short chat is drawn whole, as
+       always.
+     - Opened again, it's drawn once: no more drawings as this device's copy and the cloud's answer (`render`), and
+       none of what's already there is touched when nothing changed (`drawChat`). */
+  // `letters`: still to be drawn, up to this many: the whole chat at once. `keep`: the chats whose turns are kept drawn
+  // (the newest opened). `whole` (tests only): every turn drawn afresh each time, as before 1.22.2, to compare with.
+  const drawing = { letters: 12000, keep: 3, whole: false };
+  const drawn = new WeakMap();   // turn -> { sig, chat, el, h, lay, given, quick, kept }
+  const entries = new WeakMap(); // a kept turn's element -> its entry (the size watcher's)
+  const holes = new WeakMap();   // turn -> its stand-in until it's drawn
+  const kept = [];               // chat ids, newest drawn first
+  let sizes = null;              // one ResizeObserver: how tall each kept turn was, for content-visibility
+  let lens = null;               // the stand-ins near the screen are drawn at once
+  let quickLens = null;          // kept turns whose Quick read pieces are still to be put right, near the screen
+  let quickLater = false;        // (while a turn is drawn ahead of being seen: its Quick read pieces wait, `rendered`)
+  let fillTicket = 0;
+
+  const keepable = (turn) => ['done', 'cut', 'stopped', 'failed', 'refused'].includes(turn.state) && !(turn.actions || []).length;
+  // What an answer's drawing depends on: its turn as it is, whether it's the last (Retry) and, then, whether an answer
+  // is coming (no Retry), whether there's a device to send to, and its notes' locks. (Quick read is put right by
+  // `quickSync`, as it changes nothing else.)
+  function sigOf(turn, last, sendable) {
+    let words = '';
+    try { words = JSON.stringify(turn); } catch (error) { return ''; }
+    const locks = (turn.notes || []).map((n) => { const row = V.data.notes.get(n.id); return row && row.locked ? 1 : 0; }).join('');
+    return `${words}|${last ? 1 : 0}${last && busy ? 1 : 0}${sendable ? 1 : 0}|${locks}`;
+  }
+  // The width the turns are laid out at, and what else changes their height (dyslexia-friendly text's font).
+  // `widths`: the thread's width as last measured since the window last changed size (or zoom), so a drawing needn't
+  // lay the page out to learn it (even reading the window's width does).
+  const widths = new Map();
+  let sized = 0;
+  window.addEventListener('resize', () => { sized++; widths.clear(); });
+  const windowKey = () => sized;
+  const layOf = (width) => {
+    const r = V.reading.get();
+    return `${Math.round(width)}|${r.dyslexia ? r.font : ''}`;
+  };
+
+  function sizeWatch() {
+    if (sizes || typeof ResizeObserver !== 'function') return sizes;
+    sizes = new ResizeObserver((list) => {
+      for (const one of list) {
+        const entry = entries.get(one.target);
+        const thread = one.target.closest('.chat-thread');
+        if (!entry || !thread) continue;
+        const h = one.contentRect.height;
+        // (a turn off screen measures as the height it was given: nothing new learned, its width included)
+        if (!(h > 0) || (one.target.classList.contains('chat-cv') && Math.abs(h - entry.given) < 1)) continue;
+        entry.h = h;
+        widths.set(windowKey(), thread.clientWidth);
+        entry.lay = layOf(thread.clientWidth);
+      }
+    });
+    return sizes;
+  }
+
+  function forget(turn) {
+    const entry = drawn.get(turn);
+    if (entry && sizes) sizes.unobserve(entry.el);
+    drawn.delete(turn);
+    holes.delete(turn);
+  }
+
+  /* A turn's element: the one kept when nothing it shows has changed, else drawn now (and kept, when it's settled).
+     `ahead`: an older turn drawn before it's seen, its Quick read pieces left for when it comes near the screen. */
+  function turnFor(chat, turn, last, sendable, sig = keepable(turn) ? sigOf(turn, last, sendable) : '', ahead = false) {
+    if (!keepable(turn)) {
+      forget(turn);
+      return { el: turnEl(chat, turn, last) };
+    }
+    const was = drawn.get(turn);
+    // (a picture that couldn't be fetched, offline say, is asked for again, as each drawing used to)
+    const missing = was && (turn.files || []).some((f) => f.kind === 'image') && !!was.el.querySelector('.chat-pic.missing');
+    if (was && was.sig === sig && was.chat === chat && !missing) return was;
+    forget(turn);
+    quickLater = ahead;
+    let el;
+    try { el = turnEl(chat, turn, last); } finally { quickLater = false; }
+    const entry = { sig, chat, el, h: 0, lay: '', given: 0, quick: ahead ? false : V.reading.quickOn(), kept: true };
+    drawn.set(turn, entry);
+    if (sizeWatch()) {
+      entries.set(el, entry);
+      sizes.observe(el);
+    }
+    return entry;
+  }
+
+  /* A kept turn's Quick read pieces put right: drawn ahead of being seen, or Quick read switched on or off while it
+     wasn't on screen (js/reading.js puts right the ones showing). `soon`: once it's near the screen, not now. */
+  function quickSync(entry, soon = false) {
+    const want = V.reading.quickOn();
+    if (entry.quick === want) return;
+    if (soon && parts && typeof IntersectionObserver === 'function') {
+      if (!quickLens) {
+        quickLens = new IntersectionObserver((seen) => {
+          for (const one of seen) {
+            if (!one.isIntersecting) continue;
+            if (quickLens) quickLens.unobserve(one.target);
+            const kept = entries.get(one.target);
+            if (kept) quickSync(kept);
+          }
+        }, { root: parts.scroll, rootMargin: '100% 0px 100% 0px' });
+      }
+      quickLens.observe(entry.el);
+      return;
+    }
+    entry.quick = want;
+    for (const area of entry.el.querySelectorAll('[data-quick-area]')) {
+      const has = !!area.querySelector('.quick-lead');
+      if (want && !has) V.reading.quick(area);
+      else if (!want && has) V.reading.unquick(area);
+    }
+  }
+
+  /* A kept turn isn't laid out while it's off screen, at the height it had at this width, or (`guessed`: an older turn
+     never laid out yet, as one drawn while a phone showed the list of chats) about its height; the browser keeps the
+     real one once it has shown it. A newest one never laid out is laid out as it comes. */
+  function fit(entry, lay, guessed = 0) {
+    const known = entry.h > 0 && entry.lay === lay;
+    entry.given = known ? Math.round(entry.h) : Math.round(guessed);
+    entry.el.classList.toggle('chat-cv', entry.given > 0);
+    entry.el.style.containIntrinsicSize = entry.given > 0 ? `auto 1px auto ${entry.given}px` : '';
+  }
+
+  /* About how tall a turn is (a stand-in's height until it's drawn). */
+  const lettersOf = (turn) => textOf(turn).length + String(turn.text || '').length;
+  function guess(turn, width) {
+    const perLine = Math.max(20, Math.floor(Math.max(200, width - 32) / 7.8));
+    const lines = (text) => String(text || '').split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / perLine)), 0);
+    return 96 + lines(textOf(turn)) * 25 + (turn.text ? 28 + lines(turn.text) * 22 : 0);
+  }
+  function holeFor(chat, turn, width) {
+    let hole = holes.get(turn);
+    if (!hole || hole.dataset.chat !== chat.id) {
+      hole = V.h('div.chat-turn.chat-later', { dataset: { turn: turn.id, state: turn.state, chat: chat.id }, 'aria-busy': 'true' });
+      hole.style.height = `${guess(turn, width) + 16}px`;  // (with the turn's own padding: about its height in the list)
+      holes.set(turn, hole);
+    }
+    return hole;
+  }
+
+  /* The open chat's turns as elements: kept ones put back, new ones drawn, and (a long chat) older ones not drawn yet
+     left as stand-ins. */
+  function turnsFor(chat) {
+    const turns = chat.turns;
+    const n = turns.length;
+    if (drawing.whole) return turns.map((turn, i) => turnEl(chat, turn, i === n - 1));
+    const sendable = !!(V.send && V.send.targets().length);
+    const width = widths.get(windowKey()) || parts.thread.clientWidth || window.innerWidth || 400;
+    const lay = layOf(width);
+    const sigs = turns.map((turn, i) => (keepable(turn) ? sigOf(turn, i === n - 1, sendable) : ''));
+    const ready = turns.map((turn, i) => {
+      const was = sigs[i] ? drawn.get(turn) : null;
+      return !!was && was.chat === chat && was.sig === sigs[i];
+    });
+    const left = turns.reduce((sum, turn, i) => sum + (ready[i] ? 0 : lettersOf(turn)), 0);
+    const later = left > drawing.letters;
+    let room = 2 * (window.innerHeight || 800);  // (the newest two screens: what shows, and a little more)
+    const out = new Array(n);
+    if (quickLens) quickLens.disconnect();
+    quickLens = null;
+    for (let i = n - 1; i >= 0; i--) {
+      const turn = turns[i];
+      if (ready[i] || !later || room > 0 || i === n - 1) {
+        const entry = turnFor(chat, turn, i === n - 1, sendable, sigs[i]);
+        if (entry.kept) {
+          fit(entry, lay, room > 0 ? 0 : guess(turn, width));
+          quickSync(entry, room <= 0);  // (the newest ones now; older ones when they're near the screen)
+        }
+        out[i] = entry.el;
+        room -= entry.h || guess(turn, width);
+      } else {
+        out[i] = holeFor(chat, turn, width);
+        room -= guess(turn, width);
+      }
+    }
+    // (the answers of the newest chats drawn stay kept; older ones are let go)
+    if (kept[0] !== chat.id) {
+      const at = kept.indexOf(chat.id);
+      if (at > 0) kept.splice(at, 1);
+      kept.unshift(chat.id);
+      for (const id of kept.splice(Math.max(1, drawing.keep))) for (const turn of (chatOf(id) || { turns: [] }).turns) forget(turn);
+    }
+    return out;
+  }
+
+  /* The stand-ins drawn, newest first, a little at a time while nothing else is going on; one scrolled near is drawn at
+     once. What's being read doesn't move as each comes in (the browser's scroll anchoring does it where it can, and
+     this measures, for the browsers without it). */
+  function fillSoon() {
+    if (lens) lens.disconnect();
+    lens = null;
+    const thread = parts && parts.thread;
+    // (a phone showing its list of chats: not before the chat is opened, as nothing of it is laid out meanwhile)
+    if (!thread || !thread.querySelector(':scope > .chat-later') || !paneShown()) return;
+    const ticket = ++fillTicket;
+    near.clear();
+    if (typeof IntersectionObserver === 'function') {
+      lens = new IntersectionObserver((seen) => {
+        for (const one of seen) {
+          if (one.isIntersecting) near.add(one.target); else near.delete(one.target);
+        }
+        fillNear();
+      }, { root: parts.scroll, rootMargin: '100% 0px 100% 0px' });
+      for (const hole of thread.querySelectorAll(':scope > .chat-later')) lens.observe(hole);
+    }
+    const idle = (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(fn, { timeout: 300 }) : setTimeout(fn, 40));
+    const step = (deadline) => {
+      if (ticket !== fillTicket || !parts || parts.thread !== thread || !thread.isConnected) return;
+      const started = performance.now();
+      for (;;) {
+        const holesLeft = thread.querySelectorAll(':scope > .chat-later');
+        if (!holesLeft.length) { if (lens) { lens.disconnect(); lens = null; } return; }
+        if (!fill(holesLeft[holesLeft.length - 1], true)) return;  // (the chat changed: its next drawing starts again)
+        const spare = deadline && typeof deadline.timeRemaining === 'function' ? deadline.timeRemaining() : 0;
+        if (performance.now() - started > 12 || spare < 6) break;
+      }
+      idle(step);
+    };
+    idle(step);
+  }
+
+  /* The stand-ins within a screen of what's showing: drawn one a frame, the nearest first. */
+  const near = new Set();
+  let nearFrame = 0;
+  function fillNear() {
+    if (nearFrame || !near.size) return;
+    nearFrame = requestAnimationFrame(() => {
+      nearFrame = 0;
+      if (!parts) { near.clear(); return; }
+      const box = parts.scroll.getBoundingClientRect();
+      let best = null;
+      let gap = Infinity;
+      for (const hole of near) {
+        if (hole.parentNode !== parts.thread) { near.delete(hole); continue; }
+        const at = hole.getBoundingClientRect();
+        const away = at.bottom < box.top ? box.top - at.bottom : at.top > box.bottom ? at.top - box.bottom : 0;
+        if (away < gap) { gap = away; best = hole; }
+      }
+      if (best) { near.delete(best); fill(best); }
+      fillNear();
+    });
+  }
+
+  const paneShown = () => !!parts && !!parts.app && (parts.app.classList.contains('showing-chat') || V.wide());
+
+  /* One stand-in replaced by its turn, drawn (`ahead` of being seen: Quick read's pieces once it's near the screen).
+     False when it no longer stands for a turn of the chat open (the chat changed meanwhile). */
+  function fill(hole, ahead = false) {
+    if (!parts || !hole.isConnected || hole.parentNode !== parts.thread) return false;
+    const chat = chatOf(openId);
+    const i = chat ? chat.turns.findIndex((t) => t.id === hole.dataset.turn) : -1;
+    const turn = i >= 0 ? chat.turns[i] : null;
+    if (lens) lens.unobserve(hole);
+    near.delete(hole);
+    if (!turn || holes.get(turn) !== hole) return false;
+    const scroller = parts.scroll;
+    const edge = scroller.getBoundingClientRect().top;
+    // (one above what's being read: what's read stays put; one in sight grows down, as anything drawn there does)
+    const above = hole.getBoundingClientRect().bottom <= edge + 1;
+    const ref = above ? [...parts.thread.children].find((el) => el !== hole && el.getBoundingClientRect().bottom > edge + 1) : null;
+    const top = ref ? ref.getBoundingClientRect().top : 0;
+    const entry = turnFor(chat, turn, i === chat.turns.length - 1, !!(V.send && V.send.targets().length), undefined, ahead);
+    holes.delete(turn);
+    hole.replaceWith(entry.el);
+    if (entry.kept) quickSync(entry, true);
+    if (ref) {
+      const moved = ref.getBoundingClientRect().top - top;
+      if (Math.abs(moved) >= 0.5) scroller.scrollTop += moved;
+    }
+    return true;
+  }
+
   function drawChat() {
     if (!parts) return;
     const chat = chatOf(openId);
@@ -2212,9 +2503,15 @@ V.chat = (() => {
     const where = `${chat.id}:${chat.turns.length}`;
     parts.scroll.dataset.place = `chat:${chat.id}`;  // (js/start.js puts a chat's scroll back only on that chat)
     const scroller = parts.scroll;
-    const top = scroller.scrollTop;
-    const atEnd = scroller.scrollHeight - top - scroller.clientHeight < 80;
-    V.clear(parts.thread, chat.turns.length ? chat.turns.map((t, i) => turnEl(chat, t, i === chat.turns.length - 1)) : emptyChat());
+    // (an empty thread, just made: at its top, which is its end; read from the page otherwise)
+    const fresh = !parts.thread.firstChild;
+    const top = fresh ? 0 : scroller.scrollTop;
+    const atEnd = fresh || scroller.scrollHeight - top - scroller.clientHeight < 80;
+    const list = chat.turns.length ? turnsFor(chat) : [emptyChat()];
+    const kids = parts.thread.children;
+    // (the same turns as are there already, kept ones: left as they are)
+    if (kids.length !== list.length || list.some((el, i) => kids[i] !== el)) V.clear(parts.thread, list);
+    fillSoon();
     if (where !== shown) requestAnimationFrame(() => { if (parts) parts.scroll.scrollTop = parts.scroll.scrollHeight; });
     else scroller.scrollTop = atEnd ? scroller.scrollHeight : top;
     shown = where;
@@ -2227,8 +2524,9 @@ V.chat = (() => {
     const chat = chatOf(openId);
     if (!chat) return;
     const draft = draftOf(openId);
-    if (parts.input.value !== draft.text) parts.input.value = draft.text;
-    grow();
+    const put = parts.input.value !== draft.text;
+    if (put) parts.input.value = draft.text;
+    grow(put || !parts.fieldHeight);
     const old = tooOld(chat);
     const model = modelFor(chat);  // (Gemini while Claude is switched off)
     const gem = isGemini(model);  // Gemini has no "Think" or web search here
@@ -2267,15 +2565,45 @@ V.chat = (() => {
     parts.go.disabled = old || (!answering && (!!busy || !!sendingId || (!draft.text.trim() && !draft.files.length && !draft.notes.length)));
   }
 
-  function grow() {
-    if (!parts || !parts.input) return;
-    parts.input.style.height = 'auto';
-    parts.input.style.height = Math.min(parts.input.scrollHeight + 2, 200) + 'px';
+  /* The box grows with the words, up to 200 px. (1.22.2, the owner: typing got "real slow" in a long chat.) The words
+     sit in a box of their own (`.chat-field`: contain strict, its height set here), so a letter typed lays out and
+     paints only that box, never the page and the chat above it; and the words' height is measured inside it (with a
+     class for a moment, never the page laid out at another height): a letter typed on needs no measuring at all, only
+     a check that the words still fit. The field's height changes only when a line comes or goes, and then the chat's
+     end, if it was showing, stays in sight. `force`: the words were put in from elsewhere (a chat opened, a message
+     sent or put back). */
+  function grow(force = false) {
+    if (!parts || !parts.input || !parts.field) return;
+    const { input, field } = parts;
+    const was = parts.fieldHeight || 0;
+    let want;
+    // (taller than the least it's been, or words taken away, pasted or put in: it may need less room, so it's measured
+    // as one line, which grows to fit its words; one more letter, or none, can only need more)
+    const letters = input.value.length;
+    if (force || !was || was > (parts.least || Infinity) || letters < parts.letters || letters > parts.letters + 1) {
+      input.classList.add('chat-measure');
+      want = input.scrollHeight;
+      input.classList.remove('chat-measure');
+    } else {
+      if (input.scrollHeight <= input.clientHeight) { parts.letters = input.value.length; return; }
+      want = input.scrollHeight;
+    }
+    parts.letters = input.value.length;
+    if (!want) return;  // (not on screen: a phone showing its list of chats)
+    want = Math.min(want + 2, 200);
+    parts.least = Math.min(parts.least || Infinity, want);
+    if (want === was) return;
+    const scroller = parts.scroll;
+    const atEnd = !!scroller && want > was && was > 0 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 2;
+    field.style.height = `${want}px`;
+    parts.fieldHeight = want;
+    if (atEnd) scroller.scrollTop = scroller.scrollHeight;
   }
 
   function buildBox() {
     const input = V.h('textarea.chat-input', { rows: '1', placeholder: 'Ask anything', 'aria-label': 'Your message',
       enterkeyhint: enterSends ? 'send' : 'enter' });
+    // (the drafts are kept in memory only: nothing is saved, sent or drawn again as a letter is typed)
     input.addEventListener('input', () => { draftOf(openId).text = input.value; grow(); drawSendButton(); });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && enterSends && !event.isComposing) { event.preventDefault(); send(); }
@@ -2308,9 +2636,12 @@ V.chat = (() => {
     const troubleLine = V.h('div.chat-trouble', { role: 'status', hidden: true });
     const attached = V.h('div.chat-attached.in-box', { hidden: true });
     const hint = V.h('p.chat-hint', { hidden: true });
-    const box = V.h('div.chat-box', {}, attached, hint, input,
+    // (the field can't be the box's grid item itself: a browser lays out a grid's items with the grid, contained or not)
+    const field = V.h('div.chat-field', {}, input);
+    const box = V.h('div.chat-box', {}, attached, hint, V.h('div.chat-words', {}, field),
       V.h('div.chat-tools', {}, clip, model, think, web, V.h('span.chat-tools-gap'), go));
-    Object.assign(parts, { input, clip, model, think, web, go, trouble: troubleLine, attached, hint, box });
+    Object.assign(parts, { input, field, fieldHeight: 0, least: 0, letters: 0, clip, model, think, web, go, trouble: troubleLine,
+      attached, hint, box });
     return V.h('div.chat-composer', {}, troubleLine, box, pick, photo);
   }
 
@@ -2345,11 +2676,13 @@ V.chat = (() => {
       list);
     parts.app = V.h('div.chat-app', {}, side, pane);
     V.clear(container, parts.app);
-    if (chats) choose();
+    const had = !!chats;
+    if (had) choose();
     draw();
     load().then(() => {
-      choose();
-      draw();
+      // (this device's copy, read just now: drawn once it's there; drawn again regardless only in `drawing.whole`, the
+      // way before 1.22.2 that tests compare with)
+      if (!had || drawing.whole) { choose(); draw(); }
       return refresh();
     }).then(() => { choose(); draw(); reflect(); pump().catch(() => {}); }).catch(() => {});
     V.ai.check().then(retarget).catch(() => {});  // (on the PC too: Python says about Claude, the cloud about Gemini)
@@ -2407,6 +2740,9 @@ V.chat = (() => {
 
   function open(id) {
     if (id === null) id = (blank() || newChat()).id;
+    // (from a phone's list of chats: the chat comes up at its newest message, as one opened the first time does; a box
+    // that was hidden keeps no scroll place, so before 1.22.2 it came up at its first message instead)
+    if (!showingChat && !V.wide()) shown = '';
     auto = false;
     openId = id;
     showingChat = true;
@@ -2766,6 +3102,7 @@ V.chat = (() => {
     badge: badgeCount,  // (the Chat tab's badge: messages waiting to send, and answers that ended unseen)
     writing,            // (the Chat tab's dot: an answer being written here, wherever the owner is in Wefty)
     retryWaits,  // (tests shorten them)
+    drawing,     // (tests: a long chat drawn whole at once, as before 1.22.2)
     claimWaits,  // (tests shorten the heartbeat)
   };
 })();

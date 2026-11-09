@@ -641,6 +641,7 @@ textarea.field { resize: vertical; min-height: 48px; }
   margin: 0; color: var(--text-2); font: 400 13.5px/19px var(--font); overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
+.notice.whole .notice-text { display: block; -webkit-line-clamp: unset; overflow: visible; }  /* (a sentence read whole: V.notice's `cls`) */
 .notice-more { margin: 0; color: var(--muted); font: 400 13px/18px var(--font); }
 .notice-lines:empty { display: none; }
 .notice-line { margin: 4px 0 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 500 13px/18px var(--font); }
@@ -682,6 +683,15 @@ textarea.field { resize: vertical; min-height: 48px; }
 .gate-box > .moved-done { margin: 6px 0 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--ok-soft); color: var(--text); }
 .gate-box > .moved-done.trouble { background: var(--warn-soft); }
 .gate-box > .moved-hint { text-align: center; margin: 4px 0 0; }
+/* 1.22.2: the copy and paste way at wefty.org (js/start.js): a box to paste a sign-in into when the clipboard can't be
+   read (what's in it shows as dots, and never stays), a Safari tab's "here instead", the window that got nothing. */
+.pass-box-row[hidden] { display: none; }
+.gate-box > .pass-box-row { margin-top: 2px; }
+.field.pass-box { -webkit-text-security: disc; }
+.gate-box > .btn.pass-safari { margin-top: 2px; }
+.gate-box > .moving-steps { margin: 4px 0 8px; }
+.gate-box > .link-btn.moving-other { justify-self: center; min-height: 44px; margin-top: 6px; }
+.gate-box > .doors-closed { font-size: 14px; line-height: 21px; }
 .setup-step {
   display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; background: var(--card); border: 1px solid var(--line);
   border-radius: var(--r-lg); padding: 16px; margin-top: 10px;
@@ -1168,6 +1178,12 @@ button.card.done .card-title { text-decoration: line-through; text-decoration-co
 .t-status { color: var(--text-2); }
 .t-status.ok { color: var(--ok); font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
 .transfer.fresh .t-status { color: var(--accent-ink); font-weight: 600; }
+/* (1.22.2) A file the cloud turned down as too big: it waits in Sending with Try again and Remove (js/send.js); Show on
+   its card brings it into sight, lit for a moment. */
+.transfer.refused .t-status { color: var(--warn); font-weight: 600; }
+.transfer.lit { animation: out-lit 1.5s ease-out; }
+@keyframes out-lit { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); } }
+@media (prefers-reduced-motion: reduce) { .transfer.lit { animation: none; outline: 2px solid var(--accent); outline-offset: 2px; } }
 .t-actions { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; align-items: center; }
 .t-actions > .icon-btn:last-child { margin-left: auto; }
 .t-actions:has(> :only-child) { grid-column: 3; grid-row: 1; }
@@ -3930,9 +3946,18 @@ html:has(#app.gate) .nt-strip { display: none; }
   font: 600 16.5px/22px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-title:hover { background: var(--surface-2); }
-.chat-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* (1.22.2) The chat is a world of its own (contain: layout paint, which changes nothing that shows: it scrolls and clips
+   as it did): a letter typed in the box below it, or anything else changing outside it, no longer has the browser go
+   over every answer of a long chat before it paints. */
+.chat-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; contain: layout paint; }
 .chat-thread { max-width: 760px; margin: 0 auto; padding: 20px 16px 28px; display: flex; flex-direction: column; gap: 26px; }
-.chat-turn { display: grid; gap: 14px; min-width: 0; }
+.chat-turn { display: grid; gap: 14px; min-width: 0; padding: 8px; margin: -8px; }
+/* (1.22.2) A turn kept from an earlier drawing isn't laid out while it's off screen (.chat-cv, js/chat.js), at the
+   height it had. A few pixels of room all round (padding, given back by the margin, so nothing moves) keep focus
+   rings, shadows and Quick read's colour in, as content-visibility clips what's drawn to the turn. A turn not drawn yet
+   (.chat-later) is a stand-in of about its height. */
+.chat-turn.chat-cv { content-visibility: auto; }
+.chat-later { flex: none; }
 .chat-you { justify-self: end; display: grid; justify-items: end; gap: 8px; max-width: min(86%, 560px); min-width: 0; }
 .chat-you-text {
   padding: 10px 14px; border-radius: 18px 18px 6px 18px; background: var(--accent-soft); color: var(--text);
@@ -4144,11 +4169,18 @@ button.chat-sent-pic { display: block; padding: 0; border: none; border-radius: 
 }
 .chat-box:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
 .chat-hint { margin: 0 6px; color: var(--muted); font-size: 12.5px; line-height: 17px; }
+/* (1.22.2) The words in a box of their own (js/chat.js `grow`): contained, so a letter typed lays out and paints only
+   it, never the page and the chat above; its height is set by the script, one line or more, up to 200 px. */
+.chat-field { contain: strict; height: 40px; }
 .chat-input {
-  width: 100%; min-height: 38px; max-height: 200px; padding: 8px 8px 4px; border: none; outline: none; resize: none;
+  display: block; width: 100%; height: 100%; min-height: 38px; padding: 8px 8px 4px; border: none; outline: none; resize: none;
   background: transparent; color: var(--text); font: 400 15.5px/22px var(--font);
 }
-.chat-input:focus-visible { outline: none; }
+.chat-input.chat-measure { height: auto; }  /* (measured as one line, which grows to fit its words) */
+/* The words draw no ring of their own (a square inside the round box): the whole box lights up instead, a soft ring
+   on its own rounded edge, for a finger, a mouse and the keyboard alike. (:where() keeps these as weak as a class:
+   the glass look's own rules win.) */
+:where(.chat-box) .chat-input:is(:focus, :focus-visible) { outline: none; }
 .chat-tools { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .chat-tools-gap { flex: 1; }
 .chat-tools .icon-btn { width: 36px; height: 36px; }
@@ -4900,6 +4932,30 @@ textarea.field.cap-words { min-height: 200px; max-height: 50vh; resize: vertical
 .tour-offer-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .tour-offer-buttons .btn { min-height: 44px; }
 @media (min-width: 900px) { .tour-offer { left: auto; right: 24px; width: 400px; margin: 0; bottom: calc(24px + var(--safe-bottom)); } }
+
+/* 1.22.2: "Wefty has moved to wefty.org" (js/start.js), on an old address, once a session, at a calm moment: a small card
+   at the bottom like the tour's offer, with Copy my sign-in, Open wefty.org and Move to wefty.org; its X closes it. */
+.move-pop {
+  position: fixed; z-index: 52; left: 16px; right: 16px; margin: 0 auto; max-width: 440px; bottom: calc(84px + var(--safe-bottom));
+  box-sizing: border-box; display: grid; grid-template-columns: 32px minmax(0, 1fr) 44px;
+  align-items: start; gap: 4px 12px; padding: 12px 8px 12px 14px; border: 1px solid light-dark(var(--line), var(--line-strong));
+  border-radius: 14px; background: var(--raised); color: var(--text); box-shadow: var(--shadow-3);
+}
+.move-pop-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); }
+.move-pop-text { min-width: 0; padding-top: 5px; }
+.move-pop-text strong { display: block; font: 600 15px/21px var(--font); overflow-wrap: anywhere; }
+.move-pop-text p { margin: 2px 0 0; font: 400 14px/20px var(--font); color: var(--text-2); overflow-wrap: anywhere; }
+.move-pop-close { width: 44px; height: 44px; margin-top: -6px; }
+.move-pop-said { grid-column: 1 / -1; margin: 0; font: 400 14px/20px var(--font); color: var(--text); }
+.move-pop-said:empty { display: none; }
+.move-pop-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-right: 4px; }
+.move-pop-buttons .btn { min-height: 44px; white-space: normal; text-align: center; }
+.move-pop-buttons a.btn { text-decoration: none; }
+@media (prefers-reduced-motion: no-preference) { .move-pop { animation: tour-in var(--d-3) var(--ease-out); } }
+@media (min-width: 900px) { .move-pop { left: auto; right: 24px; width: 420px; margin: 0; bottom: calc(24px + var(--safe-bottom)); } }
+.settings-card > .move-card-said { margin: 0 0 8px; border-top: none; }
+.settings-card > .move-card-said:empty { display: none; }
+.settings-card > .move-card-code { margin: 4px 0 12px; }
 
 /* Show me (1.22, js/showme.js): a ring round the real thing for 3 seconds, pulsing (steady when motion is turned down),
    above everything but never in the way: taps go through it. The page's own colour first, then the accent, so it shows

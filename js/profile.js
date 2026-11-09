@@ -36,7 +36,9 @@ V.profile = (() => {
   }
   function countOutgoing() {
     if (!V.db || !V.db.all) return;
-    V.db.all('outgoing').then((rows) => {
+    V.db.all('outgoing').then((all) => {
+      // (not the files the cloud turned down as too big: they wait in Sending for Try again, never going by themselves)
+      const rows = all.filter((row) => !row.refused);
       if (rows.length !== outgoing) { outgoing = rows.length; paintAll(); }
     }, () => { /* (no store yet: nothing waits) */ });
   }

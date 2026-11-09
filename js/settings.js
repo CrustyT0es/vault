@@ -543,6 +543,8 @@ V.settings = (() => {
       const which = V.send.deviceSetting();  // which device this is (js/send.js)
       if (which) which.dataset.setting = 'this-device';
       return [
+        // (1.22.2: an old address, signed in: "Sign in on wefty.org", Copy my sign-in. js/start.js)
+        V.move && V.move.card ? V.move.card(ui) : null,
         ui.card(phone ? `This ${V.deviceKind.ios ? V.deviceKind.model : 'phone'}` : V.deviceKind.chromebook ? 'This Chromebook' : 'This browser',
           V.arrive && V.arrive.rows ? V.arrive.rows(ui) : null,  // js/arrive.js: a Chromebook's copying and saving
           stepLine(ui), installLine(ui)),

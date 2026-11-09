@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.22.1';
+V.VERSION = '1.22.2';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -937,7 +937,8 @@ V.notice = (() => {
   return function notice(options) {
     if (current) current.close(true);
     const state = { ms: 8000, ...options };
-    const el = V.h('div.notice', { role: 'group' });
+    // (`cls`: a class of its own, as `whole`: its words never cut after two lines, for a sentence that must be read whole)
+    const el = V.h('div.notice' + (state.cls ? '.' + state.cls : ''), { role: 'group' });
     const parts = {
       picture: V.h('div.notice-picture'),
       title: V.h('strong.notice-title'),
@@ -1095,6 +1096,17 @@ V.fileOver = (name) => `${name || 'That file'} is over ${V.FILE_MOST_WORDS}, the
 /* When the cloud itself turns a file down as too big although it is within V.FILE_MOST (its limit isn't raised yet). */
 V.FILE_REFUSED = 'The cloud refused that file as too big. If it is over 50 MB, the cloud\'s limit may not be raised yet.';
 V.fileTooBig = (error) => !!error && /the most Wefty takes|refused that file as too big/.test(String(error.message || error));
+/* The cloud's own limit until it's raised (a free Supabase project's 50 MB), and the sentence for files it turned down
+   (1.22.2: Share > Send keeps them, says so once and never tries them again by itself). `names`: the files' names,
+   `smallest`: the smallest one's size (the 50 MB is only said when they're all over it). */
+V.FILE_CLOUD_WAS = 50 * 1024 * 1024;
+V.fileRefusedWords = (names, smallest = 0) => {
+  const list = [].concat(names || []).filter(Boolean);
+  const one = list.length <= 1;
+  const who = one ? list[0] || 'That file' : list.length === 2 ? `${list[0]} and ${list[1]}` : `${list[0]} and ${list.length - 1} more files`;
+  const limit = smallest > V.FILE_CLOUD_WAS ? ` (it allows up to ${V.FILE_CLOUD_WAS / (1024 * 1024)} MB right now)` : ' right now';
+  return `${who} ${one ? 'is' : 'are'} too big for your cloud${limit}. Remove ${one ? 'it' : 'them'} or try again later.`;
+};
 
 const pad = (n) => String(n).padStart(2, '0');
 V.dateText = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

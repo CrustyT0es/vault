@@ -47,6 +47,10 @@ V.doors = (() => {
     unreachable: 'Wefty can\'t reach the cloud. Check the internet, then try again.',
     full: 'Wefty is full for now. Ask a friend who uses Wefty for an invite, or try again in a few days.',
     closed: 'Wefty isn\'t taking new accounts right now. Ask a friend who uses Wefty for an invite.',
+    // (1.22.2) the first screen while sign-ups are closed, and Google coming back with an account Wefty doesn't have
+    signUpsSoon: 'New here? Sign-ups open soon. Ask whoever invited you.',
+    noAccountYet: 'There\'s no Wefty for that account, and Wefty isn\'t taking new accounts right now. Invited? Sign in '
+      + 'with the e-mail your invite went to.',
     exists: 'There may already be a Wefty with that e-mail. Sign in, or reset your password if you forgot it.',
     notConfirmed: 'Your e-mail isn\'t confirmed yet. Wefty can send you a new code.',
     wrongCode: 'That code isn\'t right, or it ran out. Check it, or send a new one.',
@@ -444,16 +448,31 @@ V.doors = (() => {
           await signIn(() => draw());
           done();
         } });
-        const google = known && known.google ? V.button('Continue with Google', { kind: 'wide-btn doors-google',
-          onClick: () => googleStart({ problem, back: () => draw() }) }) : null;
+        // (While the cloud takes no new accounts, Google only signs in an account that's already there, the same
+        // e-mail: the cloud turns a new one down. So it says sign in.)
+        const google = known && known.google ? V.button(open ? 'Continue with Google' : 'Sign in with Google', {
+          kind: 'wide-btn doors-google', onClick: () => googleStart({ problem, back: () => draw() }) }) : null;
+        const pair = pairButton({ cloud, done, back: () => draw() });
+        const invited = V.h('button.link-btn.doors-invite', { type: 'button', text: 'I have an invite', onclick: () => invite(() => draw()) });
+        // (1.22.2) Sign-ups closed (most people here were invited, many moving from the old address): no Sign up, and
+        // the ways in for someone who has a Wefty lead: Sign in, Paste my sign-in from the old Wefty, a code from
+        // another device. Can't tell (the cloud's switches unread): the same, without the line about sign-ups.
+        const closedLine = known && !known.signup ? V.h('p.doors-new.doors-closed', { text: WORDS.signUpsSoon }) : null;
+        if (!open && !icon) {
+          if (paste && paste.closed) paste.closed();
+          screen(V.h('h1.doors-pitch', { text: WORDS.pitch }),
+            note && !said ? V.h('p.doors-note', { role: 'note', text: note }) : null,
+            V.h('div.doors-stack', {}, signInButton, paste ? paste.button : null, pair, google),
+            paste ? [paste.problem, paste.box || null, paste.hint] : null,
+            problem, invited, closedLine, legal());
+          return;
+        }
         screen(V.h('h1.doors-pitch', { text: WORDS.pitch }),
           note && !said ? V.h('p.doors-note', { role: 'note', text: note }) : null,
-          icon ? [paste.hint, paste.button, paste.problem] : null,
-          V.h('div.doors-stack', {}, signUp, signInButton, google, pairButton({ cloud, done, back: () => draw() })),
-          paste && !icon ? [paste.hint, paste.button, paste.problem] : null,
-          problem,
-          V.h('button.link-btn.doors-invite', { type: 'button', text: 'I have an invite', onclick: () => invite(() => draw()) }),
-          legal());
+          icon ? [paste.hint, paste.button, paste.problem, paste.box || null] : null,
+          V.h('div.doors-stack', {}, signUp, signInButton, google, pair),
+          paste && !icon ? [paste.hint, paste.button, paste.problem, paste.box || null] : null,
+          problem, invited, closedLine, legal());
       };
       const wait = waiting(cloud);
       if (wait) codeScreen({ ...wait, cloud, back: () => draw(), done });
@@ -883,8 +902,11 @@ V.doors = (() => {
     try { history.replaceState(history.state, '', location.pathname + search); } catch (error) { /* */ }
     const type = KINDS.includes(params.get('type') || '') ? params.get('type') : '';
     if (params.has('error') || params.has('error_code')) {
-      return { note: words({ code: params.get('error_code') || '', message: params.get('error_description') || params.get('error') || '' },
-        { link: true, fallback: WORDS.google }) };
+      const given = { code: params.get('error_code') || '', message: params.get('error_description') || params.get('error') || '' };
+      // (1.22.2) Google (or a link) for an account Wefty doesn't have, while it takes no new ones: often a friend whose
+      // Google account isn't the e-mail they were invited with.
+      if (given.code === 'signup_disabled' || /signups? not allowed/i.test(given.message)) return { note: WORDS.noAccountYet };
+      return { note: words(given, { link: true, fallback: WORDS.google }) };
     }
     const saved = stored('vault-config');
     const cloud = saved && goodUrl(String(saved.url || '')) && saved.key ? { url: saved.url, key: saved.key } : await defaultCloud();
