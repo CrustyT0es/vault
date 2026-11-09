@@ -182,6 +182,14 @@ V.help = (() => {
       a: 'Yes, with Wefty on your PC: switch on PC files in Settings > Devices, pick the folders your phone may see in Share > '
         + 'Files on the PC, and Share > Files shows them on your phone and Chromebook.',
       words: ['pc files', 'computer files', 'documents', 'files', 'folders', 'drive', 'wefty drive', 'browse', 'remote'] },
+    // (1.22.3, js/files.js: picking several in Wefty Drive, and its previews)
+    { id: 'drive-several', group: 'share', q: 'How do I save several files from Wefty Drive at once?', show: 'pc-files',
+      when: () => !!(V.share && V.share.filesRow),
+      a: 'In Share > Files > Wefty Drive, tap Select (on a computer, Ctrl+click or Shift+click), pick files and folders, then '
+        + 'use the bar at the bottom. It saves them all at once: one ZIP on a Chromebook, the share sheet on a phone. Pictures '
+        + 'and videos show a preview, and a tap opens them big.',
+      words: ['several files', 'many files', 'multiple files', 'all files', 'download all', 'save all', 'select files',
+        'pick files', 'shift select', 'shift click', 'zip', 'preview', 'previews', 'thumbnail', 'thumbnails', 'video preview'] },
 
     // -- chat and AI
     { id: 'chat', group: 'ai', q: 'What can Chat do?', show: 'chat', when: () => !!V.chat,

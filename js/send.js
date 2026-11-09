@@ -120,10 +120,13 @@ V.send = (() => {
     }
   }
 
-  /* A video's first frame (a second in, or a tenth of a short one, as many start black). */
+  /* A video's first frame (a second in, or a tenth of a short one, as many start black). `file`: the File; or (1.22.3,
+     Wefty Drive's videos already in the cloud: js/files.js) its signed link, read with preload=metadata and a seek, so
+     only the bits that frame needs come down, and crossOrigin, so the frame may be read back (the cloud allows it). */
   function videoThumb(file) {
     return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
+      const remote = typeof file === 'string';
+      const url = remote ? file : URL.createObjectURL(file);
       const video = document.createElement('video');
       let done = false;
       let nudge = null;
@@ -135,7 +138,7 @@ V.send = (() => {
         video.pause();
         video.removeAttribute('src');
         video.load();
-        URL.revokeObjectURL(url);
+        if (!remote) URL.revokeObjectURL(url);
         if (error) reject(error); else resolve(value);
       };
       const timer = setTimeout(() => finish(null, new Error('The video took too long')), 12000);
@@ -155,6 +158,20 @@ V.send = (() => {
       };
       video.muted = true;
       video.playsInline = true;
+      if (remote) {
+        // Only what the frame needs: its length and where it starts, then that one frame (a seek fetches it).
+        video.crossOrigin = 'anonymous';
+        video.preload = 'metadata';
+        video.addEventListener('loadedmetadata', () => {
+          const length = video.duration;
+          video.addEventListener('seeked', grab, { once: true });
+          nudge = setTimeout(() => video.play().catch(() => {}), 1500);  // (a phone that waits to be asked to play)
+          video.currentTime = Number.isFinite(length) && length > 0 ? Math.min(1, length / 10) : 0.1;
+        }, { once: true });
+        video.addEventListener('error', () => finish(null, new Error('This browser can\'t play that video')), { once: true });
+        video.src = url;
+        return;
+      }
       video.preload = 'auto';
       // Some phones only load a frame once asked to play (muted, so it's allowed); it's stopped straight after.
       video.addEventListener('loadedmetadata', () => { nudge = setTimeout(() => video.play().catch(() => {}), 1500); }, { once: true });
@@ -177,6 +194,11 @@ V.send = (() => {
       if (isVideo(file.type)) return await videoThumb(file);
     } catch (error) { /* a kind this browser can't show (HEIC in Chrome): no preview, the icon stays */ }
     return null;
+  }
+
+  /* A video already in the cloud (its signed link): its frame, as preview() makes one, or null (js/files.js). */
+  async function videoPreview(url) {
+    try { return await videoThumb(url); } catch (error) { return null; }
   }
 
   /* -- the tray: what's picked, waiting for Send */
@@ -1310,7 +1332,7 @@ V.send = (() => {
 
   return {
     render, files, text, sendFiles, unsend, runQueue, takeShared, stage, unseen, deviceSetting,
-    targets, preview,
+    targets, preview, videoPreview, THUMB_NAME,
     // For js/arrive.js's card: the preview, the big view, opening and marking what came as arrived.
     image, viewer, received, openHere, openLink, kindIcon,
     checkIncoming: () => {

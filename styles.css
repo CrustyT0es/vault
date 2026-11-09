@@ -2354,6 +2354,97 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
 .files-actions .btn.primary { grid-column: 1 / -1; }
 .sheet-body > .hint .icon { width: 15px; height: 15px; vertical-align: -3px; }
 
+/* Wefty Drive, several at once (1.22.3, js/files.js): the Select button beside Upload, a round tick on each row while
+   picking, Notes' pick bar held at the foot of the screen (sticky), previews on the rows (a video's with a play mark),
+   a grid, the big view of a picture or a video, and Move to's folders. */
+.files-tools { align-items: center; }
+.files-tools-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }  /* (the next line on a narrow phone) */
+.select-btn.files-select { height: 40px; min-height: 40px; }
+@media (pointer: coarse) { .select-btn.files-select { height: 44px; min-height: 44px; } }
+.files-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }  /* (round: it follows the row's corners) */
+.files-tick { display: none; }
+.files-list.picking .files-tick {
+  grid-area: face; align-self: end; justify-self: end; z-index: 1; display: grid; place-items: center; width: 20px; height: 20px;
+  margin: 0 -5px -5px 0; border-radius: 50%; border: 1.75px solid var(--control); background: var(--card); color: transparent;
+  transition: background var(--d-1), border-color var(--d-1);
+}
+.files-tick .icon { width: 12px; height: 12px; }
+.files-tick .icon svg { stroke-width: 2.8; }
+.files-list.picking .files-row.picked .files-tick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.files-list.picking .files-row.picked .files-open, .files-list.picking .files-row.picked .files-open:hover {
+  background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.files-thumb { position: relative; }
+.files-play {
+  position: absolute; inset: 0; margin: auto; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--toast); color: var(--on-toast); opacity: .9;
+}
+.files-play .icon { width: 10px; height: 10px; margin-left: 1px; }
+.files-length { color: var(--text-2); }
+.files-length + .files-size:not(:empty)::before { content: "·"; margin-right: 8px; }
+
+.pick-bar.files-pick-bar { position: sticky; left: auto; right: auto; bottom: 12px; z-index: 6; grid-row: auto; grid-column: auto; margin-top: 4px; }
+.view:has(.files-main.picking) { scroll-padding-bottom: 190px; }  /* (a row the keyboard goes to never hides under the bar) */
+.files-pick-bar .pick-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-size { color: var(--muted); font-weight: 500; }
+.files-pick-bar .pick-action > span:not(.icon) { white-space: normal; text-align: center; overflow-wrap: anywhere; }  /* ("Save to phone" on two lines) */
+.files-pick-status:empty { display: none; }
+.files-pick-line {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px 0 6px; color: var(--text-2);
+  font: 500 14px/20px var(--font);
+}
+.files-pick-line > span { flex: 1; min-width: 0; }
+.files-pick-line.ready > span { color: var(--text); }
+.files-pick-line .btn { flex: none; min-height: 40px; padding: 0 12px; }
+.files-pick-note { margin: 0 6px 6px; }
+
+/* the grid: tiles with big previews (two across on a phone), the ⋯ on the tile's corner */
+.files-list.drive.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.files-list.drive.grid .files-row {
+  position: relative; display: block; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card);
+}
+.files-list.drive.grid .files-open {
+  width: 100%; grid-template-columns: minmax(0, 1fr); grid-template-areas: "face" "name" "meta"; row-gap: 4px; min-height: 0;
+  padding: 8px 8px 10px; border-radius: inherit;
+}
+.files-list.drive.grid .files-icon, .files-list.drive.grid .files-thumb { width: 100%; height: auto; aspect-ratio: 1; border-radius: var(--r-md); }
+.files-list.drive.grid .files-icon .icon { width: 32px; height: 32px; }
+.files-list.drive.grid .files-name { align-self: start; padding: 0 2px; font-size: 14px; }
+.files-list.drive.grid .files-meta { display: flex; padding: 0 2px; }
+.files-list.drive.grid .files-date { display: none; }
+.files-list.drive.grid .files-length + .files-size::before { content: "·"; margin-right: 8px; }
+.files-list.drive.grid .files-row > .icon-btn {
+  position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 50%; background: var(--card);
+  box-shadow: var(--shadow-1);
+}
+.files-list.drive.grid .files-row > .icon-btn::after { content: ""; position: absolute; inset: -6px; }  /* (44 px to a finger) */
+.files-list.drive.grid .files-play { width: 36px; height: 36px; }
+.files-list.drive.grid .files-play .icon { width: 18px; height: 18px; margin-left: 2px; }
+.files-list.drive.grid.picking .files-tick { align-self: start; justify-self: start; width: 24px; height: 24px; margin: 6px 0 0 6px; }
+.files-list.drive.grid.picking .files-row.picked { border-color: var(--accent); background: var(--accent-wash); }
+.files-list.drive.grid.picking .files-row.picked .files-open { box-shadow: none; background: transparent; }
+@media (min-width: 600px) { .files-list.drive.grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
+
+/* the big view of a picture or a video (js/send.js's own look), its name under it, Move to's folders */
+.files-viewer { touch-action: pan-y pinch-zoom; -webkit-user-select: none; user-select: none; }
+.files-viewer img, .files-viewer video { max-height: 52vh; max-height: 52dvh; }  /* (its buttons stay in sight under it) */
+.files-viewer > * { grid-area: 1 / 1; }
+.files-viewer.none { gap: 8px; grid-auto-flow: row; padding: 32px 16px; text-align: center; }
+.files-viewer.none > * { grid-area: auto; }
+.files-viewer.none .hint { margin: 0; }
+.files-view .viewer-count { margin-top: 6px; }
+.files-view-name { margin: 10px 0 0; }
+.files-move-list { display: grid; gap: 2px; }
+.files-move-to {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 8px; border: none; border-radius: var(--r-md);
+  background: none; color: var(--text); text-align: left;
+}
+.files-move-to:hover { background: var(--surface-2); }
+.files-move-to .files-icon { width: 36px; height: 36px; border-radius: 10px; }
+.files-move-text { display: grid; min-width: 0; }
+.files-move-name { font: 500 15px/20px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-move-where { color: var(--muted); font: 400 12.5px/16px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* the PC: what it shares */
 .files-share .setting > .files-icon { width: 36px; height: 36px; }
 .files-share .setting > .setting-text { flex: 1; }
@@ -2394,6 +2485,11 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   .files-cloud .icon { width: 16px; height: 16px; }
   .files-row .icon-btn { width: 36px; height: 36px; }
   .files-go { width: 36px; }
+  /* Wefty Drive's table (1.22.3): a video's length in its own column */
+  .files-list.drive .files-columns, .files-list.drive .files-open { grid-template-columns: 32px minmax(0, 1fr) 48px 88px 128px; }
+  .files-list.drive .files-open { grid-template-areas: "face name length size date"; }
+  .files-list.drive .files-length { grid-area: length; text-align: right; color: var(--muted); font: 400 13px/18px var(--font); }
+  .files-list.drive .files-length + .files-size::before { content: none; }
 }
 
 /* -- pen ---------------------------------------------------------- drawing and handwriting (js/ink.js): a page over
