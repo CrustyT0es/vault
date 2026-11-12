@@ -60,6 +60,9 @@ V.history = (() => {
     return true;
   }
 
+  const turnedDown = (error) => navigator.onLine && !!error && error.kind !== 'signed-out'
+    && !/no internet|failed to fetch|offline|network/i.test(error.message || '');
+
   /* The copies waiting here go up, oldest first (later, if the cloud can't be reached now). */
   function flush() {
     if (flushing) return flushing;
@@ -68,20 +71,122 @@ V.history = (() => {
       const trimmed = new Set();
       while (list.length && V.cloud.sb && navigator.onLine) {
         const next = list[0];
+        if (plainOfLocked(next.id, next.payload)) {  // (1.22.5: a note locked since its copy was made: never goes up)
+          list.shift();
+          await V.db.meta('history-waiting', list);
+          continue;
+        }
+        // (the review of 1.22.5) A plain copy goes up only once this device has heard from the cloud since its last
+        // look started (synced, or held): a lock made on another device meanwhile is known by then (plainOfLocked).
+        // Until then it waits, and the cloud's next look sends it.
+        if (!next.payload.locked && !['synced', 'held'].includes(V.cloud.status)) break;
         try {
           await V.cloud.upload(next.path, new Blob([JSON.stringify(next.payload)], { type: 'application/json' }),
             { mime: 'application/json' });
         } catch (error) {
           console.warn('Vault history: not up yet', error && error.message);
-          break;
+          // One the cloud itself turns down (not the network, not the sign-in) is let go after 3 tries, so it never
+          // holds back every copy after it (DATA-24).
+          next.tries = (next.tries || 0) + (turnedDown(error) ? 1 : 0);
+          if (next.tries < 3) { await V.db.meta('history-waiting', list).catch(() => {}); break; }
         }
         list.shift();
         await V.db.meta('history-waiting', list);
         trimmed.add(next.id);
       }
       for (const id of trimmed) await trim(id).catch(() => {});
+      if (V.cloud.sb && navigator.onLine) await unplainWaiting().catch(warn);
     })().finally(() => { flushing = null; });
     return flushing;
+  }
+
+  /* -- locked notes (1.22.5)
+
+     A locked note keeps no copy of its words in plain anywhere: locking it (V.editor's toggleLock asks `locking`
+     first) files no "version that was there" (it would be the plain words), drops its plain copies waiting here, and
+     takes its plain copies out of the cloud (each copy is read to tell: a sealed one stays). A copy made on another
+     device before it heard of the lock is dropped there before it goes up, and every device clears the plain copies
+     of the notes already locked once (`sweep`), and again whenever History is opened for one. Done offline, the
+     cloud's part waits here (meta "history-unplain") until the cloud can be reached. History of a locked note shows
+     nothing until it's unlocked with the PIN, and then only its sealed copies. */
+  const plainOfLocked = (id, payload) => {
+    const row = V.data.notes.get(id);
+    // (the review of 1.22.5: also a note changed here whose newer version, from the cloud, is locked: its change waits
+    // here for the PIN, js/cloud.js's waitForPin)
+    const locked = !!row && (!!row.locked || !!(row._theirs && row._theirs.locked));
+    return locked && !row.deleted && !!payload && !payload.locked;
+  };
+
+  /* The plain copies of note `id` in the cloud taken out: how many there were. */
+  async function dropPlain(id) {
+    const all = await listed(id);
+    const plain = [];
+    for (const file of all) {
+      const path = `${folder(id)}/${file.name}`;
+      try {
+        const { data, error } = await V.cloud.sb.storage.from('vault').download(path);
+        if (error) throw error;
+        const copy = JSON.parse(await data.text());
+        if (!copy || !copy.locked) plain.push(path);
+      } catch (error) {
+        // (one that can't be read can't be told apart: taken out too, as it can't be shown either)
+        plain.push(path);
+      }
+    }
+    if (plain.length) await V.cloud.remove(plain);
+    return plain.length;
+  }
+
+  async function unplainWaiting() {
+    const ids = (await V.db.meta('history-unplain').catch(() => null)) || [];
+    if (!ids.length) return;
+    const left = [];
+    for (const id of ids) {
+      try { await dropPlain(id); } catch (error) { left.push(id); }
+    }
+    await V.db.meta('history-unplain', left);
+  }
+
+  /* Note `id`'s plain copies: dropped here at once, and the cloud's noted to be taken out. */
+  async function markUnplain(id) {
+    const list = await queue();
+    const left = list.filter((w) => !(w.id === id && w.payload && !w.payload.locked));
+    if (left.length !== list.length) { waiting = left; await V.db.meta('history-waiting', left); }
+    const ids = (await V.db.meta('history-unplain').catch(() => null)) || [];
+    if (!ids.includes(id)) await V.db.meta('history-unplain', [...ids, id]);
+  }
+
+  /* Right before note `id` is locked: no plain copy of it is made, and the ones there are go. */
+  async function locking(id) {
+    if (opened && opened.id === id) opened.before = true;  // (the version that was there is the plain one)
+    await markUnplain(id);
+  }
+
+  /* After it's locked: its plain copies taken out of the cloud now (or later, when it can be reached). */
+  async function locked(id) {
+    const seen = await lastCopies();
+    if (id in seen) { delete seen[id]; await V.db.meta('history-last', seen); }
+    if (flushing) await flushing.catch(() => {});  // (a copy going up as it was locked is in the cloud by then)
+    if (V.cloud.sb && navigator.onLine) await unplainWaiting().catch(warn);
+  }
+
+  /* Once a device (and account): the plain copies of every note that's locked now taken out (Weftys before 1.22.5
+     kept them). */
+  const SWEPT = 'wefty-history-swept';
+  let sweeping = null;
+  function sweep() {
+    const me = owner();
+    if (!me || !V.cloud.sb || !navigator.onLine || sweeping) return sweeping || Promise.resolve();
+    try { if (localStorage.getItem(SWEPT) === me) return Promise.resolve(); } catch (error) { /* this time, then */ }
+    sweeping = (async () => {
+      const lockedIds = [...V.data.notes.values()].filter((row) => row.locked && !row._purge).map((row) => row.id);
+      const ids = (await V.db.meta('history-unplain').catch(() => null)) || [];
+      await V.db.meta('history-unplain', [...new Set([...ids, ...lockedIds])]);
+      await unplainWaiting();
+      const left = (await V.db.meta('history-unplain').catch(() => null)) || [];
+      if (!left.length) { try { localStorage.setItem(SWEPT, me); } catch (error) { /* */ } }
+    })().finally(() => { sweeping = null; });
+    return sweeping;
   }
 
   async function listed(id) {
@@ -99,14 +204,15 @@ V.history = (() => {
     if (old.length) await V.cloud.remove(old);
   }
 
-  /* Every copy of a note gone (it was emptied from the Trash). */
-  async function forget(id) {
+  /* Every copy of a note gone (it was emptied from the Trash). `cloud` false: only the ones on this device (another
+     device deleted it for good, and took the cloud's). */
+  async function forget(id, { cloud = true } = {}) {
     const list = await queue();
     const left = list.filter((w) => w.id !== id);
     if (left.length !== list.length) { waiting = left; await V.db.meta('history-waiting', left); }
     const seen = await lastCopies();
     if (id in seen) { delete seen[id]; await V.db.meta('history-last', seen); }
-    if (!V.cloud.sb) return;
+    if (!cloud || !V.cloud.sb) return;
     const all = await listed(id);
     if (all.length) await V.cloud.remove(all.map((f) => `${folder(id)}/${f.name}`));
   }
@@ -152,7 +258,12 @@ V.history = (() => {
     }, AFTER_CLOSING);
   });
 
-  V.on('status', (state) => { if ((state === 'synced' || state === 'held') && waiting && waiting.length) flush(); });
+  V.on('status', (state) => {
+    if (state !== 'synced' && state !== 'held') return;
+    if (waiting && waiting.length) flush();
+    else unplainWaiting().catch(warn);
+    sweep().catch(warn);
+  });
   window.addEventListener('online', () => setTimeout(flush, 2000));
 
   const warn = (error) => console.warn('Vault history:', error);
@@ -192,6 +303,17 @@ V.history = (() => {
   function show(id) {
     const note = V.data.notes.get(id);
     if (!note) return;
+    // (1.22.5) A locked note's older versions only with its PIN: nothing of them shows until it's unlocked.
+    if (note.locked && !V.lock.unlocked()) {
+      V.sheet({
+        title: 'History',
+        content: [V.h('div.history-empty.history-locked', {}, V.icon('lock', 'big'),
+          V.h('p', { text: 'This note is locked.' }),
+          V.h('p.hint', { text: 'Unlock it with your PIN first (tap Unlock with PIN on the note), then its older versions show here.' }))],
+        actions: [{ label: 'Close' }],
+      });
+      return;
+    }
     const list = V.h('div.history-list', { 'aria-busy': 'true' }, V.h('p.hint', { text: 'Loading older versions...' }));
     const sheet = V.sheet({
       title: 'History',
@@ -207,6 +329,12 @@ V.history = (() => {
   }
 
   async function fill(id, list, sheet) {
+    const note = V.data.notes.get(id);
+    // (1.22.5) A locked note's plain copies (kept by a Wefty before 1.22.5) go before anything is shown.
+    if (note && note.locked && V.cloud.sb && navigator.onLine) {
+      await markUnplain(id).catch(warn);
+      await unplainWaiting().catch(warn);
+    }
     const { all, problem } = await copies(id);
     list.removeAttribute('aria-busy');
     if (!all.length) {
@@ -230,9 +358,16 @@ V.history = (() => {
     const item = V.h('div.history-item', {}, head, preview, V.h('div.history-actions', {}, restore));
     // Each copy's words are fetched as its row shows (a small JSON file each).
     load(id, entry).then(async (copy) => {
+      const now = V.data.notes.get(id);
+      if (now && now.locked && !copy.locked) {  // (1.22.5: never a locked note's words in plain)
+        preview.classList.add('sealed');
+        preview.textContent = 'From before the note was locked, so it isn\'t kept.';
+        restore.disabled = true;
+        markUnplain(id).then(unplainWaiting).catch(warn);
+        return;
+      }
       entry.copy = copy;
       const words = await wordsOf(copy);
-      const now = V.data.notes.get(id);
       // The title shows only when it was different then.
       const title = copy.title && (!now || now.title !== copy.title) ? copy.title + '\n' : '';
       if (words === null) {
@@ -278,7 +413,13 @@ V.history = (() => {
     }
   }
 
-  return { show, keep, flush, forget, copies, load, trim, KEEP, timing };
+  /* (1.22.5) Copies waiting here to go up, and locked notes whose plain History the cloud still has to drop. */
+  async function unsent() {
+    const ids = (await V.db.meta('history-unplain').catch(() => null)) || [];
+    return (await queue()).length + ids.length;
+  }
+
+  return { unsent, show, keep, flush, forget, copies, load, trim, locking, locked, sweep, KEEP, timing };
 })();
 
 /* ---------------------------------------------------------------- everything in one ZIP */

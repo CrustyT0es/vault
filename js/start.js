@@ -555,7 +555,9 @@
           { box: true, here: leading && tabMoving }) : null;
         if (pasting) for (const box of [emailBox, passBox]) catchPaste(box, pasting.mover);  // (pasted in the wrong box)
         const doors = web ? V.doors.signInWays({ email: () => emailBox.value.trim(), back: again, done: resolve }) : null;
+        const using = V.cloud.cloudConfig ? V.cloud.cloudConfig() : null;
         screen(V.h('h1', { text: 'Sign in' }),
+          web && using ? cloudNote(using.url) : null,
           pasting && leading ? [V.h('p.muted.pass-mover', { text: PASS_WORDS.moverHere }), pasting.button, pasteSaid,
             pasting.box.row] : null,
           V.h('p.muted', { text: V.desktop ? 'Wefty on this PC got signed out. Sign in again with your Wefty e-mail and password.'
@@ -773,9 +775,11 @@
     } catch (error) { /* nothing usable kept */ }
     if (saved && localStorage.getItem('vault-auth')) {
       const same = saved.url === invite.url && who && String(who.email || '').toLowerCase() === email.toLowerCase();
-      if (!same) { invite.busy = (who && who.email) || 'someone else'; return; }
+      if (!same) invite.busy = (who && who.email) || 'someone else';
+      return;  // (the same person, signed in here already: nothing to set up)
     }
-    localStorage.setItem('vault-config', JSON.stringify({ url: invite.url, key: invite.key, email }));
+    // (1.22.5: its cloud is kept once it's known to be all right, takeLinkCloud: asked first when it isn't Wefty's own)
+    invite.config = { url: invite.url, key: invite.key, email };
   }
 
   /* A join QR code's link (js/access.js's joinLinkFor): #join= with the owner's cloud and a join code that anyone may
@@ -808,7 +812,23 @@
       join.busy = (who && who.email) || 'someone else';
       return;
     }
-    localStorage.setItem('vault-config', JSON.stringify({ url: join.url, key: join.key }));
+    join.config = { url: join.url, key: join.key };  // (kept by takeLinkCloud, 1.22.5)
+  }
+
+  /* (1.22.5) An invite's or join code's cloud, kept here once it's all right: the one saved here, Wefty's own, or one
+     the person said yes to (cloudQuestion). Said no to: the link is let go, as if it hadn't been opened. */
+  async function takeLinkCloud() {
+    const link = invite || join;
+    if (!link || !link.config) return;
+    if (await mayUseCloud(link.config)) {
+      link.config.key = await keyFor(link.config.url, link.config.key);
+      link.key = link.config.key;  // (a join code's own request goes with it too)
+      localStorage.setItem('vault-config', JSON.stringify(link.config));
+      link.other = !(await officialCloud(link.url));  // (its screens name the cloud: SEC-02)
+      return;
+    }
+    invite = null;
+    join = null;
   }
 
   /* The invite (or a join code's link) was opened inside an app's own browser (tapped in Instagram, Snapchat...:
@@ -922,6 +942,9 @@
       + 'again, tap it, then tap Paste my sign-in here. If not, sign in with your e-mail and password.',
     used: 'That copied sign-in was already used, or it stopped working. Sign in with your e-mail and password.',
     bad: 'That copied sign-in didn\'t come through right. Copy it again from the old Wefty (or Vault).',
+    // (1.22.5) "Sign in as <e-mail>?" answered No, or a copied sign-in that wasn't for the account it named
+    notYou: 'Nobody was signed in. Sign in with your own e-mail and password.',
+    notFor: (email) => `That copied sign-in wasn't for ${email}, so nobody was signed in.`,
     offline: 'You\'re offline. Connect to the internet, then tap Paste my sign-in again.',
     unreachable: 'Wefty couldn\'t reach the cloud just now. Check the internet, then tap Paste my sign-in again.',
     safari: 'That\'s your sign-in for the new Wefty icon. Add Wefty to your Home Screen first (Share > Add to Home '
@@ -1001,6 +1024,8 @@
     const session = stored('vault-auth');
     const refresh = session && typeof session.refresh_token === 'string' ? session.refresh_token : '';
     if (!saved || !CLOUD.test(String(saved.url || '')) || !PUBLIC_KEY.test(String(saved.key || '')) || !REFRESH.test(refresh)) return null;
+    // (1.22.5: a session another cloud made is never handed over as this cloud's)
+    if (!V.cloud.madeBy(session, saved.url)) return null;
     const email = (session.user && session.user.email) || saved.email || (stored('vault-user') || {}).email || '';
     return { url: saved.url, key: saved.key, email: String(email), refresh };
   }
@@ -1137,20 +1162,42 @@
       problem.textContent = text;
       if (choice) { choice.remove(); choice = null; }
     };
-    const reload = (pass, outcome, session) => {
+    const reload = async (pass, outcome, session) => {
+      busy = true;  // (nothing more from here: the page starts again)
       if (session) localStorage.setItem('vault-auth', session);
-      localStorage.setItem('vault-config', JSON.stringify({ url: pass.url, key: pass.key, email: pass.email }));
+      // (no sign-in came of it: its key is only kept once it's known to be the cloud's, keyFor)
+      const key = session ? pass.key : await keyFor(pass.url, pass.key);
+      localStorage.setItem('vault-config', JSON.stringify({ url: pass.url, key, email: pass.email }));
       try { sessionStorage.setItem(PASS_NOTE, outcome); } catch (error) { /* the sign-in screen just won't say why */ }
       location.reload();
     };
+    // (1.22.5) A copied sign-in names its cloud and account: whose it is is asked first (and the cloud's name, when it
+    // isn't Wefty's own or the one saved here), as a link's is (js/doors.js's signInAs).
+    const otherCloud = async (url) => {
+      const saved = stored('vault-config');
+      return !(saved && saved.url === url) && !(await officialCloud(url));
+    };
+    const askWho = async (email, url) => (!V.doors || !V.doors.signInAs ? true
+      : V.doors.signInAs(email, { line: await V.doors.cloudLine(url, { saved: (stored('vault-config') || {}).url || '' }) }));
+    // One that ran out: its cloud and e-mail are kept for the sign-in screen (as a #connect= link's); a cloud that's
+    // neither the one saved nor Wefty's own only once they said yes to it (as for a link: cloudQuestion).
+    async function expired(pass) {
+      if ((await otherCloud(pass.url)) && !(await cloudQuestion(pass.url))) { location.reload(); return; }
+      reload({ ...pass, refresh: '' }, 'expired');
+    }
     async function swap(pass) {
       if (busy) return;
       // (Wefty's own ten minutes, checked again for one held since a tap the cloud couldn't answer: the cloud itself
       // knows nothing of them, and would take the token as long as the session lives.)
-      if (!(pass.x > Date.now())) { held = null; reload({ ...pass, refresh: '' }, 'expired'); return; }
+      if (!(pass.x > Date.now())) { held = null; await expired(pass); return; }
       if (!navigator.onLine) { held = pass; say(PASS_WORDS.offline); return; }
       busy = true;
       say('');
+      if (pass.email && !pass.asked) {
+        const yes = await askWho(pass.email, pass.url);
+        if (!yes) { busy = false; held = null; say(PASS_WORDS.notYou); return; }
+        pass.asked = true;  // (tried again after the cloud couldn't be reached: not asked twice)
+      }
       const label = button.querySelector(':scope > span:not(.icon)');
       const was = label ? label.textContent : '';
       if (label) label.textContent = 'Signing in…';
@@ -1161,8 +1208,14 @@
       if (label) label.textContent = was;
       if (got === 'unreachable') { held = pass; say(PASS_WORDS.unreachable); return; }
       held = null;
-      if (got === 'used') reload(pass, 'used');
-      else reload({ ...pass, email: got.email || pass.email }, safariTab() ? 'safari' : 'in', got.session);
+      if (got === 'used') { reload(pass, 'used'); return; }
+      // Never kept unless it's the account it said it was (or, saying none, the one they said yes to now).
+      const email = String(got.email || '');
+      if (pass.email ? email.toLowerCase() !== pass.email.toLowerCase() : !(await askWho(email, pass.url))) {
+        say(pass.email ? PASS_WORDS.notFor(pass.email) : PASS_WORDS.notYou);
+        return;
+      }
+      reload({ ...pass, email: email || pass.email }, safariTab() ? 'safari' : 'in', got.session);
     }
     // Taken here, in this very tap (a paste, a tap on Paste my sign-in, or Safari's "here instead"): off the clipboard.
     function use(read) {
@@ -1170,7 +1223,7 @@
       clearAtNextTap();
       held = null;
       if (read.problem === 'bad') say(PASS_WORDS.bad);
-      else if (read.problem === 'expired') reload(read.pass, 'expired');
+      else if (read.problem === 'expired') expired(read.pass);
       else swap(read.pass);
     }
     return {
@@ -1824,8 +1877,10 @@
           return;
         }
         const got = await swapPass(pass);
+        // (no sign-in came of it: its key is only kept once it's known to be the cloud's, keyFor)
+        const key = got && got.session ? pass.key : await keyFor(pass.url, pass.key);
         try {
-          localStorage.setItem('vault-config', JSON.stringify({ url: pass.url, key: pass.key,
+          localStorage.setItem('vault-config', JSON.stringify({ url: pass.url, key,
             email: (got && got.email) || pass.email }));
         } catch (error) { /* private browsing */ }
         if (got === 'unreachable' || got === 'used') {
@@ -1895,7 +1950,12 @@
         if (passBox.value !== againBox.value) { problem.textContent = 'The two passwords aren\'t the same.'; return; }
         go.disabled = true;
         try {
-          const made = await askToJoin(name, email, passBox.value);
+          // (1.22.5, SEC-02) A cloud that isn't Wefty's own runs a helper someone else wrote: it's sent a password
+          // made up here, only for making the account, and the one picked goes only to the cloud's sign-in service,
+          // once signed in (pickedPassword). Wefty's own cloud's helper is Wefty's: it's sent the one picked, as before.
+          const other = !!join.other;
+          const helperPassword = other ? madeUpPassword() : passBox.value;
+          const made = await askToJoin(name, email, helperPassword);
           if (made.error) {
             problem.textContent = made.error;
             instead.hidden = !made.exists;
@@ -1912,12 +1972,16 @@
               if (signed) V.data.user = await V.cloud.user();
             } catch (error) { /* the password, then */ }
           }
-          if (!signed) {
+          if (!signed && other) {
+            await pickedPassword({ email: made.email || email, helperPassword, picked: passBox.value });
+          } else if (!signed) {
             try {
               await V.cloud.signIn(made.email || email, passBox.value);
             } catch (error) {
               await signInScreen(made.email || email, 'Your Wefty is made. Sign in with the e-mail and password you just picked.');
             }
+          } else if (other) {
+            await pickedPassword({ email: made.email || email, helperPassword, picked: passBox.value, signed: true });
           }
           resolve('joined');
         } finally {
@@ -1928,6 +1992,7 @@
       const owner = join.name.split(/\s+/)[0];
       screen(V.welcome.dots('password'), V.h('h1', { text: owner ? `Join ${owner}'s Wefty` : 'Join Wefty' }),
         V.h('p.muted', { text: 'Make your own Wefty: your notes are only yours.' }),
+        cloudNote(join.url),
         nameRow, emailRow, passRow, againRow, problem, go, instead,
         V.h('p.hint', { text: PRIVATE }),
         V.h('p.hint.choose-stats', { text: V.welcome.STATS_WORDS }));
@@ -1966,6 +2031,42 @@
       : `That didn't work (the cloud said ${response.status}). Ask for a new code.`), exists: answer && answer.error === 'exists' };
   }
 
+  /* (1.22.5) A password made up here for another's cloud's helper to make the account with: long and random, never
+     shown, kept or sent anywhere else. */
+  function madeUpPassword() {
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 28) + 'a7A!';
+  }
+
+  /* (1.22.5) A join in a cloud that isn't Wefty's own, made with madeUpPassword: signed in (with the helper's one-time
+     sign-in, or the made-up password), then the password they picked goes to the cloud's sign-in service, and only
+     there. Until it's saved, a page that closes asks for one at its next start (PICK_LATER, mustChoose). */
+  const PICK_LATER = 'wefty-pick-password';  // localStorage: the account's id (nothing secret) until its password is picked
+  async function pickedPassword({ email, helperPassword, picked, signed = false }) {
+    while (!signed) {
+      try {
+        await V.cloud.signIn(email, helperPassword);
+        signed = true;
+      } catch (error) {
+        await new Promise((resolve) => {
+          screen(V.h('h1', { text: 'Almost done' }),
+            V.h('p.muted', { text: 'Your Wefty is made, but Wefty couldn\'t sign you in to it just now. Check the internet, '
+              + 'then tap Try again.' }),
+            V.button('Try again', { kind: 'primary wide-btn', onClick: () => resolve() }));
+        });
+      }
+    }
+    const user = V.data.user || await V.cloud.user().catch(() => null);
+    try { localStorage.setItem(PICK_LATER, String((user && user.id) || '')); } catch (error) { /* */ }
+    try {
+      await V.cloud.changePassword(picked, { current: helperPassword });
+    } catch (error) {
+      await chooseScreen({ joined: true, current: helperPassword });  // (it says what went wrong, and takes another go)
+    }
+    try { localStorage.removeItem(PICK_LATER); } catch (error) { /* */ }
+  }
+  const pickLater = (user) => { try { return !!user && !!user.id && localStorage.getItem(PICK_LATER) === user.id; } catch (error) { return false; } };
+
   /* Whether the join link's cloud answers at all (its sign-in service's health check). */
   async function reachable() {
     const control = new AbortController();
@@ -1980,8 +2081,10 @@
     }
   }
 
-  /* A friend's first sign-in (or any later one before they did it): their own password, which ends the code. */
-  function chooseScreen({ name = '', code = '' } = {}) {
+  /* A friend's first sign-in (or any later one before they did it): their own password, which ends the code.
+     `joined` (1.22.5): an account just made in another's cloud, whose password is still the made-up one. The password
+     now (`current`, else the invite's code), when it's known, goes along with the new one (V.cloud.changePassword). */
+  function chooseScreen({ name = '', code = '', joined = false, current = '' } = {}) {
     return new Promise((resolve) => {
       const [passRow, passBox] = field('Your new password', { type: 'password', placeholder: 'At least 8 characters', autocomplete: 'new-password' });
       const [againRow, againBox] = field('Type it again', { type: 'password', autocomplete: 'new-password' });
@@ -1996,8 +2099,8 @@
         }
         go.disabled = true;
         try {
-          await V.cloud.changePassword(passBox.value);
-          V.toast('Password saved. Your invite code doesn\'t work any more.');
+          await V.cloud.changePassword(passBox.value, { current: current || code || V.cloud.signedInCode() });
+          V.toast(joined ? 'Password saved.' : 'Password saved. Your invite code doesn\'t work any more.');
           resolve();
         } catch (error) {
           problem.textContent = /fetch|network|internet|offline/i.test(error.message || '')
@@ -2008,7 +2111,7 @@
       } });
       againBox.addEventListener('keydown', (event) => { if (event.key === 'Enter') go.click(); });
       screen(V.welcome.dots('password'), V.h('h1', { text: 'Choose your own password' }),
-        V.h('p.muted', { text: `${name ? `Welcome, ${name}! ` : ''}Your invite code only works once. Pick a password only you know: it's what you'll sign in with on your other devices.` }),
+        V.h('p.muted', { text: `${name ? `Welcome, ${name}! ` : ''}${joined ? 'One last step: pick' : 'Your invite code only works once. Pick'} a password only you know: it's what you'll sign in with on your other devices.` }),
         passRow, againRow, problem, go,
         V.h('p.hint', { text: PRIVATE }),
         V.h('p.hint.choose-stats', { text: V.welcome.STATS_WORDS }),
@@ -2023,9 +2126,12 @@
 
   /* The gate, whenever the signed-in account is still on its invite code. True once they chose a password here. */
   async function mustChoose() {
-    if (!(await V.cloud.mustChange())) return false;
     const user = V.data.user || {};
-    await chooseScreen({ name: (invite && invite.name) || user.name || '', code: invite && invite.code });
+    // (1.22.5: a join in another's cloud whose own password wasn't saved before the page closed: picked now)
+    const joined = pickLater(user);
+    if (!joined && !(await V.cloud.mustChange())) return false;
+    await chooseScreen({ name: (invite && invite.name) || user.name || '', code: invite && invite.code, joined });
+    if (joined) { try { localStorage.removeItem(PICK_LATER); } catch (error) { /* */ } }
     return true;
   }
 
@@ -2109,23 +2215,145 @@
 
   /* ---------------------------------------------------------------- the phone's own bits */
 
-  function takeConnectLink() {
+  /* A #connect= link (the PC's QR code, an old address's move, an iPhone's "Copy the sign-in link"): the cloud to use
+     and the e-mail to sign in with, never a sign-in. Taken out of the address at once. (1.22.5) It changes nothing of a
+     Wefty someone is signed in to here, and signed out, a cloud that's neither the one saved here nor Wefty's own is
+     asked about first, and a key that isn't the cloud's never replaces the one known (see "links that name a cloud"
+     below). */
+  async function takeConnectLink() {
     const match = /#connect=([A-Za-z0-9_-]+)/.exec(location.hash);
     if (!match) return;
-    try {
-      const raw = match[1].replace(/-/g, '+').replace(/_/g, '/');
-      const parsed = JSON.parse(decodeURIComponent(escape(atob(raw + '='.repeat((4 - raw.length % 4) % 4)))));
-      if (/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(parsed.u) && parsed.k) {
-        localStorage.setItem('vault-config', JSON.stringify({ url: parsed.u, key: parsed.k, email: parsed.e || '' }));
-        // (1.22.2: from an old address's move: Paste my sign-in leads on the sign-in screen; h: from a browser tab, so
-        // an iPhone's Safari takes it without asking whether it's for the home screen icon)
-        cameMoving = parsed.m === 1;
-        tabMoving = cameMoving && parsed.h === 1;
-      }
-    } catch (error) {
-      console.warn('Vault: that connect link was damaged', error);
-    }
     history.replaceState(null, '', location.pathname + location.search);
+    let parsed = null;
+    try { parsed = readLink(match[1]); } catch (error) { /* said below */ }
+    if (!parsed || typeof parsed !== 'object' || !CLOUD.test(String(parsed.u || '')) || !parsed.k) {
+      console.warn('Vault: that connect link was damaged');
+      return;
+    }
+    const link = { url: String(parsed.u), key: String(parsed.k), email: typeof parsed.e === 'string' ? parsed.e : '' };
+    if (!(await mayUseCloud(link))) return;
+    link.key = await keyFor(link.url, link.key);
+    localStorage.setItem('vault-config', JSON.stringify(link));
+    // (1.22.2: from an old address's move: Paste my sign-in leads on the sign-in screen; h: from a browser tab, so
+    // an iPhone's Safari takes it without asking whether it's for the home screen icon)
+    cameMoving = parsed.m === 1;
+    tabMoving = cameMoving && parsed.h === 1;
+  }
+
+  /* ---------------------------------------------------------------- links that name a cloud (1.22.5)
+
+     A link may name the cloud to use: #connect=, #invite=, #join=, or a copied sign-in (pasted links reload with it,
+     openPasted). Anyone can make a Supabase project, so an https://<ref>.supabase.co address isn't Wefty's own just by
+     its looks: before 1.22.5 a #connect= link, which any web page can send a browser to, switched a signed-in Wefty to
+     the cloud it named, and the sign-in went there with it. Now:
+     - nothing changes the cloud of a Wefty someone is signed in to here (otherCloudScreen says so, and why), nor its
+       key or e-mail;
+     - signed out, a cloud that's neither the one saved here nor Wefty's own (js/doors.js's official: this site's
+       cloud.json, or on an old address wefty.org's) is asked about first, by its name, with Don't connect as the main
+       button (cloudQuestion), and for one of those two the key known for it stays unless the cloud takes the link's
+       (keyFor);
+     - a kept sign-in only ever goes to the cloud that made it (js/cloud.js's madeBy). */
+  const hostOf = (url) => { try { return new URL(String(url)).host; } catch (error) { return String(url || ''); } };
+  // Someone is signed in to this browser's Wefty (as the invite and join links have always looked).
+  const keptHere = (saved) => { try { return !!saved && !!localStorage.getItem('vault-auth'); } catch (error) { return false; } };
+  /* Whether `url` is Wefty's own cloud for this page (never on the PC, which has none). */
+  const officialCloud = (url) => (V.doors && V.doors.official ? V.doors.official(url).catch(() => false) : Promise.resolve(false));
+
+  /* Whether the cloud a link names (`link.url`) may be saved here (signed out): the same one as saved, Wefty's own, or
+     one the person said yes to. Signed in: never. (The review of 1.22.5: not even the cloud they're signed in to, as a
+     link may bring that cloud's address with a key that isn't its own, and another e-mail. Kept, every request was
+     turned down, "Invalid API key", and they were signed out, their right password failing at every start.) A link
+     for another cloud says nothing was changed; one for theirs just opens Wefty. */
+  async function mayUseCloud(link) {
+    const saved = stored('vault-config');
+    if (keptHere(saved)) {
+      if (saved.url !== link.url) await otherCloudScreen(link.url);
+      return false;
+    }
+    if (saved && saved.url === link.url) return true;
+    if (await officialCloud(link.url)) return true;
+    return cloudQuestion(link.url);
+  }
+
+  /* The key kept for the cloud at `url` that a link (or a copied sign-in) brings with `key`, signed out. Anyone can
+     make a link for the cloud saved here, or Wefty's own, with a key that isn't that cloud's: so the key known for it
+     (the one saved here, else cloud.json's) stays, unless the link's is the same or the cloud itself takes it (a new
+     key its owner made). A cloud that's neither keeps the link's own (it was said yes to, cloudQuestion). */
+  async function keyFor(url, key) {
+    const saved = stored('vault-config');
+    let known = saved && saved.url === url && saved.key ? String(saved.key) : '';
+    if (!known && V.doors && V.doors.officialCloud) {
+      const own = await V.doors.officialCloud().catch(() => null);
+      if (own && own.url === String(url).replace(/\/+$/, '')) known = own.key;
+    }
+    if (!known || known === key) return key;
+    return (await keyWorks(url, key)) ? key : known;
+  }
+  const KEY_CHECK_MS = 8000;
+  /* Whether the cloud at `url` takes `key`: its sign-in service's switches, which need no sign-in, read with it. Any
+     other answer, or none (offline, too slow), is a no. */
+  async function keyWorks(url, key) {
+    const control = new AbortController();
+    const timer = setTimeout(() => control.abort(), KEY_CHECK_MS);
+    try {
+      const reply = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key }, cache: 'no-store', credentials: 'omit',
+        signal: control.signal });
+      return reply.ok;
+    } catch (error) {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* A link for another cloud while someone is signed in here: nothing is changed, and that's said. */
+  function otherCloudScreen(url) {
+    return new Promise((resolve) => {
+      const who = (stored('vault-user') || {}).email || (stored('vault-config') || {}).email || '';
+      screen(V.h('h1', { text: 'Already signed in' }),
+        V.h('p.muted', { text: `That link is for another cloud:` }),
+        V.h('p.doors-address.cloud-host', { text: hostOf(url) }),
+        V.h('p.muted', { text: `Wefty here is signed in${who ? ` as ${who}` : ''}, so nothing was changed.` }),
+        V.h('p.hint', { text: 'If that cloud really is yours, sign out of Wefty first (tap your picture, then Sign out), then '
+          + 'open the link again.' }),
+        V.button('Open Wefty', { kind: 'primary wide-btn cloud-open', onClick: () => resolve() }));
+    });
+  }
+
+  /* A cloud that isn't Wefty's own (or, when Wefty's own can't be read, one Wefty can't vouch for), named by a link:
+     asked first, by its name. True to go on with it. */
+  async function cloudQuestion(url) {
+    const own = V.doors && V.doors.officialCloud ? await V.doors.officialCloud().catch(() => null) : null;
+    return new Promise((resolve) => {
+      const no = V.button('Don\'t connect', { kind: 'primary wide-btn cloud-no', onClick: () => resolve(false) });
+      screen(V.h('h1', { text: 'Another cloud?' }),
+        V.h('p.muted', { text: own ? 'This link sets Wefty up with a cloud that isn\'t Wefty\'s own:'
+          : 'This link sets Wefty up with this cloud, and Wefty can\'t check whose it is:' }),
+        V.h('p.doors-address.cloud-host', { text: hostOf(url) }),
+        V.h('p.doors-note', { role: 'note', text: 'Whoever runs that cloud can read everything you save in it. Only '
+          + 'connect if it\'s your own, or someone you trust set it up for you.' }),
+        no,
+        V.button('Connect anyway', { kind: 'wide-btn cloud-yes', onClick: () => resolve(true) }));
+      requestAnimationFrame(() => no.focus());
+    });
+  }
+
+  /* (SEC-02) A screen that takes a password names a cloud that isn't Wefty's own, with the way back to Wefty's own.
+     Filled in once Wefty's own cloud is known: never a warning when it can't be read. (Never on the PC: its cloud is
+     the one set up on it.) */
+  function cloudNote(url) {
+    const slot = V.h('div.cloud-other-slot');
+    if (V.desktop || !url || !V.doors || !V.doors.officialCloud) return slot;
+    V.doors.officialCloud().then((own) => {
+      if (!own || own.url === String(url).replace(/\/+$/, '') || !slot.isConnected) return;
+      V.clear(slot, V.h('p.doors-note.cloud-other', { role: 'note', text: `This is a cloud that isn't Wefty's own: `
+        + `${hostOf(url)}. Whoever runs it can read everything you save in it.` }),
+      V.h('button.link-btn.cloud-own', { type: 'button', text: 'Use Wefty\'s own cloud instead', onclick: () => {
+        try { localStorage.setItem('vault-config', JSON.stringify({ url: own.url, key: own.key })); } catch (error) { /* */ }
+        location.reload();
+      } }));
+    }).catch(() => {});
+    return slot;
   }
 
   /* ---------------------------------------------------------------- dropping files anywhere */
@@ -2308,12 +2536,13 @@
         // taken out of the address at once).
         if (V.doors) door = await V.doors.arrival().catch((error) => { console.error(error); return null; });
         const arrived = await takeHandOver();
-        takeConnectLink();
+        await takeConnectLink();
         if (await V.update.atBoot()) return;
         takeInviteLink();
         takeJoinLink();
         if ((invite && invite.busy) || (join && join.busy)) await busyScreen();
         else if ((invite || join) && V.deviceKind.inApp) await inAppScreen();
+        await takeLinkCloud();
         let saved = JSON.parse(localStorage.getItem('vault-config') || 'null');
         // The open door (1.21): nothing saved here, and the site names its own cloud (cloud.json). Without one, the
         // connect screen as before.

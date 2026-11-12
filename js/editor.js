@@ -216,16 +216,202 @@ V.editor = (() => {
   function drawShade(area) {
     const under = shades.get(area);
     const value = area.value;
-    if (!under || under.words === value) return;
-    under.words = value;
-    if (!SHADED.test(value) && !quickWords(value)) {
-      if (under.lines.length) { under.lines = []; V.clear(under.el); }
-      under.el.hidden = true;
-      return;
+    if (!under) return;
+    if (under.words !== value) {
+      under.words = value;
+      if (!SHADED.test(value) && !quickWords(value)) {
+        if (under.lines.length) { under.lines = []; V.clear(under.el); }
+        under.el.hidden = true;
+        return;
+      }
+      under.lines = relines(under.el, under.lines, lineKeys(value), shadeLine);
+      under.el.hidden = !under.lines.some((line) => line.drawn);
     }
-    under.lines = relines(under.el, under.lines, lineKeys(value), shadeLine);
-    under.el.hidden = !under.lines.some((line) => line.drawn);
+    fitCopy(area, under, shadeLine);
   }
+
+  /* -- the copies break their lines just where the box does
+
+     A copy's words are cut into pieces (Quick read's first letters, a mark, a bold word), and a browser lays out each
+     piece on its own, its width rounded up a hair: along a line that's up to half a pixel more than the box's own plain
+     words take. Mostly it's unseen, but a line of the box that only just fits runs a hair over in the copy, which then
+     wraps a word sooner, and from there on every letter it draws is a word (or a line) away from the box's own: the
+     caret, the spelling lines and what's typed are where the box has them, the letters aren't (the owner, Quick read
+     on, on a Chromebook: "the typing dash thing got caught in the words and typed them strange"). So while a box is
+     being written in, each line of its copies breaks just where the box breaks it, found in a plain copy of its words
+     laid out as the box lays them out (.block-fit), and never wraps by itself (styles.css: [data-fit]). A line is broken
+     for one width and type (`fitKey`); once that changes (the window, the pane, a font that came in, the reading
+     settings), it's made again from its words and broken afresh. */
+  const fitted = new WeakMap();   // a copy's line -> the fitKey it was broken for
+  const fitCopies = new WeakMap(); // a box -> the plain copy of its words its lines are measured in
+  let fontsCame = 0;              // (a font that was on its way lays the words out again)
+  let breakCache = { key: '', lines: new Map() };  // a line's words -> where the box breaks it, for one fitKey
+
+  const fitKey = (area) => {
+    const s = getComputedStyle(area);
+    const width = parseFloat(s.width);
+    return width > 0 ? [s.width, s.font, s.letterSpacing, s.wordSpacing, fontsCame].join('|') : '';
+  };
+
+  /* (typing: once a frame, just before it's drawn, never once a letter: a line not broken yet wraps by itself till then,
+     which nobody sees; a change of width or type is seen to at once, `now`) */
+  const fitting = new Map();      // a copy -> [area, make], waiting for the next frame
+  let fitFrame = 0;
+  function fitCopy(area, copy, make, now = false) {
+    if (now) { fitting.delete(copy); fitNow(area, copy, make); return; }
+    if (document.activeElement !== area) return;
+    fitting.set(copy, [area, make]);
+    if (!fitFrame) {
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = 0;
+        const all = [...fitting];
+        fitting.clear();
+        for (const [held, [box, maker]] of all) if (box.isConnected) fitNow(box, held, maker);
+      });
+    }
+  }
+  function fitNow(area, copy, make) {
+    if (document.activeElement !== area || !copy.lines.length || !area.parentElement) return;
+    const key = fitKey(area);
+    if (!key) return;
+    const todo = [];
+    copy.lines.forEach((line, i) => { if (fitted.get(line.node) !== key) todo.push(i); });
+    if (!todo.length) return;
+    const texts = area.value.split('\n');
+    const breaks = breaksFor(area, key, todo.map((i) => texts[i] || ''));
+    todo.forEach((i, k) => {
+      let line = copy.lines[i];
+      if (fitted.has(line.node)) {  // (broken for another width: made again from its words)
+        const fresh = make(line.key, i);
+        line.node.replaceWith(fresh.node);
+        copy.lines[i] = line = fresh;
+      }
+      breakLine(line.node, breaks[k]);
+      line.node.dataset.fit = '';  // (an attribute of its own: the line's look is the same, nothing round it changes)
+      fitted.set(line.node, key);
+    });
+  }
+
+  /* Where the box breaks each of these lines of its words: for each, the places where a new line starts. */
+  function breaksFor(area, key, texts) {
+    if (breakCache.key !== key) breakCache = { key, lines: new Map() };
+    const known = breakCache.lines;
+    const wanted = [...new Set(texts.filter((text) => text.length > 1 && !known.has(text)))];
+    if (wanted.length) {
+      // (one plain copy kept in each box being written in, contained: its words change, nothing round it is laid out again)
+      let copy = fitCopies.get(area);
+      if (!copy || copy.parentElement !== area.parentElement) {
+        copy = V.h('div.block-fit', { 'aria-hidden': 'true', inert: true });
+        area.parentElement.append(copy);
+        fitCopies.set(area, copy);
+      }
+      const rows = wanted.map((text) => V.h('div', {}, text));
+      copy.replaceChildren(...rows);
+      wanted.forEach((text, k) => known.set(text, rowBreaks(rows[k])));
+      copy.replaceChildren();
+      if (known.size > 400) breakCache = { key, lines: new Map() };  // (never a big pile of old lines)
+    }
+    return texts.map((text) => known.get(text) || []);
+  }
+
+  /* The places in a laid out line of plain words where a new line starts (each line's first letter, found by halving:
+     the letters' tops only go down a line). */
+  function rowBreaks(row) {
+    const node = row.firstChild;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return [];
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const tops = [...new Set([...range.getClientRects()].filter((r) => r.height > 0).map((r) => Math.round(r.top)))].sort((a, b) => a - b);
+    if (tops.length < 2) return [];
+    const data = node.data;
+    const topAt = (i) => {  // (the top of the letter at i, or of the next one with a box)
+      for (let at = i; at < data.length; at++) {
+        const code = data.charCodeAt(at);
+        if (code >= 0xdc00 && code <= 0xdfff) continue;
+        range.setStart(node, at);
+        range.setEnd(node, Math.min(data.length, at + (code >= 0xd800 && code <= 0xdbff ? 2 : 1)));
+        const box = [...range.getClientRects()].find((r) => r.height > 0);
+        if (box) return box.top;
+      }
+      return Infinity;
+    };
+    const out = [];
+    let lo = 0;
+    for (let k = 1; k < tops.length; k++) {
+      const half = (tops[k] - tops[k - 1]) / 2;
+      let a = lo;
+      let b = data.length;
+      while (a < b) {  // (the first letter at or under this line's top)
+        const m = (a + b) >> 1;
+        if (topAt(m) >= tops[k] - half) b = m; else a = m + 1;
+      }
+      if (a > 0 && a < data.length && (data.charCodeAt(a) & 0xfc00) === 0xdc00) a--;  // (never between a pair)
+      if (a <= lo || a >= data.length) continue;
+      out.push(a);
+      lo = a;
+    }
+    return out;
+  }
+
+  /* A line of a copy broken at these places in its words (a <br>, which has no words of its own). */
+  function breakLine(node, places) {
+    if (!places.length) return;
+    const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    while (walk.nextNode()) texts.push(walk.currentNode);
+    let start = 0;
+    let k = 0;
+    for (const text of texts) {
+      const end = start + text.length;
+      let piece = text;
+      let from = start;
+      while (k < places.length && places[k] < end) {
+        const at = places[k++];
+        if (at < from) continue;
+        if (at > from) { piece = piece.splitText(at - from); from = at; }
+        piece.parentNode.insertBefore(document.createElement('br'), piece);
+      }
+      start = end;
+    }
+  }
+
+  /* The box was left: its copies' lines wrap by themselves again (their breaks were for the width it had then, and the
+     copy under it can be read while it isn't written in), and are broken again when it next gets the caret. */
+  function unfit(area) {
+    for (const copy of [letters.get(area), shades.get(area)]) {
+      if (!copy) continue;
+      for (const line of copy.lines) {
+        if (!fitted.has(line.node)) continue;
+        fitted.delete(line.node);
+        delete line.node.dataset.fit;
+        for (const br of line.node.querySelectorAll('br')) br.remove();
+      }
+    }
+  }
+
+  /* While a box is being written in, its copies keep up with a change of width or type (its words change nothing:
+     they're seen to as they're drawn). */
+  function refit() {
+    const area = document.activeElement;
+    if (!area || !area.matches || !area.matches('.blocks .block-input')) return;
+    const state = letters.get(area);
+    if (state && state.on) {
+      drawLetters(area);
+      fitCopy(area, state, (key, line) => lettersLine(key, line >= state.lit[0] && line <= state.lit[1]), true);
+    }
+    drawShade(area);
+    const under = shades.get(area);
+    if (under) fitCopy(area, under, shadeLine, true);
+  }
+  const fitWatch = window.ResizeObserver ? new ResizeObserver(() => refit()) : null;
+  let fitWatched = null;
+  function watchFit(area) {
+    if (!fitWatch || fitWatched === area) return;
+    fitWatch.disconnect();
+    fitWatched = area;
+    if (area) fitWatch.observe(area);
+  }
+  if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => { fontsCame++; refit(); });
 
   /* Each line's key (for the copies of a box's words: shade, preview): its words, and whether it's in a ``` block
      (drawn plain there). */
@@ -369,6 +555,7 @@ V.editor = (() => {
       state.lines = relines(state.el, state.lines, lettersKeys(value, ime),
         (key, line) => lettersLine(key, line >= lit[0] && line <= lit[1]));
     }
+    fitCopy(area, state, (key, line) => lettersLine(key, line >= lit[0] && line <= lit[1]));
     relight(state, lit);
     if (state.on) drawShade(area);  // (the copy under it keeps up at the same moment)
     return state;
@@ -643,7 +830,11 @@ V.editor = (() => {
     const field = area.parentElement;
     if (!field) return;
     const writing = asWritten(area);
-    if (document.activeElement === area) lettersUp(area, true); else lettersDown(area);
+    if (document.activeElement === area) { lettersUp(area, true); watchFit(area); } else {
+      lettersDown(area);
+      unfit(area);
+      if (fitWatched === area) watchFit(null);
+    }
     const view = writing ? previews.get(area) : drawPreview(area);
     const copy = view && view.el;
     if (copy && copy.parentNode !== field) field.append(copy);
@@ -2479,8 +2670,9 @@ V.editor = (() => {
         const ending = small.type === 'image/jpeg' ? 'jpg' : (/\.([a-z0-9]{1,10})$/i.exec(small.name) || [])[1];
         const path = `${user.id}/notes/${id}/${V.uuid()}${ending ? '.' + ending.toLowerCase() : ''}`;
         await V.cloud.upload(path, small.blob, { mime: small.type, onProgress: (share) => { fill.style.width = Math.round(share * 100) + '%'; } });
-        // Kept on this device too (so it shows offline), unless it's big.
-        if (small.blob.size < 6 * 1024 * 1024) await V.db.put('files', { key: path, blob: small.blob, at: Date.now() });
+        // Kept on this device too (so it shows offline), unless it's big; a full device only goes without that copy
+        // (it used to leave a picture that went up out of the note, and Try again sent it twice, DATA-10).
+        if (small.blob.size < 6 * 1024 * 1024) await V.db.put('files', { key: path, blob: small.blob, at: Date.now() }).catch(() => {});
         const item = { path, name: small.name, mime: small.type, size: small.blob.size, ...extra };
         if (picture) { item.w = small.w || 0; item.h = small.h || 0; }
         await attach(id, item);
@@ -2610,7 +2802,7 @@ V.editor = (() => {
       const name = a.name || fallback;
       const url = await V.cloud.link(a.path, { download: name });
       if (V.desktop) await V.pc.call('saveFile', { id: '', url, name });
-      else window.open(url, '_blank');
+      else window.open(url, '_blank', 'noopener');
     } catch (error) {
       V.problem(error);
     }
@@ -2692,7 +2884,7 @@ V.editor = (() => {
         { label: 'Save a copy', icon: 'download', onClick: async () => {
           const url = await V.cloud.link(attachment.path, { download: attachment.name || 'picture.jpg' });
           if (V.desktop) await V.pc.call('saveFile', { id: '', url, name: attachment.name || 'picture.jpg' });
-          else window.open(url, '_blank');
+          else window.open(url, '_blank', 'noopener');
           return true;
         } },
         ...pictureActions.map((action) => ({ label: action.label, icon: action.icon,
@@ -3401,17 +3593,48 @@ V.editor = (() => {
     if (V.lock.unlocked()) return true;
     if (!V.lock.hasPin() && navigator.onLine) await V.cloud.sync();  // a PIN made on the other device counts
     if (!V.lock.hasPin()) {
+      // (1.22.5) Never a PIN of this device's own before the cloud's lock row was read: its salt would replace the
+      // cloud's, and every note locked with that PIN would be lost (SEC-04). The cloud takes it first (V.cloud.setPin),
+      // only if it still has none; only then does it lock anything.
+      if (!navigator.onLine || !V.cloud.settingsRead()) {
+        V.toast('Connect to the internet first: Wefty checks your cloud for a PIN you already have before it sets one.',
+          { kind: 'err', ms: 7000 });
+        return false;
+      }
       const pin = await V.lock.askPin({ title: 'Locked notes', make: true });
       if (!pin) return false;
-      await V.cloud.saveSettings(await V.lock.make(pin));
-      return true;
+      const prepared = await V.lock.prepare(pin);
+      try {
+        await V.cloud.setPin(prepared.values);
+        V.lock.adopt(prepared);
+        return true;
+      } catch (error) {
+        if (error.kind !== 'pin-changed') { V.toast(error.message || String(error), { kind: 'err', ms: 7000 }); return false; }
+        V.toast(error.message, { ms: 7000 });  // (set on another device meanwhile: that one, then)
+      }
     }
     for (let tries = 0; tries < 5; tries++) {
+      // (1.22.5, SEC-03) After 5 wrong PINs, a wait, longer each time, kept on this device.
+      if (V.lock.waitLeft()) { V.toast(V.lock.waitSaid(), { kind: 'err', ms: 6000 }); return false; }
       const pin = await V.lock.askPin({ title: tries ? 'Wrong PIN, try again' : 'Enter your PIN' });
       if (!pin) return false;
       if (await V.lock.unlock(pin)) return true;
     }
-    V.toast('Too many tries.', { kind: 'err' });
+    V.toast(V.lock.waitSaid() || 'Too many tries.', { kind: 'err', ms: 6000 });
+    return false;
+  }
+
+  /* (1.22.5) A note sealed with an earlier PIN (changed since, on this device or another, and sent up late by a device
+     that was offline): that PIN opens it, and it's sealed again with the one in use now. True when it was given. */
+  async function earlierPin() {
+    if (!(await V.lock.hasEarlier())) return false;
+    for (let tries = 0; tries < 3; tries++) {
+      if (V.lock.waitLeft()) { V.toast(V.lock.waitSaid(), { kind: 'err', ms: 6000 }); return false; }
+      const pin = await V.lock.askPin({ title: tries ? 'Not that one. Its earlier PIN' : 'Its earlier PIN',
+        hint: 'This note was locked with a PIN you had before. Type that one to open it: it then switches to your PIN now.' });
+      if (!pin) return false;
+      if (await V.lock.tryOld(pin)) return true;
+    }
     return false;
   }
 
@@ -3423,19 +3646,35 @@ V.editor = (() => {
     if ((note.attachments || []).length) return V.toast('Remove the pictures and files first: locked notes keep words only.');
     if (recording) return V.toast('Finish the voice memo first.');
     if (!(await unlockWithPin())) return;
+    const id = note.id;
+    // (1.22.5) Nothing of its words stays in plain: History's copies from before go (js/history.js), and so do Test
+    // me's questions and answers kept for its cards (extra.quiz, js/learn.js).
+    if (V.history && V.history.locking) await V.history.locking(id).catch(() => {});
     note.locked = true;
+    if (note.extra && 'quiz' in note.extra) {
+      const { quiz, ...rest } = note.extra;
+      note.extra = rest;
+    }
     revealed = true;
     quietClipboard(true);
     await save();
     drawBar();
-    V.toast('Locked. Only your PIN opens it now.');
+    if (V.history && V.history.locked) V.history.locked(id).catch(() => {});
+    V.toast('Locked. Only your PIN opens it now. Its older, unlocked versions were taken out of History.', { ms: 6000 });
   }
 
   async function reveal() {
     if (!(await unlockWithPin())) return;
     try {
       const stored = V.data.notes.get(note.id) || note;
-      const opened = JSON.parse(await V.lock.decrypt(stored.secret));
+      let sealed;
+      try {
+        sealed = await V.lock.openAny(stored.secret);
+      } catch (error) {
+        if (!(await earlierPin())) throw error;
+        sealed = await V.lock.openAny(stored.secret);
+      }
+      const opened = JSON.parse(sealed.text);
       blocks = parse(opened.body || '');
       savedWords = serialize();
       remember(savedWords);
@@ -3444,6 +3683,7 @@ V.editor = (() => {
       quietClipboard(true);
       drawBody();
       resetHistory();
+      if (sealed.old) save();  // (sealed again with the PIN in use now)
     } catch (error) {
       V.problem(error);
     }

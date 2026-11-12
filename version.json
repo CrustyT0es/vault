@@ -1,8 +1,15 @@
 {
  "format": 1,
- "version": "1.22.3",
+ "version": "1.22.5",
  "min_shell": 1,
  "notes": [
+  "Your words are safer when the internet drops at the wrong moment: nothing written on another device gets written over, and a note you delete for good stays deleted on every device, even ones that were switched off.",
+  "With no signal, Wefty opens straight to your notes, even after a while away, and says Offline until your cloud has everything.",
+  "Locked notes stay locked: their older versions in History need your PIN, setting or changing the PIN on two devices at once can't shut any notes away, and after 5 wrong tries Wefty waits a little before the next.",
+  "Wefty checks with you first: a link to a cloud it doesn't know asks before connecting, Paste my sign-in asks \"Is this you?\", and Change password and Delete my account ask for your password.",
+  "Signing out clears everything Wefty kept on that device. Words you share into Wefty from another app go to your other devices when you tap Copy on all my devices.",
+  "Typing in a note lands exactly where the cursor shows, with Quick read on too (before, a word could jump to the next line in what you saw but not in what you typed into, so letters went in the wrong spot).",
+  "Chat no longer offers Fable, the most expensive model: Opus 5.5 is the top choice. A chat that used Fable carries on with Opus 5.5.",
   "Wefty Drive (Share > Files) picks several files at once: tap Select, or Ctrl+click and Shift+click on a computer. Save them all in one go (one ZIP on a Chromebook, straight into Downloads on your PC, the share sheet on a phone), or move or delete them together.",
   "Pictures and videos in Wefty Drive show a preview, and a tap opens them big: swipe or use the arrow keys for the next one. The grid button shows bigger previews.",
   "Chat opens straight away, and typing stays quick even in a very long chat.",
@@ -31,7 +38,7 @@
   "Right-click, two-finger tap or a long press opens more options on almost everything: notes, folders, flash cards, chats, pictures and files.",
   "Snap a page: take a photo of your notes or a handout (from Today, a new note or Chat) and AI turns it into a tidy note you check before it's saved. Share links, screenshots and PDFs into Wefty from other apps; on an iPhone, copy them and tap Paste into Wefty."
  ],
- "build": "1.22.3-7a2f832b6027",
+ "build": "1.22.5-d7e50e513d6b",
  "files": {
   "chat/index.html": {
    "sha256": "98f794623744461d3714280e7ed675a806612660d4d47468d4253326654f0aa4",
@@ -182,12 +189,12 @@
    "size": 7173
   },
   "js/capture.js": {
-   "sha256": "974dac786cba291710ace9fd013f1e2570ad49f6697e33e41fd855f17f4ba842",
-   "size": 49956
+   "sha256": "9120df567f5589d08cc9eb5f111fba937bf3582cfa35a0a9b158c36ddca6f61c",
+   "size": 49961
   },
   "js/chat.js": {
-   "sha256": "77cdada342773f5844cc72ba28b0c3b50ca27cc49fd49a0142ce557f9b796e6c",
-   "size": 180772
+   "sha256": "a3f59a93d780f9eef8a6d9184d4be490ff15374fb172ca086b3db5697740096c",
+   "size": 181621
   },
   "js/chattools.js": {
    "sha256": "93f208bba5317bb02821373404f64c5853ae2039e1f2c4aff31dea09d046fde9",
@@ -198,36 +205,36 @@
    "size": 16271
   },
   "js/clips.js": {
-   "sha256": "c65c760f9342f71cecd60bf036d678760481a140c09815960b4c0fe1707224ae",
-   "size": 56736
+   "sha256": "cffe5c7fc5dbb7815b0a103501c68727df55e2b5d14fdfbbb8c1bed07ef9ec49",
+   "size": 57482
   },
   "js/cloud.js": {
-   "sha256": "7fb37fe77f9908ddaa214a2c52cc54aca214d19de7a91eb5f9687b2126a37ffc",
-   "size": 52967
+   "sha256": "ad4cfad6481989ce031a744e5b7d9bd8486baa9a3f5cf806c50f6b6483eae830",
+   "size": 95845
   },
   "js/coach.js": {
    "sha256": "12b410fcac7e93b0e61cbd87a37da1621184220e1a48a2970e8527c2533e6143",
    "size": 10778
   },
   "js/db.js": {
-   "sha256": "e48e7ef3b1d78e2872acd7c7484b3b3a53f7b2d4738336fd78e921b02366dce1",
-   "size": 3536
+   "sha256": "b1fa17fea94986abfe6ce7c7474fcb326acbc7f27e8269b98e4025ccef2497f3",
+   "size": 4125
   },
   "js/dictation.js": {
    "sha256": "793151d96b3b184183102cb7e7dc271402df938a60216be69406c20fcb1dc189",
    "size": 19528
   },
   "js/doors.js": {
-   "sha256": "f5738b7a9c8cec578159704d9ed0eb066c034d8ecb1ef772dd7d81f3963f6266",
-   "size": 53624
+   "sha256": "0993f6da3ce3bc3762f62c3134cb642466dece56d9d5b9a219ec439cbdfd53e5",
+   "size": 59809
   },
   "js/drag.js": {
    "sha256": "653a3b24b368b8c77ef027cdddcda79df9d92faaf4ce07955f132df99d8976c0",
    "size": 17479
   },
   "js/editor.js": {
-   "sha256": "3c401a9075607cc69b4aea8396f7412f85aa5a0f59cb2f9cdf83bff485244d6c",
-   "size": 214114
+   "sha256": "166ab36f2d03ed18c0080b9a2863d47062dd4bcac498e437f77dd7acbdac0818",
+   "size": 226076
   },
   "js/exams.js": {
    "sha256": "8573cdb3499258aa1bed883bfa812e7aa0f03e6c82e0fce0fda953bf19bbc9f4",
@@ -250,8 +257,8 @@
    "size": 56780
   },
   "js/history.js": {
-   "sha256": "5c0ab090bf0ffed0271fd46cf641ffbe8e892bd9588127bf0b75b430055f2b45",
-   "size": 29983
+   "sha256": "4980967037f8bc7fc0d0451b3f356e22b91430114c724e33071cd243a0589a6f",
+   "size": 37422
   },
   "js/homescreen.js": {
    "sha256": "4e9e61d186e7c02d5729503e41cce50ee4953d3cec3f56800df340db9cf9d881",
@@ -266,8 +273,8 @@
    "size": 69903
   },
   "js/lock.js": {
-   "sha256": "2dc5a12191a30bc6643574ec994394b892fb7e72a518a6c79e9f196cc40395a9",
-   "size": 7054
+   "sha256": "df01e5d1ac80cec20d58e7af7c978139f574a7f1b1b5bf92b33446029216022d",
+   "size": 12669
   },
   "js/moved.js": {
    "sha256": "9d7e2029b1d2f9034c5679b0a1fa1470f8d644711f89a807457f33a9a8f3afe0",
@@ -282,8 +289,8 @@
    "size": 87662
   },
   "js/notetaker.js": {
-   "sha256": "f048e6f36440797b94f9e51dcdb24babc90fca00989e86f3fab9b2442e553082",
-   "size": 162282
+   "sha256": "2132d4ad4317350aa7941e425b476ac530c7bc73cc8c8032ce653b67ee996eb9",
+   "size": 162796
   },
   "js/organise.js": {
    "sha256": "cb66c4b293f03158a5abca15380f5fd8c055103c7b9d7279b03472fc6a42e4e1",
@@ -294,8 +301,8 @@
    "size": 21368
   },
   "js/profile.js": {
-   "sha256": "b466708b3e0287ae6167c581a772f9bd3eb9b638e2b4e2e2aeb0d0cdfba39d2c",
-   "size": 16185
+   "sha256": "7d276675ae4f05af27e38e07fd7acf3ba2c437280085a401faf3c5db6b49c916",
+   "size": 16721
   },
   "js/push.js": {
    "sha256": "baf0f38e0d9b62e5367d9f6209d8150a3c0991f1f9e8d6c3008f6c6c8679c58e",
@@ -314,12 +321,12 @@
    "size": 86303
   },
   "js/send.js": {
-   "sha256": "f97a234af6fe862767be88664a90150389ddab32b1fc2bce280ed263204ea833",
-   "size": 76783
+   "sha256": "b6e4ef9e590dca43c9cc03fe483278bf29a83c8c2020f32bcf36b77b3b80e2f3",
+   "size": 76959
   },
   "js/settings.js": {
-   "sha256": "d5baf94504474215d54a14f3609324ad05a51d8ca9aced6e7ea5fa84ead9a7c1",
-   "size": 49536
+   "sha256": "76dd248ae0b2b3c27f8125b56b8aa337780bbdacad395aa39d480ccc4ef821ff",
+   "size": 58173
   },
   "js/settingsui.js": {
    "sha256": "f32eba0e9d98795d41b6a83be4a169308e3c2603560c48ec27e4da99cecf135d",
@@ -334,8 +341,8 @@
    "size": 32106
   },
   "js/start.js": {
-   "sha256": "6cb2a97dd91fcb02925b6e7b54ad741d81b35c0cb1146238c16f7253f3bc7f0c",
-   "size": 149460
+   "sha256": "06dfd85a0adf3250e12baf97804e4a12f0dd681cfc2b0b32cd72ff16f471e942",
+   "size": 164306
   },
   "js/starthere.js": {
    "sha256": "0930205a2307d0dc7ff483492c1b8f8545c9b286164b5d6e61be596fce41e1a2",
@@ -370,8 +377,8 @@
    "size": 16759
   },
   "js/util.js": {
-   "sha256": "1a52bf8b764b2c151d43450a4467806e41c317e59a10713b2846394d00e3aa31",
-   "size": 79451
+   "sha256": "316abc9256d76943d08f639355aab06e0ca6397deacd155ac35913b363a70e1f",
+   "size": 79687
   },
   "js/week.js": {
    "sha256": "fc7876e2759528ccc85183afdb8286c4b25cef84418187deb68130d16d8e3c6f",
@@ -446,11 +453,11 @@
    "size": 6619
   },
   "styles.css": {
-   "sha256": "d13ca4f3af95e5877d909bb093ecefdd6a9a4e50d6c63baaebda13f95670c68d",
-   "size": 366122
+   "sha256": "470419369b42a52f31b50b97b341c6b02378ddeff48843837d93206729b588f2",
+   "size": 368119
   },
   "sw.js": {
-   "sha256": "96949637f9caa1a1807f686225ffc8a70eac34c58cdd0743c8a8c9dc6f17ed1e",
+   "sha256": "e32359c5f5c47f8881040cd41a668a7b57006c8180d1a3681712bc715e492856",
    "size": 12908
   },
   "terms.html": {

@@ -4,7 +4,7 @@
 'use strict';
 
 const V = (window.V = window.V || {});
-V.VERSION = '1.22.3';
+V.VERSION = '1.22.5';
 V.desktop = !!window.VAULT_DESKTOP;  // set by the PC app (vault/desktop.py) before any script runs
 /* Sentences from the cloud's helper (vault/functions/vault-admin), which may have been put in before Vault became
    Wefty and still say "Vault ..." (its VERSION didn't change for words alone, so nothing asks the owner to update it):
@@ -1166,7 +1166,10 @@ V.RISKY_TYPES = ['exe', 'com', 'scr', 'pif', 'cpl', 'msi', 'msp', 'mst', 'msix',
   'appinstaller', 'application', 'appref-ms', 'bat', 'cmd', 'ps1', 'psm1', 'psd1', 'ps1xml', 'psc1', 'vbs', 'vbe', 'js',
   'jse', 'wsf', 'wsh', 'ws', 'hta', 'lnk', 'url', 'scf', 'inf', 'reg', 'dll', 'sys', 'ocx', 'jar', 'msc', 'gadget',
   'settingcontent-ms', 'library-ms', 'search-ms', 'iso', 'img', 'vhd', 'vhdx', 'chm', 'py', 'pyw', 'sh', 'xll', 'xlam',
-  'ppam', 'docm', 'xlsm', 'pptm', 'dotm', 'xltm', 'potm', 'ppsm', 'sldm'];
+  'ppam', 'docm', 'xlsm', 'pptm', 'dotm', 'xltm', 'potm', 'ppsm', 'sldm',
+  // (1.22.5, SEC-18)
+  'pyz', 'pyzw', 'pyc', 'pyo', 'one', 'diagcab', 'theme', 'themepack', 'jnlp', 'website', 'searchconnector-ms', 'accde',
+  'accdr', 'ade', 'mde', 'sct', 'wsc', 'html', 'htm', 'xht', 'xhtml', 'mht', 'mhtml', 'svg'];
 V.CHROMEBOOK_RISKY = ['apk', 'crx', 'deb', 'rpm', 'appimage'];
 V.risky = (name) => {
   const clean = String(name || '').split(/[\\/]/).pop().replace(/[. ]+$/, '');

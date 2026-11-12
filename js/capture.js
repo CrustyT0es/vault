@@ -762,7 +762,7 @@ V.capture = (() => {
       title: copied === 'sent' ? 'Copied on all your devices' : 'Shared with Wefty', content,
       actions: [
         ...(words && !t.files.length && copied !== 'sent' && V.clips
-          ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
+          ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.copyShared(words) }] : []),
         V.send && V.send.stage && !V.desktop ? { label: 'Send to PC', icon: 'send', onClick: () => V.send.stage(words, t.files) } : null,
         { label: 'Save to Wefty', kind: 'primary', icon: 'check', onClick: () => { saveShared(t, select.value).catch(V.problem); } },
       ].filter(Boolean),

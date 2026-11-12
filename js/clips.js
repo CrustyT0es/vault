@@ -517,6 +517,18 @@ V.clips = (() => {
     return (await Promise.race([sent, slow])) ? 'sent' : 'later';
   }
 
+  /* The share sheet's Copy on all my devices (1.22.5: a share is never copied by itself, as any web page can post to
+     the share target: SEC-10). Words mayShare takes go as shareShared sends them, so a cloud that can't be reached now
+     still gets them once it's back; others (a password, say) only as the clipboard card's own Copy does: the person's
+     own choice. */
+  async function copyShared(text) {
+    const clean = String(text || '').trim();
+    if (!clean || !mayShare(clean)) return share(clean);
+    const how = await shareShared(clean);
+    if (how === 'later') V.toast('Couldn\'t copy it right now: it goes when you\'re back online.', { ms: 6000 });
+    else V.toast('Ready to paste on your other devices');
+  }
+
   /* Ctrl+C or Ctrl+X in Vault itself (a note, a chat): Vault's own words, as with a Copy button. What they are is read
      from the clipboard once the browser has put them there. (Not V.copy's own stand-in for a refused write.) */
   function copyEvent(event) {
@@ -1013,7 +1025,7 @@ V.clips = (() => {
   }
 
   return {
-    render, share, mayShare, whyNot, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, wrote, older, put, tap, copying, copied,
+    render, share, mayShare, whyNot, saveAsNote, stepRow, pcStepRow, pcDirections, pcStepping: () => pcStepping(), setPcStepping, step, sendNow, shareShared, copyShared, wrote, older, put, tap, copying, copied,
     stepping: () => stepping(), setStepping, canStep: () => canStep(), markNew, offering: () => offering(), fresh: () => fresh(),
     quiet: hush,  // (js/editor.js, while a locked note's words show)
     // What's been put on this clipboard (and the look at it on coming back) finished first.

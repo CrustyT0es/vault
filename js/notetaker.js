@@ -916,6 +916,15 @@ V.notetaker = (() => {
     pump().catch(() => {});
   }
 
+  /* (The review of 1.22.5) How many of this person's recordings are still only on this device: pieces Gemini hasn't
+     written down yet, and stretches waiting to go up as voice memos. Signing out would throw them away (SEC-17 clears
+     the device), so its warning counts them (js/cloud.js's unsent). */
+  async function unsent() {
+    if (!mine()) return 0;
+    const rows = (await chunkStore.all()).filter((row) => row.owner === mine());
+    return new Set(rows.map((row) => row.session)).size;
+  }
+
   /* Starts writing down what waits (or carries on), unless it's at it already. */
   function kick() {
     if (!mine()) return;
@@ -2931,6 +2940,6 @@ V.notetaker = (() => {
     pocket: (on = true) => pocket(!!on), pocketOn: () => !!pocketUi, backup,
     // AI listening (1.19.5): Settings > AI's switch, and what tests look at (aiChunk, restartGaps: tests shorten them)
     aiSwitch, aiWanted, aiPicked, setAiPicked, aiChunk, restartGaps, AI_PROMPT, withoutOverlap, newPart,
-    hearing: () => (session ? session.hearing : null),
+    hearing: () => (session ? session.hearing : null), unsent,
     waiting: () => ({ notes: Object.fromEntries(waitingNotes), sessions: Object.fromEntries(waitingSessions), trouble: aiTrouble }) };
 })();

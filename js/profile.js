@@ -60,7 +60,7 @@ V.profile = (() => {
     if (waiting && !['held', 'offline', 'error', 'asleep', 'signed-out'].includes(value)) {
       return `You: sending ${plural(waiting, 'change')}`;
     }
-    if (value === 'held') return `You: ${plural(V.cloud.held || 1, 'note')} not synced`;
+    if (value === 'held') return `You: ${plural(((V.cloud.held || 0) + (V.cloud.waitingPin || 0)) || 1, 'note')} not synced`;
     if (value === 'offline') return 'You: offline, changes wait here';
     if (value === 'error' || value === 'asleep') return 'You: Wefty can\'t reach your cloud';
     if (value === 'signed-out') return 'You: signed out';
@@ -140,6 +140,12 @@ V.profile = (() => {
       title = `Sending ${plural(waiting, 'change')}...`;
       words = 'Keep Wefty open until this goes.';
       action = ['Send now', () => { close(); V.cloud.sync(); }];
+    } else if (value === 'held' && V.cloud.waitingPin) {
+      // (1.22.5) Changed here, and locked on another device meanwhile: they go up sealed once the PIN is typed here.
+      const n = V.cloud.waitingPin;
+      title = `${plural(n, 'note')} ${n === 1 ? 'waits' : 'wait'} for your PIN`;
+      words = `${n === 1 ? 'It was' : 'They were'} locked on your other device. Your changes are safe on this ${here()}.`;
+      action = ['Type PIN', () => { close(); V.cloud.askPin().catch(V.problem); }];
     } else if (value === 'held') {
       const n = V.cloud.held || 1;
       title = `${plural(n, 'note')} too big to sync`;

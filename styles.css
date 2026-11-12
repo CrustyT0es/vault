@@ -743,6 +743,15 @@ textarea.field { resize: vertical; min-height: 48px; }
 .doors-show::after { content: ""; position: absolute; inset: -4px; }  /* (a 44 px target) */
 .gate-box > .doors-sent { margin: 0; }
 .gate-box > .doors-address { text-align: center; font-weight: 600; color: var(--text); margin: 2px 0 4px; overflow-wrap: anywhere; }
+/* (1.22.5) A link's sign-in, asked about first ("Sign in as <e-mail>?"), and a cloud that isn't Wefty's own, named. */
+.sheet-body > .who-ask { color: var(--text); font-size: 16px; overflow-wrap: anywhere; }
+.sheet-body > .who-ask .who-email { color: var(--text); }
+.sheet-body > .doors-note { margin: 8px 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--warn-soft);
+  color: var(--text); overflow-wrap: anywhere; }
+.gate-box > .doors-note.cloud-other { text-align: left; }
+/* (the sign-in screen's: in a slot of its own, filled once Wefty's own cloud is known, js/start.js's cloudNote) */
+.gate-box > .cloud-other-slot > .doors-note { margin: 0 0 4px; padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--warn-soft); color: var(--text); text-align: left; overflow-wrap: anywhere; }
 .gate-box .field.doors-code { font: 600 24px/30px var(--font); letter-spacing: .25em; text-align: center; font-variant-numeric: tabular-nums; }
 .gate-box > .hint.doors-center { text-align: center; margin: 2px 0; }
 .gate-box > .doors-status { text-align: center; color: var(--text-2); font-size: 13.5px; margin: 4px 0 0; }
@@ -2919,6 +2928,17 @@ button.t-thumb:hover, .mosaic-tile:hover { border-color: var(--line-strong); }
   color: var(--ink); white-space: pre-wrap; overflow-wrap: break-word;
 }
 .block-letters > div { min-height: 1lh; }
+/* (2.0 round 4 / 1.22.4) While a box is being written in, its copies' lines break just where the box breaks them and
+   never wrap by themselves (js/editor.js: fitCopy): a copy's words in pieces take a hair more room than the box's, and
+   a line that only just fits the box wrapped a word sooner in the copy. */
+:is(.block-letters, .blank-shade) > div[data-fit] { white-space: pre; }
+/* (the plain copy those breaks are found in: laid out as the box lays out its words, unseen, and contained, so its words
+   changing lays out nothing else) */
+.block-fit {
+  position: absolute; inset: 0; overflow: hidden; padding: 4px 0; pointer-events: none; user-select: none; visibility: hidden;
+  white-space: pre-wrap; overflow-wrap: break-word; contain: strict;
+}
+.block-fit > div { min-height: 1lh; }
 .block-letters .lt-b { -webkit-text-stroke: .05em var(--ink); }
 .block-letters .lt-mark, .block-letters .lt-soft { -webkit-text-stroke-width: 0; }
 .block-letters .lt-mark { color: transparent; }
@@ -4451,6 +4471,12 @@ button.chat-sent-pic { display: block; padding: 0; border: none; border-radius: 
 .delete-account > .delete-what { color: var(--text); }
 .delete-account > .setting-buttons { padding: 6px 0 2px; }
 .delete-account .label { overflow-wrap: anywhere; }
+/* (1.22.5) "Is it you?": the password again, or a code by e-mail, before deleting the account or changing the password. */
+.itsyou { display: grid; gap: 4px; }
+.itsyou .label { overflow-wrap: anywhere; }
+.itsyou > .itsyou-email { justify-self: start; text-align: left; margin: 0 0 6px; }
+.change-password { display: grid; gap: 4px; }
+.change-password > .hint { margin: 2px 0 4px; }
 .sheet:has(.delete-account) .sheet-actions > .btn { white-space: normal; text-align: center; min-width: 0; flex: 1 1 auto; }
 .gate-box > .goodbye-what { margin-top: 4px; }
 .doors { display: grid; }

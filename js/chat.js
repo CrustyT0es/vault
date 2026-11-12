@@ -77,8 +77,6 @@ V.chat = (() => {
       search: 'web_search_20260209', fallback: true },
     { id: 'claude-opus-5-5', provider: 'claude', name: 'Claude Opus 5.5', short: 'Opus 5.5', about: 'The smartest everyday model.',
       search: 'web_search_20260209', fallback: true },
-    { id: 'claude-fable-5-1', provider: 'claude', name: 'Claude Fable 5.1', short: 'Fable 5.1', about: 'The most capable, and expensive: keep it for the hardest things.',
-      search: 'web_search_20260209', fallback: true },
     // Gemini (Google), free: Chat's own models (the only ones while Claude is off). Add a free key in Settings > AI.
     // Text and pictures; no "Think" or web search here. Like Claude, it needs a network that isn't a school's filter
     // (use mobile data). `tier` goes to js/ai.js, which picks the model. (any other "gemini..." id is Gemini Fast too)
@@ -88,12 +86,17 @@ V.chat = (() => {
       about: 'Google\'s bigger Flash: better for hard homework and long writing, but slower to start and busy more often. Free.' },
   ];
   const CLAUDE_MODEL = MODELS[0].id;  // (MODELS[0] stays Claude's: an id nobody knows is read as a Claude model)
+  /* Fable left Chat's list in 1.22.4 (the owner: it cost far more than any homework needs). A chat or a waiting message
+     still on it answers with Opus 5.5 from now on; its earlier answers keep their own name ("Fable 5.1"). */
+  const RETIRED = /^claude-fable/;
+  const RETIRED_TO = 'claude-opus-5-5';
+  const current = (id) => (RETIRED.test(String(id || '')) ? RETIRED_TO : id);
   const geminiId = (id) => /^gemini/.test(String(id || ''));
   const isGemini = (id) => modelOf(id).provider === 'gemini';
   /* The model that answers for `model` now: itself, or Gemini while Claude is switched off. Claude being off never
      rewrites a chat's or a message's own model: the chat goes back to the Claude model picked for it once Claude is on
      again, and a message waiting for Claude takes Gemini's name only once Gemini has answered it (answer). */
-  const useNow = (model) => (isGemini(model) || V.ai.claudeOn() ? model : GEMINI_MODEL);
+  const useNow = (model) => (isGemini(model) || V.ai.claudeOn() ? current(model) : GEMINI_MODEL);
   /* The model a chat uses now (a chat started on a Claude model goes on with Gemini while Claude is off). */
   const modelFor = (chat) => useNow((chat && chat.model) || GEMINI_MODEL);
   /* A PC whose Jarvis is too old for Claude chats (no chatSend): a Gemini chat still works there, from the page. */
@@ -215,7 +218,7 @@ V.chat = (() => {
   const dir = () => `${owner()}/chats`;
   const fileOf = (id) => `${dir()}/${id}.json`;
   const filesDir = (id) => `${dir()}/${id}/files`;
-  const modelOf = (id) => MODELS.find((m) => m.id === id)
+  const modelOf = (id) => MODELS.find((m) => m.id === current(id))
     || (geminiId(id) ? MODELS.find((m) => m.id === GEMINI_MODEL) : null) || MODELS[0];
   /* "Haiku 5.5"; a model the API answered with instead ("claude-opus-4-8") as "Opus 4.8"; "Gemini Smart", and any
      other Gemini as "Gemini Fast". */
@@ -595,7 +598,8 @@ V.chat = (() => {
       drawBox();
       try {
         await V.cloud.upload(item.path, ready.blob, { mime: ready.mime });
-        if (ready.blob.size < 6 * 1024 * 1024) await V.db.put('files', { key: item.path, blob: ready.blob, at: Date.now() });
+        // (kept here too unless big; a full device only goes without that copy: DATA-10)
+        if (ready.blob.size < 6 * 1024 * 1024) await V.db.put('files', { key: item.path, blob: ready.blob, at: Date.now() }).catch(() => {});
         item.state = 'ready';
       } catch (error) {
         draft.files = draft.files.filter((f) => f !== item);
@@ -1507,6 +1511,17 @@ V.chat = (() => {
   const isCut = (t) => t.state === 'waiting' && t.waitWhy === 'cut';
   const waitingCount = () => [...(chats || new Map()).values()]
     .reduce((n, c) => n + (c.turns || []).filter((t) => t.state === 'waiting' && !isCut(t)).length, 0);
+  /* (1.22.5) What signing out would throw away of Chat's: messages waiting to send (cut answers too) and chats saved
+     here that haven't reached the cloud yet. */
+  async function unsentHere() {
+    await load().catch(() => {});
+    let count = 0;
+    for (const [id, c] of (chats || new Map())) {
+      const turns = (c.turns || []).filter((t) => t.state === 'waiting').length;
+      count += turns || (index && index.waiting.has(id) ? 1 : 0);
+    }
+    return count;
+  }
   /* The Chat tab's badge: messages waiting to send, and chats whose answer ended unseen. */
   const badgeCount = () => waitingCount() + [...unread].filter((id) => chatOf(id)).length;
   /* The Chat tab's dot: an answer being written here now (or one cut off, about to be finished: not one held for the
@@ -3081,6 +3096,7 @@ V.chat = (() => {
   return {
     render,
     again,
+    unsent: unsentHere,  // (1.22.5: counted before signing out, js/cloud.js unsentParts)
     refresh: () => refresh().catch(() => {}),
     load,
     forBackup,

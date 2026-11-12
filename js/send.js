@@ -449,7 +449,7 @@ V.send = (() => {
       const thumb = folder + THUMB_NAME;
       try {
         await V.cloud.upload(thumb, item.thumb, { mime: 'image/jpeg' });
-        await V.db.put('files', { key: thumb, blob: item.thumb, at: Date.now() });
+        await V.db.put('files', { key: thumb, blob: item.thumb, at: Date.now() }).catch(() => {});  // (a full device: DATA-10)
         Object.assign(extra, { thumb, thumb_size: item.thumb.size, w: item.w || 0, h: item.h || 0 });
         if (item.seconds) extra.seconds = item.seconds;
         if (item.group) Object.assign(extra, { group: item.group, n: item.n || 0 });
@@ -808,7 +808,9 @@ V.send = (() => {
     await V.db.clear('shared');
     const all = shared.flatMap((s) => s.files || []);
     const words = shared.map((s) => [s.title, s.text, s.url].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
-    const copied = words && !all.length && V.clips && V.clips.mayShare(words) ? await V.clips.shareShared(words) : '';
+    // (1.22.5) Never on every device's clipboard by itself: any web page can post to the share target, as if it had
+    // been shared from another app (SEC-10). The sheet's first button, Copy on all my devices, does it.
+    const copied = '';
     // Where to paste it, never naming the device in hand: the PC has it already; a Chromebook's tab and the phone's
     // Vault need opening first ("Keep this clipboard in step").
     const where = ['Paste it on your PC now',
@@ -828,6 +830,8 @@ V.send = (() => {
     V.sheet({
       title: copied === 'sent' ? 'Copied on all your devices' : 'Shared with Wefty', content,
       actions: [
+        ...(words && !all.length && copied !== 'sent'
+          ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.copyShared(words) }] : []),
         { label: 'Save as a note', onClick: async () => {
           V.go('notes');
           await V.notes.create(V.TEMPLATES[0], {
@@ -835,8 +839,6 @@ V.send = (() => {
           }, { fresh: true });
           if (all.length) await V.editor.addFiles(all);  // pictures and other files alike (a shared PDF is kept too)
         } },
-        ...(words && !all.length && copied !== 'sent'
-          ? [{ label: 'Copy on all my devices', icon: 'copy', onClick: () => V.clips.share(words) }] : []),
         { label: 'Send to PC', kind: 'primary', icon: 'send', onClick: () => stage(words, all) },
       ],
     });

@@ -73,8 +73,18 @@ V.db = (() => {
       }
       return run('meta', 'readwrite', (s) => s.put({ key, value }));
     },
-    async wipe() {  // signing out: nothing of the owner's stays on the device
-      for (const name of STORES) await run(name, 'readwrite', (s) => s.clear());
+    /* Signing out: nothing of the owner's stays on the device. One transaction for every store, so it's all or
+       nothing: a page closed half way used to leave when each table was last checked over an empty copy, which then
+       showed no notes and never fetched the older ones (DATA-24). */
+    async wipe() {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('The save was stopped'));
+        try { for (const name of STORES) tx.objectStore(name).clear(); } catch (error) { tx.abort(); reject(error); }
+      });
     },
   };
 })();

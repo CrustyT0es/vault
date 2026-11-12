@@ -37,6 +37,11 @@ V.doors = (() => {
   const TURNSTILE = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
   const NEW = 'vault-doors-new';  // localStorage: the id of an account made just now, until its welcome starts
   const WAIT = 'wefty-doors-wait';  // sessionStorage: a code screen left open ({ email, kind, url, at }), never a code
+  // (1.22.5) What this browser asked for, so a link that comes back for it needs no question (see `expected`):
+  // localStorage, an e-mail sent to an address ([{ email, url, at }], an e-mail's link may open in another tab), and
+  // sessionStorage, Google started in this tab ({ url, at }: Google comes back to the very tab). Never a code or link.
+  const ASKED = 'wefty-doors-asked';
+  const GOOGLE = 'wefty-doors-google';
   const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   // (tests shorten them)
   const waits = { cloud: 5000, settings: 5000, front: 4000, resend: 60, load: 15000, check: 60000, wait: 3600000 };
@@ -80,6 +85,7 @@ V.doors = (() => {
   const longer = (n) => `Pick a longer password: at least ${n} characters.`;
 
   const here = () => location.origin + location.pathname;  // where e-mail links and Google come back to
+  const hostOf = (url) => { try { return new URL(String(url)).host; } catch (error) { return String(url || ''); } };
   const sleep = (ms) => new Promise((done) => { setTimeout(done, ms); });
   const stored = (key) => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (error) { return null; } };
 
@@ -110,11 +116,12 @@ V.doors = (() => {
       ? { provider: 'turnstile', site: String(given.site) } : null;
     return { url, key: String(file.key), captcha };
   }
-  async function readCloudFile() {
+  async function readCloudFile(address = './cloud.json') {
     const control = new AbortController();
     const timer = setTimeout(() => control.abort(), waits.cloud);
     try {
-      const reply = await fetch('./cloud.json', { cache: 'no-store', credentials: 'same-origin', signal: control.signal });
+      const reply = await fetch(address, { cache: 'no-store', credentials: address.startsWith('./') ? 'same-origin' : 'omit',
+        signal: control.signal });
       if (!reply.ok) return null;
       return checked(await reply.json());
     } finally {
@@ -128,6 +135,21 @@ V.doors = (() => {
     if (!fromSite) fromSite = readCloudFile().catch(() => null);
     return fromSite;
   }
+  /* (1.22.5) Whether the cloud at `url` is Wefty's own: the one this site's cloud.json names, or on an old address
+     (which has no cloud.json: js/moved.js) the one wefty.org's names. Links for any other cloud are asked about first,
+     and the screens that take a password say whose cloud it is (js/start.js's "links that name a cloud"). False when
+     neither can be read: then nothing can vouch for any cloud. */
+  let wefty = null;
+  function officialCloud() {
+    if (V.desktop) return Promise.resolve(null);
+    if (!wefty) {
+      wefty = defaultCloud().then((own) => own || (V.moved && V.moved.old && V.moved.to
+        ? readCloudFile(V.moved.to + 'cloud.json') : null)).catch(() => null);
+    }
+    return wefty;
+  }
+  const official = (url) => officialCloud().then((cloud) => !!cloud && !!url
+    && cloud.url === String(url).replace(/\/+$/, ''));
 
   /* The cloud in use: the one a door here set up, else the one js/start.js made the client for. */
   let using = null;
@@ -348,8 +370,10 @@ V.doors = (() => {
     if (V.desktop || !V.cloud || !V.cloud.sb) return null;
     let user = null;
     try {
-      const { data } = await V.cloud.sb.auth.getSession();
-      user = data && data.session && data.session.user;
+      // (the kept sign-in first: the start never waits on the cloud for this, js/cloud.js's kept)
+      const kept = V.cloud.kept ? V.cloud.kept() : null;
+      const session = kept || (await V.cloud.sb.auth.getSession()).data.session;
+      user = session && session.user;
     } catch (error) { return null; }
     if (!user) return null;
     const app = user.app_metadata || {};
@@ -549,6 +573,7 @@ V.doors = (() => {
      the e-mail went just now (the countdown starts full). */
   function codeScreen({ cloud = current(), email, kind, back, done, sent = false, note = '' }) {
     try { sessionStorage.setItem(WAIT, JSON.stringify({ email, kind, url: cloud.url, at: Date.now() })); } catch (error) { /* */ }
+    noteAsked(cloud, email);  // (its link, opened in this browser, needs no question: 1.22.5)
     const [codeRow, codeBox] = field('Code from the e-mail', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code',
       maxlength: '10', pattern: '[0-9]*', class: 'doors-code', spellcheck: 'false' });
     const problem = V.h('p.error-text', { role: 'alert', text: note });
@@ -593,6 +618,7 @@ V.doors = (() => {
             ? await V.cloud.sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: here(), captchaToken } })
             : await V.cloud.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: here(), captchaToken } });
         if (error) throw error;
+        noteAsked(cloud, email);
         status.textContent = 'Sent. Check your e-mail again.';
         countFrom(waits.resend);
       } catch (error) {
@@ -798,6 +824,7 @@ V.doors = (() => {
     if (V.deviceKind.inApp) { inAppGoogle(back); return; }
     if (problem) problem.textContent = '';
     try {
+      noteGoogle(current());  // (Google comes back to this tab: that sign-in needs no question, 1.22.5)
       const { error } = await V.cloud.sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: here() } });
       if (error) throw error;
     } catch (error) {
@@ -861,6 +888,70 @@ V.doors = (() => {
 
   /* ---------------------------------------------------------------- arriving from an e-mail or Google */
 
+  /* (1.22.5) A link signs a browser in as whoever's account it was made for: a link someone sends you for their own
+     account would sign you in as them, and what you then write would be theirs to read. So a sign-in that arrives
+     (an e-mail's link, Google coming back, a copied sign-in pasted) only goes straight in when this browser asked for
+     exactly that just before: an e-mail to that address in the last hour, or Google from this very tab in the last
+     ten minutes. Anything else asks "Sign in as <e-mail>?" first (signInAs). */
+  const HOUR = 3600000;
+  const GOOGLE_MS = 600000;
+  function askedList() {
+    const list = stored(ASKED);
+    return Array.isArray(list) ? list.filter((one) => one && typeof one.email === 'string' && Date.now() - Number(one.at) < HOUR) : [];
+  }
+  function noteAsked(cloud, email) {
+    const address = String(email || '').trim().toLowerCase();
+    if (!cloud || !address) return;
+    const list = askedList().filter((one) => !(one.email === address && one.url === cloud.url));
+    list.push({ email: address, url: cloud.url, at: Date.now() });
+    try { localStorage.setItem(ASKED, JSON.stringify(list.slice(-5))); } catch (error) { /* a question, then */ }
+  }
+  function noteGoogle(cloud) {
+    try { sessionStorage.setItem(GOOGLE, JSON.stringify({ url: cloud ? cloud.url : '', at: Date.now() })); } catch (error) { /* */ }
+  }
+  /* Whether this browser asked for the sign-in that came (`type` from the link: an e-mail's; none: Google's), for the
+     account `email` in `cloud`. Used up once it's matched. */
+  function expected(type, email, cloud) {
+    const address = String(email || '').toLowerCase();
+    if (!type) {
+      let google = null;
+      try { google = JSON.parse(sessionStorage.getItem(GOOGLE) || 'null'); sessionStorage.removeItem(GOOGLE); } catch (error) { /* */ }
+      return !!google && google.url === cloud.url && Date.now() - Number(google.at) < GOOGLE_MS;
+    }
+    const list = askedList();
+    const found = list.find((one) => one.email === address && one.url === cloud.url);
+    if (!found) return false;
+    try { localStorage.setItem(ASKED, JSON.stringify(list.filter((one) => one !== found))); } catch (error) { /* */ }
+    return true;
+  }
+
+  /* "Sign in as <e-mail>?", over whatever shows: true when they said yes. `line`: what to say about its cloud
+     (cloudLine), when it isn't Wefty's own or the one used here already. */
+  function signInAs(email, { line = '' } = {}) {
+    return new Promise((resolve) => {
+      let yes = false;
+      V.sheet({
+        title: 'Is this you?',
+        content: [
+          V.h('p.who-ask', {}, 'Sign in as ', V.h('strong.who-email', { text: email || 'this account' }), '?'),
+          line ? V.h('p.doors-note.who-cloud', { text: line }) : null,
+          V.h('p.hint', { text: 'Only if it\'s your own account. If someone sent you this, tap No: in their account, they '
+            + 'could read everything you write.' })],
+        actions: [{ label: 'No, not me' }, { label: 'Yes, sign in', kind: 'primary who-yes', onClick: () => { yes = true; } }],
+        onClose: () => resolve(yes),
+      });
+    });
+  }
+  /* What a sign-in's question says about its cloud: nothing for Wefty's own or `saved` (the one used here already),
+     else its name, and whether it's known not to be Wefty's own. */
+  async function cloudLine(url, { saved = '' } = {}) {
+    if (!url || url === saved) return '';
+    const own = await officialCloud();
+    if (own && own.url === String(url).replace(/\/+$/, '')) return '';
+    return own ? `That account is in a cloud that isn't Wefty's own: ${hostOf(url)}.`
+      : `That account is in the cloud at ${hostOf(url)}. Wefty can't check whose cloud it is.`;
+  }
+
   /* Supabase's client with its session in memory only (a sign-in checked before it replaces anyone's here). */
   let temps = 0;
   function memoryClient(cloud) {
@@ -918,8 +1009,9 @@ V.doors = (() => {
     const mine = saved && saved.url === cloud.url ? signedInHere() : '';
     let session = null;
     try {
-      // Nobody signed in here: straight into this browser's sign-in. Someone is: checked first, never swapped out.
-      const sb = mine ? memoryClient(cloud) : use(cloud);
+      // Checked first in a client of its own, whoever is signed in here: someone who is is never swapped out, and
+      // nobody's sign-in is made this browser's before it's known to be the one asked for (1.22.5).
+      const sb = memoryClient(cloud);
       const { data, error } = tokenHash
         ? await sb.auth.verifyOtp({ token_hash: tokenHash, type })
         : await sb.auth.setSession({ access_token: access, refresh_token: refresh });
@@ -934,8 +1026,16 @@ V.doors = (() => {
       return { toast: `That e-mail link was for ${email}, but Wefty here is signed in as ${mine}. To use ${email} here, `
         + 'sign out first (tap your picture, then Sign out), then sign in.' };
     }
-    if (mine) {  // the same person: the new sign-in takes the old one's place
-      try { await use(cloud).auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token }); } catch (error) { /* */ }
+    // Nobody signed in here: a link this browser didn't ask for says whose account it is first. (Its cloud is the one
+    // saved here, or Wefty's own: nothing to say about it.)
+    if (!mine && !expected(params.has('type') ? type || 'link' : '', email, cloud)) {
+      if (!(await signInAs(email))) return { note: `That link was for ${email || 'another account'}, so nobody was signed in.` };
+    }
+    try {
+      const { error } = await use(cloud).auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+      if (error && !mine) return { note: words(error, { link: true }) };
+    } catch (error) {
+      if (!mine) return { note: words(error, { link: true }) };
     }
     await keep(cloud);
     if (type === 'signup') markNew(session.user && session.user.id);
@@ -943,7 +1043,7 @@ V.doors = (() => {
     return { toast: type === 'email_change' ? 'Your new e-mail address is confirmed.' : '' };
   }
 
-  return { TERMS, defaultCloud, settings, captcha, termsUrl, privacyUrl, words, arrival, front, use, signInWays,
+  return { TERMS, defaultCloud, official, officialCloud, signInAs, cloudLine, settings, captcha, termsUrl, privacyUrl, words, arrival, front, use, signInWays,
     signInTrouble, signInFrom, resume, signUpScreen, forgotScreen, codeScreen, newPasswordScreen, termsGate, needsTerms, isNew,
     welcomed, waits, WORDS };
 })();
